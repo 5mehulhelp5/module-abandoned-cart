@@ -9,12 +9,14 @@
         }
     ],
     "require": {
-        "php": "~8.1.0||~8.2.0||~8.3.0",
-        "magento/framework": "*",
-        "magento/module-quote": "*",
-        "magento/module-checkout": "*",
-        "magento/module-message-queue": "*",
-        "commercekings/module-consent": "^0.1"
+        "php": "~8.1.0||~8.2.0||~8.3.0||~8.4.0||~8.5.0",
+        "magento/framework": "^103.0",
+        "magento/module-quote": "^101.2",
+        "magento/module-checkout": "^100.4",
+        "magento/module-message-queue": "^100.4",
+        "commercekings/module-consent": "^0.1",
+        "magento/module-catalog": "^104.0",
+        "magento/module-customer": "^103.0"
     },
     "autoload": {
         "files": [
@@ -28,5 +30,13 @@
         "branch-alias": {
             "dev-main": "0.1.x-dev"
         }
+    },
+    "archive": {
+        "exclude": [
+            "/Test/",
+            "/.github/",
+            "/.gitignore",
+            "/.gitattributes"
+        ]
     }
 }

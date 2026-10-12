@@ -34,7 +34,7 @@ trait DbTestTrait
 
     private function resource(): ResourceConnection
     {
-        $select = $this->createMock(Select::class);
+        $select = $this->createStub(Select::class);
         foreach (['from', 'order'] as $method) {
             $select->method($method)->willReturnSelf();
         }
@@ -47,7 +47,7 @@ trait DbTestTrait
             return $select;
         });
 
-        $db = $this->createMock(AdapterInterface::class);
+        $db = $this->createStub(AdapterInterface::class);
         $db->method('select')->willReturn($select);
         $db->method('update')->willReturnCallback(function ($table, array $data, $where = '') {
             $this->updates[] = ['table' => $table, 'data' => $data, 'where' => (array)$where];
@@ -67,14 +67,14 @@ trait DbTestTrait
         $db->method('fetchPairs')->willReturnCallback(fn () => $this->fetchPairsResults ? array_shift($this->fetchPairsResults) : []);
         $db->method('query')->willReturnCallback(function ($sql, $bind = []) {
             $this->queries[] = [$sql, $bind];
-            $statement = $this->createMock(\Zend_Db_Statement_Interface::class);
+            $statement = $this->createStub(\Zend_Db_Statement_Interface::class);
             $statement->method('rowCount')->willReturn($this->queryRowCounts ? array_shift($this->queryRowCounts) : 1);
             return $statement;
         });
         $db->method('quoteInto')->willReturnCallback(fn ($text, $value) => str_replace('?', "'" . $value . "'", $text));
         $db->method('quote')->willReturnCallback(fn ($value) => "'" . $value . "'");
 
-        $resource = $this->createMock(ResourceConnection::class);
+        $resource = $this->createStub(ResourceConnection::class);
         $resource->method('getConnection')->willReturn($db);
         $resource->method('getTableName')->willReturnArgument(0);
         return $resource;
@@ -99,7 +99,7 @@ trait DbTestTrait
     /** ConsentGuardInterface whose SQL condition is a readable marker: VALID(<column>). */
     private function guard(): \CommerceKings\Consent\Api\ConsentGuardInterface
     {
-        $guard = $this->createMock(\CommerceKings\Consent\Api\ConsentGuardInterface::class);
+        $guard = $this->createStub(\CommerceKings\Consent\Api\ConsentGuardInterface::class);
         $guard->method('validCondition')->willReturnCallback(fn ($column) => 'VALID(' . $column . ')');
         return $guard;
     }
@@ -108,16 +108,26 @@ trait DbTestTrait
     private static string $SELF = '__self__';
 
     /** Builds a mock that has both real and magic (__call) methods, e.g. Quote::getIsActive(). */
-    private function mockWith(string $class, array $returns): \PHPUnit\Framework\MockObject\MockObject
+    private function mockWith(string $class, array $returns): object
     {
         $real = array_values(array_filter(array_keys($returns), fn ($m) => method_exists($class, $m)));
         $magic = array_values(array_diff(array_keys($returns), $real));
-        $builder = $this->getMockBuilder($class)->disableOriginalConstructor()->onlyMethods($real);
+        // Magento data getters/setters use __call. Stub that real method instead of addMethods(),
+        // which PHPUnit 12 removed, so these fixtures work with PHPUnit 9 through 12.
+        $mock = $this->createStub($class);
         if ($magic) {
-            $builder->addMethods($magic);
+            $mock->method('__call')->willReturnCallback(
+                static function ($method, $arguments) use ($returns, $magic, $mock) {
+                    if (!in_array($method, $magic, true)) {
+                        throw new \BadMethodCallException('Unexpected magic method: ' . $method);
+                    }
+                    $value = $returns[$method];
+                    return $value === self::$SELF ? $mock
+                        : ($value instanceof \Closure ? $value(...$arguments) : $value);
+                }
+            );
         }
-        $mock = $builder->getMock();
-        foreach ($returns as $method => $value) {
+        foreach (array_intersect_key($returns, array_flip($real)) as $method => $value) {
             if ($value === self::$SELF) {
                 $mock->method($method)->willReturnSelf();
             } elseif ($value instanceof \Closure) {

@@ -1,5 +1,10 @@
 # Abandoned cart reminder
 
+Install in a Magento project with `composer require commercekings/module-abandoned-cart:^0.1` after the first
+release is published. Enable the Magento module(s) listed below and run `bin/magento setup:upgrade`.
+For development/tests use source checkouts (`--prefer-source`); release archives omit `Test/`.
+
+
 Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts, a RabbitMQ consumer sends the emails.
 
 Depends on **`CommerceKings_Consent` only** – not on any consent source or banner module.
@@ -110,7 +115,7 @@ bin/magento module:enable CommerceKings_Consent CommerceKings_ConsentDefaults Co
 bin/magento setup:upgrade   # feature tables and consent schema
 ```
 
-- Define the chosen adapter's categories/services in your site module and map one optional choice to `cart_reminder`. Select that source in Consent settings; adapters supply no categories or mappings automatically.
+- Define the chosen adapter's categories/services in your site module and map one optional choice to `cart_reminder`. Select that source in Consent settings. The ConsentDefaults preset maps `cart_reminder` to Personalization automatically; sites with explicit categories must add that mapping themselves.
 - Check the selected sender in **Stores → Configuration → General → Store Email Addresses**.
 - Verify the sender domain's **SPF and DKIM** (and DMARC) for the no-reply address before launch – otherwise reminders land in spam.
 - After deploying new code, **restart the resident consumer** (it keeps the old code in memory): stop the running `queue:consumers:start commerceKingsAbandonedCartRemind` process; `cron_consumers_runner` starts it again on the next cron run.

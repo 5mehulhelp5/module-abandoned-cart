@@ -22,20 +22,20 @@ class OptoutTest extends TestCase
 
     private function controller(string $token): Index
     {
-        $request = $this->createMock(RequestInterface::class);
+        $request = $this->createStub(RequestInterface::class);
         $request->method('getParam')->willReturnCallback(fn ($k) => ['q' => '42', 't' => $token][$k] ?? null);
-        $redirect = $this->createMock(Redirect::class);
+        $redirect = $this->createStub(Redirect::class);
         $redirect->method('setPath')->willReturnCallback(function ($p) use ($redirect) { $this->path = $p; return $redirect; });
-        $redirectFactory = $this->createMock(RedirectFactory::class);
+        $redirectFactory = $this->createStub(RedirectFactory::class);
         $redirectFactory->method('create')->willReturn($redirect);
-        $title = $this->createMock(Title::class);
+        $title = $this->createStub(Title::class);
         $title->method('set')->willReturnCallback(function ($t) { $this->page['title'] = (string)$t; });
-        $config = $this->createMock(PageConfig::class);
+        $config = $this->createStub(PageConfig::class);
         $config->method('getTitle')->willReturn($title);
         $config->method('setRobots')->willReturnCallback(function ($r) { $this->page['robots'] = $r; });
-        $page = $this->createMock(Page::class);
+        $page = $this->createStub(Page::class);
         $page->method('getConfig')->willReturn($config);
-        $pageFactory = $this->createMock(PageFactory::class);
+        $pageFactory = $this->createStub(PageFactory::class);
         $pageFactory->method('create')->willReturn($page);
         $this->optOut = $this->createMock(OptOut::class);
         $this->optOut->method('isValid')->willReturnCallback(fn ($id, $t) => $id === 42 && $t === 'good');
@@ -62,7 +62,7 @@ class OptoutTest extends TestCase
     public function testAlreadyOptedOutGoesHome(): void
     {
         $controller = $this->controller('good');
-        $this->optOut->method('withdraw')->willReturn(false);
+        $this->optOut->expects($this->once())->method('withdraw')->with(42)->willReturn(false);
         $controller->execute();
         $this->assertSame('', $this->path);
         $this->assertSame([], $this->page);

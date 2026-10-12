@@ -17,6 +17,8 @@ use Magento\Store\Model\App\Emulation;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
+// Shared fixtures use scenario-specific expectations; other outcomes are asserted from captured data.
+#[\PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations]
 class ConsumerTest extends TestCase
 {
     use DbTestTrait;
@@ -38,17 +40,17 @@ class ConsumerTest extends TestCase
     private function consumer(array|false $row = self::ROW, bool $enabled = true, bool $withdrawn = false): Consumer
     {
         $this->fetchRowResult = $row;
-        $config = $this->createMock(Config::class);
+        $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturn($enabled);
         $config->method('getTemplate')->willReturn('tpl');
         $config->method('getIdentity')->willReturn('custom1');
-        $consent = $this->createMock(ConsentInterface::class);
+        $consent = $this->createStub(ConsentInterface::class);
         $consent->method('isValid')->willReturnCallback(fn ($id) => $id === 'cid-1' && !$withdrawn);
-        $logger = $this->createMock(LoggerInterface::class);
+        $logger = $this->createStub(LoggerInterface::class);
         $logger->method('info')->willReturnCallback(function ($msg) { $this->logs[] = $msg; });
-        $repo = $this->createMock(CartRepositoryInterface::class);
-        $repo->method('get')->willReturn($this->createMock(CartInterface::class));
-        $data = $this->createMock(ReminderData::class);
+        $repo = $this->createStub(CartRepositoryInterface::class);
+        $repo->method('get')->willReturn($this->createStub(CartInterface::class));
+        $data = $this->createStub(ReminderData::class);
         $data->method('build')->willReturn(['customer_name' => 'Jelena', 'items_html' => '']);
         $this->emulation = $this->createMock(Emulation::class);
         $this->recipients = $this->createMock(RecipientHistory::class);
@@ -60,13 +62,13 @@ class ConsumerTest extends TestCase
             return $this->recipientClaim;
         });
 
-        $transport = $this->createMock(TransportInterface::class);
+        $transport = $this->createStub(TransportInterface::class);
         $transport->method('sendMessage')->willReturnCallback(function () {
             if ($this->sendFails) {
                 throw new \RuntimeException('SMTP down');
             }
         });
-        $builder = $this->createMock(TransportBuilder::class);
+        $builder = $this->createStub(TransportBuilder::class);
         foreach (['setTemplateIdentifier', 'setTemplateOptions', 'setTemplateVars', 'setFromByScope', 'addTo'] as $method) {
             $builder->method($method)->willReturnCallback(function (...$args) use ($builder, $method) {
                 $this->mail[$method] = $args;
@@ -78,6 +80,7 @@ class ConsumerTest extends TestCase
     }
 
     /** @dataProvider skipCases */
+    #[\PHPUnit\Framework\Attributes\DataProvider('skipCases')]
     public function testSkipsWithReason(array|false $row, bool $enabled, bool $withdrawn, string $reason): void
     {
         $this->consumer($row, $enabled, $withdrawn)->process('42');

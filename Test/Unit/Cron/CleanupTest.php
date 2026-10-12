@@ -11,6 +11,7 @@ use Psr\Log\LoggerInterface;
 class CleanupTest extends TestCase
 {
     /** @dataProvider counts */
+    #[\PHPUnit\Framework\Attributes\DataProvider('counts')]
     public function testDeletesOldRecipients(int $deleted, int $logs): void
     {
         $history = $this->createMock(RecipientHistory::class);

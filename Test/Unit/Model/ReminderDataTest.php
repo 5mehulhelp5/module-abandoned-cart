@@ -27,21 +27,21 @@ class ReminderDataTest extends TestCase
     private function data(array $customOptions = []): ReminderData
     {
         $image = $this->mockWith(ImageHelper::class, ['init' => self::$SELF, 'getUrl' => 'https://shop/img.jpg']);
-        $configuration = $this->createMock(ProductConfiguration::class);
+        $configuration = $this->createStub(ProductConfiguration::class);
         $configuration->method('getCustomOptions')->willReturn($customOptions);
-        $price = $this->createMock(PriceHelper::class);
+        $price = $this->createStub(PriceHelper::class);
         $price->method('currency')->willReturnCallback(fn ($amount) => number_format((float)$amount, 2, ',', '.') . ' RSD');
-        $url = $this->createMock(UrlInterface::class);
+        $url = $this->createStub(UrlInterface::class);
         $url->method('getUrl')->willReturnCallback(function ($route, $params = []) {
             $this->urls[$route] = $params;
             return 'https://shop/' . $route . (isset($params['_query']) ? '?' . http_build_query($params['_query']) : '');
         });
-        $escaper = $this->createMock(Escaper::class);
+        $escaper = $this->createStub(Escaper::class);
         $escaper->method('escapeHtml')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
         $escaper->method('escapeUrl')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
-        $optOut = $this->createMock(OptOut::class);
+        $optOut = $this->createStub(OptOut::class);
         $optOut->method('url')->willReturnCallback(fn ($id) => "https://shop/cartreminder/optout?q=$id&t=o");
-        $signature = $this->createMock(LinkSignature::class);
+        $signature = $this->createStub(LinkSignature::class);
         $signature->method('sign')->willReturnCallback(fn ($purpose, $id) => "$purpose-$id");
         return new ReminderData($image, $configuration, $price, $url, $escaper, $optOut, $signature);
     }
@@ -57,7 +57,7 @@ class ReminderDataTest extends TestCase
 
     private function item(string $name): Item
     {
-        $product = $this->createMock(Product::class);
+        $product = $this->createStub(Product::class);
         return $this->mockWith(Item::class, [
             'getProduct' => $product, 'getOptionByCode' => null, 'getProductType' => 'simple',
             'getName' => $name, 'getQty' => 1, 'getPrice' => 2400.0,
@@ -123,6 +123,7 @@ class ReminderDataTest extends TestCase
     }
 
     /** @dataProvider greetings */
+    #[\PHPUnit\Framework\Attributes\DataProvider('greetings')]
     public function testGreetingIsOneShortWordOfLetters(string $typed, string $shown): void
     {
         $this->assertSame($shown, $this->data()->build($this->quote([], $typed))['customer_name']);

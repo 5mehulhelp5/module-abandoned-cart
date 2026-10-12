@@ -52,17 +52,17 @@ class RestoreTest extends TestCase
             'getData' => fn ($key = '') => ['ck_abandoned_browser_hash' => $cart['browser'], 'ck_abandoned_reminded_at' => $cart['reminded']][$key] ?? null,
             'setIsActive' => self::$SELF,
         ]);
-        $request = $this->createMock(RequestInterface::class);
+        $request = $this->createStub(RequestInterface::class);
         $request->method('getParam')->willReturnCallback(fn ($k) => ['q' => '42', 't' => $token][$k] ?? null);
-        $redirect = $this->createMock(Redirect::class);
+        $redirect = $this->createStub(Redirect::class);
         $redirect->method('setPath')->willReturnCallback(function ($path) use ($redirect) { $this->path = $path; return $redirect; });
-        $redirectFactory = $this->createMock(RedirectFactory::class);
+        $redirectFactory = $this->createStub(RedirectFactory::class);
         $redirectFactory->method('create')->willReturn($redirect);
-        $signature = $this->createMock(LinkSignature::class);
+        $signature = $this->createStub(LinkSignature::class);
         $signature->method('isValid')->willReturnCallback(fn ($purpose, $id, $t) => $purpose === 'restore' && $id === 42 && $t === 'good');
-        $browserId = $this->createMock(BrowserIdentityInterface::class);
+        $browserId = $this->createStub(BrowserIdentityInterface::class);
         $browserId->method('hash')->willReturn((string)$browserHash);
-        $repo = $this->createMock(CartRepositoryInterface::class);
+        $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists) {
             if (!$cartExists) {
                 throw new NoSuchEntityException();
@@ -76,7 +76,10 @@ class RestoreTest extends TestCase
             $currentQuote = $this->mockWith(Quote::class, [
                 'getId' => $current['id'], 'getItemsCount' => $current['items'], 'merge' => self::$SELF, 'collectTotals' => self::$SELF,
             ]);
-            $currentQuote->method('merge')->with($quote);
+            $currentQuote->method('merge')->willReturnCallback(function ($merged) use ($quote, $currentQuote) {
+                $this->assertSame($quote, $merged);
+                return $currentQuote;
+            });
         }
         $checkout = $this->mockWith(CheckoutSession::class, [
             'getQuoteId' => $current['id'] ?? null,
@@ -84,15 +87,15 @@ class RestoreTest extends TestCase
             'replaceQuote' => function ($q) { $this->replaced[] = $q; },
         ]);
         $customer = $this->mockWith(CustomerSession::class, ['getCustomerId' => $loggedInCustomer ?: null]);
-        $messages = $this->createMock(ManagerInterface::class);
+        $messages = $this->createStub(ManagerInterface::class);
         foreach (['addNoticeMessage', 'addSuccessMessage'] as $method) {
             $messages->method($method)->willReturnCallback(function ($m) use ($messages) { $this->messages[] = (string)$m; return $messages; });
         }
-        $cookieManager = $this->createMock(CookieManagerInterface::class);
+        $cookieManager = $this->createStub(CookieManagerInterface::class);
         $cookieManager->method('getCookie')->willReturnCallback(fn ($name) => $name === 'section_data_ids' ? $this->sectionCookie : null);
         $cookieManager->method('setPublicCookie')->willReturnCallback(function ($name, $value) { $this->cookies[$name] = $value; });
         $metadata = $this->mockWith(PublicCookieMetadata::class, ['setPath' => self::$SELF, 'setDuration' => self::$SELF]);
-        $metadataFactory = $this->createMock(CookieMetadataFactory::class);
+        $metadataFactory = $this->createStub(CookieMetadataFactory::class);
         $metadataFactory->method('createPublicCookieMetadata')->willReturn($metadata);
 
         (new Restore($request, $redirectFactory, $signature, $browserId, $repo, $checkout, $customer, $messages, $cookieManager, $metadataFactory))->execute();
@@ -113,6 +116,7 @@ class RestoreTest extends TestCase
     }
 
     /** @dataProvider otherBrowsers */
+    #[\PHPUnit\Framework\Attributes\DataProvider('otherBrowsers')]
     public function testOtherBrowserGoesHomeAndGetsNothing(?string $browserHash, array $cart): void
     {
         $this->restore($cart, $browserHash);
@@ -148,6 +152,7 @@ class RestoreTest extends TestCase
     }
 
     /** @dataProvider unavailable */
+    #[\PHPUnit\Framework\Attributes\DataProvider('unavailable')]
     public function testOwnerSeesNoLongerAvailable(array $cart): void
     {
         $this->restore($cart);
@@ -174,6 +179,7 @@ class RestoreTest extends TestCase
     }
 
     /** @dataProvider notThatCustomer */
+    #[\PHPUnit\Framework\Attributes\DataProvider('notThatCustomer')]
     public function testCustomerCartAsksToLogIn(int $loggedIn): void
     {
         $this->restore(['customer' => 15], 'bh-owner', null, $loggedIn);
@@ -196,6 +202,7 @@ class RestoreTest extends TestCase
     }
 
     /** @dataProvider lostCart */
+    #[\PHPUnit\Framework\Attributes\DataProvider('lostCart')]
     public function testGuestLostCartIsRestoredAndMiniCartRefreshed(?array $current): void
     {
         $quote = $this->restore([], 'bh-owner', $current);

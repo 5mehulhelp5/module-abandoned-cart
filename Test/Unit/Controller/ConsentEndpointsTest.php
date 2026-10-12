@@ -24,9 +24,9 @@ class ConsentEndpointsTest extends TestCase
 
     private function jsonFactory(): JsonFactory
     {
-        $json = $this->createMock(Json::class);
+        $json = $this->createStub(Json::class);
         $json->method('setData')->willReturnCallback(function ($d) use ($json) { $this->json = $d; return $json; });
-        $factory = $this->createMock(JsonFactory::class);
+        $factory = $this->createStub(JsonFactory::class);
         $factory->method('create')->willReturn($json);
         return $factory;
     }

@@ -13,6 +13,8 @@ use Magento\Quote\Model\QuoteIdMask;
 use Magento\Quote\Model\QuoteIdMaskFactory;
 use PHPUnit\Framework\TestCase;
 
+// Shared fixtures use scenario-specific expectations; other outcomes are asserted from captured data.
+#[\PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations]
 class GuestEmailCaptureTest extends TestCase
 {
     use DbTestTrait;
@@ -23,17 +25,17 @@ class GuestEmailCaptureTest extends TestCase
     private function capture(int $quoteId = 42, bool $consent = true, bool $enabled = true): GuestEmailCapture
     {
         $mask = $this->mockWith(QuoteIdMask::class, ['load' => self::$SELF, 'getQuoteId' => $quoteId]);
-        $maskFactory = $this->createMock(QuoteIdMaskFactory::class);
+        $maskFactory = $this->createStub(QuoteIdMaskFactory::class);
         $maskFactory->method('create')->willReturn($mask);
-        $consentApi = $this->createMock(ConsentInterface::class);
+        $consentApi = $this->createStub(ConsentInterface::class);
         $consentApi->method('getCurrent')->willReturnCallback(function ($purpose) use ($consent) {
             $this->askedPurpose = $purpose;
             // CommerceKings_Consent returns only a valid consent - withdrawn / old revision = null too
             return $consent ? self::consent('cid-1') : null;
         });
-        $browser = $this->createMock(BrowserIdentityInterface::class);
+        $browser = $this->createStub(BrowserIdentityInterface::class);
         $browser->method('hash')->willReturn('browser-hash');
-        $config = $this->createMock(Config::class);
+        $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturn($enabled);
         $this->withdrawal = $this->createMock(ConsentWithdrawal::class);
         return new GuestEmailCapture($maskFactory, $this->resource(), $consentApi, $this->guard(), $browser, $this->withdrawal, $config);
@@ -68,6 +70,7 @@ class GuestEmailCaptureTest extends TestCase
     }
 
     /** @dataProvider noConsentCases */
+    #[\PHPUnit\Framework\Attributes\DataProvider('noConsentCases')]
     public function testWithoutConsentClearsInsteadOfStoring(bool $consent, bool $enabled): void
     {
         $capture = $this->capture(42, $consent, $enabled);
@@ -90,6 +93,7 @@ class GuestEmailCaptureTest extends TestCase
     }
 
     /** @dataProvider invalidEmails */
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidEmails')]
     public function testInvalidEmailStoresNothing(string $email): void
     {
         $this->assertFalse($this->capture()->capture('masked', $email));

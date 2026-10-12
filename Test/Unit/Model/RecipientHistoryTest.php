@@ -14,7 +14,7 @@ class RecipientHistoryTest extends TestCase
 
     private function history(string $cryptKey = 'store-key'): RecipientHistory
     {
-        $config = $this->createMock(DeploymentConfig::class);
+        $config = $this->createStub(DeploymentConfig::class);
         $config->method('get')->willReturnCallback(fn ($path) => $path === 'crypt/key' ? $cryptKey : null);
         return new RecipientHistory($this->resource(), $config);
     }
@@ -62,6 +62,7 @@ class RecipientHistoryTest extends TestCase
     }
 
     /** @dataProvider claims */
+    #[\PHPUnit\Framework\Attributes\DataProvider('claims')]
     public function testClaimIsAtomicAndOnlyRefreshesExpiredRows(int $affectedRows, bool $mayAnswer): void
     {
         $history = $this->history();

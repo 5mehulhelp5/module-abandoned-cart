@@ -19,20 +19,20 @@ class OptOutTest extends TestCase
     private UrlInterface $url;
     private ConsentInterface $consent;
 
-    private function optOut(): OptOut
+    private function optOut(bool $withdrawMocks = false, bool $urlMock = false): OptOut
     {
-        $signature = $this->createMock(LinkSignature::class);
+        $signature = $this->createStub(LinkSignature::class);
         $signature->method('sign')->willReturnCallback(fn ($purpose, $id) => "$purpose-$id");
         $signature->method('isValid')->willReturnCallback(fn ($purpose, $id, $t) => $t === "$purpose-$id");
-        $this->withdrawal = $this->createMock(ConsentWithdrawal::class);
-        $this->url = $this->createMock(UrlInterface::class);
-        $this->consent = $this->createMock(ConsentInterface::class);
+        $this->withdrawal = $withdrawMocks ? $this->createMock(ConsentWithdrawal::class) : $this->createStub(ConsentWithdrawal::class);
+        $this->url = $urlMock ? $this->createMock(UrlInterface::class) : $this->createStub(UrlInterface::class);
+        $this->consent = $withdrawMocks ? $this->createMock(ConsentInterface::class) : $this->createStub(ConsentInterface::class);
         return new OptOut($this->resource(), $signature, $this->consent, $this->withdrawal, $this->url);
     }
 
     public function testUrlIsSignedCartIdOnly(): void
     {
-        $optOut = $this->optOut();
+        $optOut = $this->optOut(false, true);
         $this->url->expects($this->once())->method('getUrl')
             ->with('cartreminder/optout', ['_query' => ['q' => 7, 't' => 'optout-7'], '_nosid' => true])
             ->willReturn('https://shop/cartreminder/optout/?q=7&t=optout-7');
@@ -48,7 +48,7 @@ class OptOutTest extends TestCase
 
     public function testCartWithoutConsentIsAlreadyOptedOut(): void
     {
-        $optOut = $this->optOut();
+        $optOut = $this->optOut(true);
         $this->consent->expects($this->never())->method('withdraw');
         $this->withdrawal->expects($this->never())->method('forConsents');
         $this->fetchOneResult = null;
@@ -59,7 +59,7 @@ class OptOutTest extends TestCase
 
     public function testWithdrawsTheCartsConsentNotTheEmail(): void
     {
-        $optOut = $this->optOut();
+        $optOut = $this->optOut(true);
         $this->fetchOneResult = 'cid-1';
         $this->consent->expects($this->once())->method('withdraw')->with('cid-1', 'email')->willReturn(['cid-1']);
         // the event clears the carts; cleared here too in case the consent was withdrawn earlier

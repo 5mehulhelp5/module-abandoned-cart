@@ -23,18 +23,18 @@ class FindAbandonedCartsTest extends TestCase
 
     private function finder(bool $enabled = true): FindAbandonedCarts
     {
-        $config = $this->createMock(Config::class);
+        $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturn($enabled);
         $config->method('getDelayMinutes')->willReturn(180);
         $config->method('getMaxAgeDays')->willReturn(7);
-        $publisher = $this->createMock(PublisherInterface::class);
+        $publisher = $this->createStub(PublisherInterface::class);
         $publisher->method('publish')->willReturnCallback(function ($topic, $id) { $this->published[] = [$topic, $id]; });
-        $recipients = $this->createMock(RecipientHistory::class);
+        $recipients = $this->createStub(RecipientHistory::class);
         $recipients->method('recent')->willReturnCallback(function (array $emails) {
             $this->lookups[] = $emails;
             return array_values(array_filter($emails, fn ($e) => in_array(strtolower(trim($e)), $this->recent, true)));
         });
-        return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $publisher, $recipients, $this->createMock(LoggerInterface::class));
+        return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $publisher, $recipients, $this->createStub(LoggerInterface::class));
     }
 
     public function testDisabledDoesNothing(): void

@@ -11,7 +11,7 @@ class ConfigTest extends TestCase
 {
     private function config(array $values): Config
     {
-        $scope = $this->createMock(ScopeConfigInterface::class);
+        $scope = $this->createStub(ScopeConfigInterface::class);
         $scope->method('getValue')->willReturnCallback(fn ($path) => $values[$path] ?? null);
         $scope->method('isSetFlag')->willReturnCallback(fn ($path) => (bool)($values[$path] ?? false));
         return new Config($scope);

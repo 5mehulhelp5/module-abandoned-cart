@@ -18,9 +18,9 @@ class CustomerConsentCaptureTest extends TestCase
     {
         $consentApi = $this->createMock(ConsentInterface::class);
         $consentApi->method('getCurrent')->with('cart_reminder')->willReturn($consent ? self::consent('cid-1') : null);
-        $browser = $this->createMock(BrowserIdentityInterface::class);
+        $browser = $this->createStub(BrowserIdentityInterface::class);
         $browser->method('hash')->willReturn('browser-hash');
-        $config = $this->createMock(Config::class);
+        $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturn($enabled);
         return new CustomerConsentCapture($this->resource(), $consentApi, $this->guard(), $browser, $config);
     }
@@ -47,6 +47,7 @@ class CustomerConsentCaptureTest extends TestCase
     }
 
     /** @dataProvider refusedCases */
+    #[\PHPUnit\Framework\Attributes\DataProvider('refusedCases')]
     public function testRefused(int $quoteId, int $customerId, bool $consent, bool $enabled): void
     {
         $this->assertFalse($this->capture($consent, $enabled)->execute($quoteId, $customerId));
