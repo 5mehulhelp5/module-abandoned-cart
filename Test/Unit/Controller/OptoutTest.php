@@ -8,63 +8,44 @@ use CommerceKings\AbandonedCart\Model\OptOut;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\Controller\Result\Redirect;
 use Magento\Framework\Controller\Result\RedirectFactory;
-use Magento\Framework\View\Page\Config as PageConfig;
-use Magento\Framework\View\Page\Title;
-use Magento\Framework\View\Result\Page;
-use Magento\Framework\View\Result\PageFactory;
 use PHPUnit\Framework\TestCase;
 
 class OptoutTest extends TestCase
 {
-    private OptOut $optOut;
     private ?string $path = null;
-    private array $page = [];
+    private ?string $url = null;
 
-    private function controller(string $token): Index
+    private function controller(?string $url): Index
     {
         $request = $this->createStub(RequestInterface::class);
-        $request->method('getParam')->willReturnCallback(fn ($k) => ['q' => '42', 't' => $token][$k] ?? null);
+        $request->method('getParam')->willReturnCallback(fn ($key) => ['q' => '42', 't' => 'signed'][$key]);
         $redirect = $this->createStub(Redirect::class);
-        $redirect->method('setPath')->willReturnCallback(function ($p) use ($redirect) { $this->path = $p; return $redirect; });
-        $redirectFactory = $this->createStub(RedirectFactory::class);
-        $redirectFactory->method('create')->willReturn($redirect);
-        $title = $this->createStub(Title::class);
-        $title->method('set')->willReturnCallback(function ($t) { $this->page['title'] = (string)$t; });
-        $config = $this->createStub(PageConfig::class);
-        $config->method('getTitle')->willReturn($title);
-        $config->method('setRobots')->willReturnCallback(function ($r) { $this->page['robots'] = $r; });
-        $page = $this->createStub(Page::class);
-        $page->method('getConfig')->willReturn($config);
-        $pageFactory = $this->createStub(PageFactory::class);
-        $pageFactory->method('create')->willReturn($page);
-        $this->optOut = $this->createMock(OptOut::class);
-        $this->optOut->method('isValid')->willReturnCallback(fn ($id, $t) => $id === 42 && $t === 'good');
-        return new Index($request, $pageFactory, $redirectFactory, $this->optOut);
+        $redirect->method('setPath')->willReturnCallback(function ($path) use ($redirect) {
+            $this->path = $path;
+            return $redirect;
+        });
+        $redirect->method('setUrl')->willReturnCallback(function ($url) use ($redirect) {
+            $this->url = $url;
+            return $redirect;
+        });
+        $factory = $this->createStub(RedirectFactory::class);
+        $factory->method('create')->willReturn($redirect);
+        $optOut = $this->createMock(OptOut::class);
+        $optOut->expects($this->once())->method('getWithdrawalUrl')->with(42, 'signed')->willReturn($url);
+        return new Index($request, $factory, $optOut);
     }
 
-    public function testValidLinkWithdrawsAndShowsConfirmation(): void
+    public function testOldLinkRedirectsToConsentOwnedConfirmation(): void
     {
-        $controller = $this->controller('good');
-        $this->optOut->expects($this->once())->method('withdraw')->with(42)->willReturn(true);
-        $this->assertInstanceOf(Page::class, $controller->execute());
-        $this->assertSame(['title' => 'Unsubscribe from cart reminders', 'robots' => 'NOINDEX,NOFOLLOW'], $this->page);
+        $this->controller('https://shop/ckconsent/optout?c=cid&t=signed')->execute();
+        $this->assertSame('https://shop/ckconsent/optout?c=cid&t=signed', $this->url);
         $this->assertNull($this->path);
     }
 
-    public function testForgedLinkGoesHomeWithoutWithdrawing(): void
+    public function testInvalidOrMissingConsentGoesHome(): void
     {
-        $controller = $this->controller('forged');
-        $this->optOut->expects($this->never())->method('withdraw');
-        $controller->execute();
+        $this->controller(null)->execute();
         $this->assertSame('', $this->path);
-    }
-
-    public function testAlreadyOptedOutGoesHome(): void
-    {
-        $controller = $this->controller('good');
-        $this->optOut->expects($this->once())->method('withdraw')->with(42)->willReturn(false);
-        $controller->execute();
-        $this->assertSame('', $this->path);
-        $this->assertSame([], $this->page);
+        $this->assertNull($this->url);
     }
 }

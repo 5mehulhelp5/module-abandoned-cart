@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Model;
 
+use CommerceKings\Consent\Api\WithdrawalLinkInterface;
 use Magento\Catalog\Helper\Image as ImageHelper;
 use Magento\Catalog\Helper\Product\Configuration as ProductConfiguration;
 use Magento\Framework\Escaper;
@@ -35,7 +36,7 @@ class ReminderData
         private readonly PriceHelper $priceHelper,
         private readonly UrlInterface $url,
         private readonly Escaper $escaper,
-        private readonly OptOut $optOut,
+        private readonly WithdrawalLinkInterface $withdrawalLinks,
         private readonly LinkSignature $signature
     ) {
     }
@@ -56,7 +57,7 @@ class ReminderData
             ]),
             'store_url' => $this->url->getUrl('', ['_nosid' => true]),
             'contact_url' => $this->url->getUrl('contact', ['_nosid' => true]),
-            'optout_url' => $this->optOut->url((int)$quote->getId()),
+            'optout_url' => $this->withdrawalLinks->getUrl((string)$quote->getData('ck_abandoned_consent_id')),
         ];
     }
 

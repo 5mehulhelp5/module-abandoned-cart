@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use Consent's shared withdrawal-link API and confirmation page; retain a redirect for legacy quote-based email links, and keep cart cleanup in the withdrawal observer.
 - Clarify reminder email wording without promising a saved cart snapshot, and distinguish an unavailable reminder link from the current cart.
 - Serialize guest email capture, acknowledge saved data, retry transient failures and clear stale guest capture on invalid or empty input.
 - Require confirmation and a form-key POST for guest restores; lock and reload carts, preserve destination details, validate stock and save merges atomically.

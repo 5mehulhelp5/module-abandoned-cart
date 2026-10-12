@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Test\Unit\Model;
 
 use CommerceKings\AbandonedCart\Model\LinkSignature;
-use CommerceKings\AbandonedCart\Model\OptOut;
+use CommerceKings\Consent\Api\WithdrawalLinkInterface;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use Magento\Catalog\Helper\Image as ImageHelper;
@@ -46,8 +46,8 @@ class ReminderDataTest extends TestCase
         $escaper = $this->createStub(Escaper::class);
         $escaper->method('escapeHtml')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
         $escaper->method('escapeUrl')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
-        $optOut = $this->createStub(OptOut::class);
-        $optOut->method('url')->willReturnCallback(fn ($id) => "https://shop/cartreminder/optout?q=$id&t=o");
+        $optOut = $this->createStub(WithdrawalLinkInterface::class);
+        $optOut->method('getUrl')->willReturnCallback(fn ($id) => "https://shop/ckconsent/optout?c=$id&t=o");
         $signature = $this->createStub(LinkSignature::class);
         $signature->method('sign')->willReturnCallback(fn ($purpose, $id) => "$purpose-$id");
         return new ReminderData($image, $configuration, $price, $url, $escaper, $optOut, $signature);
@@ -58,6 +58,7 @@ class ReminderDataTest extends TestCase
         $billing = $this->mockWith(Address::class, ['getFirstname' => $billingName]);
         return $this->mockWith(Quote::class, [
             'getId' => 42, 'getStoreId' => 1, 'getCustomerFirstname' => $firstname, 'getCustomerEmail' => 'a@test.com',
+            'getData' => fn ($key) => $key === 'ck_abandoned_consent_id' ? 'cid-1' : null,
             'getBillingAddress' => $billing, 'getAllVisibleItems' => $items, 'getGrandTotal' => 2400.0,
         ]);
     }
@@ -75,7 +76,7 @@ class ReminderDataTest extends TestCase
     {
         $vars = $this->data()->build($this->quote());
         $this->assertSame('https://shop/cartreminder/cart/restore?q=42&t=restore-42', $vars['restore_url']);
-        $this->assertSame('https://shop/cartreminder/optout?q=42&t=o', $vars['optout_url']);
+        $this->assertSame('https://shop/ckconsent/optout?c=cid-1&t=o', $vars['optout_url']);
         $this->assertStringNotContainsString('a@test.com', $vars['restore_url'] . $vars['optout_url']);
         $this->assertSame('https://shop/contact', $vars['contact_url']);
         $this->assertTrue($this->urls['cartreminder/cart/restore']['_nosid']);
