@@ -22,35 +22,52 @@ class CustomerConsentCapture
         private readonly ConsentInterface $consent,
         private readonly ConsentGuardInterface $guard,
         private readonly BrowserIdentityInterface $browser,
-        private readonly Config $config
+        private readonly Config $config,
+        private readonly QuoteScope $scope
     ) {
     }
 
     public function execute(int $quoteId, int $customerId): bool
     {
-        if (!$quoteId || !$customerId || !$this->config->isEnabled()) {
+        if (!$quoteId || !$customerId) {
+            return false;
+        }
+        $quote = $this->scope->find($quoteId, $customerId);
+        if (!$quote || !$this->config->isEnabled((int)$quote['store_id'])) {
             return false;
         }
         $consent = $this->consent->getCurrent(Config::PURPOSE);
-        if (!$consent) {
+        if (!$consent || !$this->scope->matches($consent, (int)$quote['store_id'])) {
             return false;
         }
         $browserHash = $this->browser->hash();
         $db = $this->resource->getConnection();
-        $db->update(
+        $where = [
+            'entity_id = ?' => $quoteId,
+            'store_id = ?' => (int)$quote['store_id'],
+            'customer_id = ?' => $customerId,
+            'is_active = ?' => 1,
+            $this->guard->validCondition($db->quote($consent->consentId)),
+        ];
+        $updated = $db->update(
             $this->resource->getTableName('quote'),
             ['ck_abandoned_consent_id' => $consent->consentId, 'ck_abandoned_browser_hash' => $browserHash],
-            [
-                'entity_id = ?' => $quoteId,
-                'customer_id = ?' => $customerId,
-                'is_active = ?' => 1,
+            array_merge($where, [
                 // only when it changes - re-opening checkout must not restart the reminder delay
                 '(ck_abandoned_consent_id IS NULL OR ck_abandoned_browser_hash IS NULL OR '
                     . $db->quoteInto('ck_abandoned_consent_id <> ?', $consent->consentId) . ' OR '
                     . $db->quoteInto('ck_abandoned_browser_hash <> ?', $browserHash) . ')',
-                $this->guard->validCondition($db->quote($consent->consentId)),
-            ]
+            ])
         );
-        return true;
+        if ($updated) {
+            return true;
+        }
+        // An identical retry is stored; a refused write or a withdrawal race is not.
+        $select = $db->select()->from($this->resource->getTableName('quote'), 'entity_id');
+        foreach ($where as $condition => $value) {
+            is_int($condition) ? $select->where($value) : $select->where($condition, $value);
+        }
+        return (bool)$db->fetchOne($select->where('ck_abandoned_consent_id = ?', $consent->consentId)
+            ->where('ck_abandoned_browser_hash = ?', $browserHash));
     }
 }

@@ -12,7 +12,7 @@ The five-package sandbox also checks consent mapping against temporary database 
 the JavaScript lifecycle, and native Vanilla consent choices, guest checkout capture, local
 reminder delivery, confirmed restore/merge and unsubscribe in a browser. Quote integration
 tests use Magento demo data and cover rollback, stock limits and concurrent restores.
-Its database is MariaDB 11.8. These checks do not certify other themes, third-party
+Endpoint regressions also cover website isolation, strict form keys, malformed input, HEAD safety and link replay. Its database is MariaDB 11.8. These checks do not certify other themes, third-party
 tracking scripts, checkout customizations or Adobe Commerce-specific features.
 
 The GitHub workflow checks package metadata, PHP syntax on 8.1–8.5 and Git archive contents.

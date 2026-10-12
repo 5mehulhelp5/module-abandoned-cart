@@ -37,6 +37,7 @@ class RestoreTest extends TestCase
     use DbTestTrait;
 
     private ?string $path = null;
+    private int $lookups = 0;
     private array $messages = [];
     private array $saved = [];
     private array $replaced = [];
@@ -55,12 +56,14 @@ class RestoreTest extends TestCase
         ?string $browserHash = 'bh-owner',
         ?array $current = null,
         int $loggedInCustomer = 0,
-        string $token = 'good',
+        mixed $token = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         bool $cartExists = true,
         bool $quoteModel = true,
         bool $isPost = true,
         bool $formKeyValid = true,
-        ?\Throwable $restoreError = null
+        ?\Throwable $restoreError = null,
+        mixed $quoteId = '42',
+        mixed $formKey = 'valid-key'
     ): Quote {
         $cart += ['id' => 42, 'store' => 1, 'active' => 1, 'items' => 2, 'customer' => null, 'browser' => 'bh-owner',
             'reminded' => gmdate('Y-m-d H:i:s', time() - 3600)];
@@ -72,13 +75,13 @@ class RestoreTest extends TestCase
         ]);
         $request = $this->createStub(Http::class);
         $request->method('isPost')->willReturn($isPost);
-        $request->method('getParam')->willReturnCallback(fn ($k) => ['q' => '42', 't' => $token][$k] ?? null);
+        $request->method('getParam')->willReturnCallback(fn ($k) => ['q' => $quoteId, 't' => $token, 'form_key' => $formKey][$k] ?? null);
         $redirect = $this->createStub(Redirect::class);
         $redirect->method('setPath')->willReturnCallback(function ($path) use ($redirect) { $this->path = $path; return $redirect; });
         $redirectFactory = $this->createStub(RedirectFactory::class);
         $redirectFactory->method('create')->willReturn($redirect);
         $signature = $this->createStub(LinkSignature::class);
-        $signature->method('isValid')->willReturnCallback(fn ($purpose, $id, $t) => $purpose === 'restore' && $id === 42 && $t === 'good');
+        $signature->method('isValid')->willReturnCallback(fn ($purpose, $id, $t) => $purpose === 'restore' && $id === 42 && $t === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
         $browserId = $this->createStub(BrowserIdentityInterface::class);
         $browserId->method('hash')->willReturn((string)$browserHash);
         $store = $this->createStub(StoreInterface::class);
@@ -88,6 +91,7 @@ class RestoreTest extends TestCase
         $access = new RestoreAccess($signature, $browserId, $stores);
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists, $quoteModel) {
+            $this->lookups++;
             if (!$cartExists) {
                 throw new NoSuchEntityException();
             }
@@ -156,7 +160,7 @@ class RestoreTest extends TestCase
 
     public function testMissingCartGoesHome(): void
     {
-        $this->restore([], 'bh-owner', null, 0, 'good', false);
+        $this->restore([], 'bh-owner', null, 0, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', false);
         $this->assertSame('', $this->path);
     }
 
@@ -319,9 +323,37 @@ class RestoreTest extends TestCase
         $this->sectionCookie = null;
         $quote = $this->restore([], 'bh-owner', ['id' => 7, 'items' => 1]);
         $this->assertSame('checkout/cart', $this->path);
-        $this->assertSame([[42, 7, 'good', 0]], $this->restores);
+        $this->assertSame([[42, 7, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 0]], $this->restores);
         $this->assertSame(7, (int)$this->replaced[0]->getId());
         $this->assertSame(['Your saved cart has been restored.'], $this->messages);
         $this->assertArrayHasKey('cart', json_decode($this->cookies['section_data_ids'], true));
+    }
+
+    /** @dataProvider malformedRequests */
+    #[\PHPUnit\Framework\Attributes\DataProvider('malformedRequests')]
+    public function testMalformedLinkDoesNotReadOrChangeCarts(mixed $id, mixed $token): void
+    {
+        $this->restore(token: $token, isPost: false, quoteId: $id);
+        $this->assertSame('', $this->path);
+        $this->assertSame(0, $this->lookups);
+        $this->assertSame([], $this->restores);
+        $this->assertSame([], $this->replaced);
+    }
+
+    public static function malformedRequests(): array
+    {
+        $token = str_repeat('a', 32);
+        return ['array id' => [[42], $token], 'array token' => ['42', [$token]],
+            'zero' => ['0', $token], 'negative' => ['-1', $token],
+            'overflow' => [str_repeat('9', 30), $token], 'non-numeric' => ['42x', $token],
+            'short token' => ['42', 'forged'], 'oversized token' => ['42', str_repeat('a', 33)]];
+    }
+
+    public function testArrayFormKeyIsRejectedWithoutCallingMagentoStringComparison(): void
+    {
+        $this->restore(formKey: ['key']);
+        $this->assertSame('checkout/cart', $this->path);
+        $this->assertSame(0, $this->lookups);
+        $this->assertSame([], $this->restores);
     }
 }

@@ -74,4 +74,12 @@ class ConsentWithdrawalTest extends TestCase
         $this->updateResults = [0, 0];
         $this->assertFalse((new ConsentWithdrawal($this->resource()))->execute(42));
     }
+
+    public function testGuestCaptureClearKeepsTheAuthorizedStore(): void
+    {
+        (new ConsentWithdrawal($this->resource()))->execute(42, true, 3);
+        $this->assertCount(1, $this->updates);
+        $this->assertSame(3, $this->updates[0]['where']['store_id = ?']);
+        $this->assertContains('customer_id IS NULL', self::conditions($this->updates[0]['where']));
+    }
 }

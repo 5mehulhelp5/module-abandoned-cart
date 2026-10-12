@@ -6,11 +6,11 @@ namespace CommerceKings\AbandonedCart\Model;
 use Magento\Framework\App\DeploymentConfig;
 
 /**
- * Signs the links in the reminder email (restore, opt-out): HMAC with the store's crypt key over
+ * Signs restore links in the reminder email: HMAC with the store's crypt key over
  * purpose + quote id. Nobody can build a working link by guessing cart ids, and Magento's own cart
  * key (the masked id, which opens the guest cart REST API) never leaves the server. The email is
  * deliberately NOT signed: a link must keep working when the cart's email changes after sending
- * (guest retypes it, customer changes the account email) - above all the unsubscribe link.
+ * (guest retypes it, customer changes the account email). Consent signs its own withdrawal links.
  */
 class LinkSignature
 {

@@ -9,6 +9,8 @@ use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Framework\App\Action\HttpGetActionInterface;
 use Magento\Framework\App\Action\HttpPostActionInterface;
+use Magento\Framework\App\CsrfAwareActionInterface;
+use CommerceKings\Consent\Controller\RejectsMalformedFormKeys;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Controller\Result\RedirectFactory;
@@ -23,8 +25,9 @@ use Magento\Quote\Model\Quote;
 use Psr\Log\LoggerInterface;
 
 /** GET validates the reminder link and shows a confirmation; only a form-key POST changes carts. */
-class Restore implements HttpGetActionInterface, HttpPostActionInterface
+class Restore implements HttpGetActionInterface, HttpPostActionInterface, CsrfAwareActionInterface
 {
+    use RejectsMalformedFormKeys;
     public function __construct(
         private readonly Http $request,
         private readonly RedirectFactory $redirectFactory,
@@ -45,13 +48,24 @@ class Restore implements HttpGetActionInterface, HttpPostActionInterface
     public function execute(): ResultInterface
     {
         $redirect = $this->redirectFactory->create();
-        $quoteId = (int)$this->request->getParam('q');
-        $token = (string)$this->request->getParam('t');
-        if ($this->request->isPost() && !$this->formKeyValidator->validate($this->request)) {
+        $id = $this->request->getParam('q');
+        $token = $this->request->getParam('t');
+        if ((!is_string($id) && !is_int($id)) || !is_string($token)
+            || !preg_match('/^[a-f0-9]{32}$/D', $token)
+        ) {
+            return $redirect->setPath('');
+        }
+        $quoteId = filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($quoteId === false) {
+            return $redirect->setPath('');
+        }
+        if ($this->request->isPost() && (!is_string($this->request->getParam('form_key'))
+            || !$this->formKeyValidator->validate($this->request))
+        ) {
             return $redirect->setPath('checkout/cart');
         }
         try {
-            $quote = $quoteId ? $this->cartRepository->get($quoteId) : null;
+            $quote = $this->cartRepository->get($quoteId);
         } catch (\Exception) {
             $quote = null;
         }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Authorize capture by quote website/store, retain scope in atomic writes and clears, verify customer acknowledgements, reject mismatched queue consents, and retire unsafe quote-only opt-out links.
+
 - Use Consent's shared withdrawal-link API and confirmation page; retain a redirect for legacy quote-based email links, and keep cart cleanup in the withdrawal observer.
 - Clarify reminder email wording without promising a saved cart snapshot, and distinguish an unavailable reminder link from the current cart.
 - Serialize guest email capture, acknowledge saved data, retry transient failures and clear stale guest capture on invalid or empty input.

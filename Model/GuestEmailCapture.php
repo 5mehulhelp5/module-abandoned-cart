@@ -30,7 +30,8 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
         private readonly ConsentGuardInterface $guard,
         private readonly BrowserIdentityInterface $browser,
         private readonly ConsentWithdrawal $withdrawal,
-        private readonly Config $config
+        private readonly Config $config,
+        private readonly QuoteScope $scope
     ) {
     }
 
@@ -42,18 +43,24 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
         if (!$quoteId) {
             return false;
         }
-        $consent = $this->config->isEnabled() ? $this->consent->getCurrent(Config::PURPOSE) : null;
-        $email = trim($email);
-        if (!$consent || $email === '') {
-            $this->withdrawal->execute($quoteId, true);
+        $quote = $this->scope->find($quoteId);
+        if (!$quote) {
             return false;
         }
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
+        $storeId = (int)$quote['store_id'];
+        $consent = $this->config->isEnabled($storeId) ? $this->consent->getCurrent(Config::PURPOSE) : null;
+        $email = trim($email);
+        if (!$consent || $email === '') {
+            $this->withdrawal->execute($quoteId, true, $storeId);
+            return false;
+        }
+        if (!$this->scope->matches($consent, $storeId) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
             return false;
         }
         $db = $this->resource->getConnection();
         $where = [
             'entity_id = ?' => $quoteId,
+            'store_id = ?' => $storeId,
             'is_active = ?' => 1,
             'customer_id IS NULL',
             $this->guard->validCondition($db->quote($consent->consentId)),

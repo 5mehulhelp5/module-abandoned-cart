@@ -85,11 +85,11 @@ The restore link works 7 days and uses `?q={cart id}&t={signature}`. Its signatu
 - valid link → consent withdrawn, page "Consent withdrawn" (`noindex`) with the purpose-specific confirmation, translated per store locale; the cart withdrawal observer clears active guest email/consent or customer consent;
 - already withdrawn → confirmation again, without withdrawing a later explicit consent. Deleting the original cart does not break the link; deleting the consent record, an invalid signature or another website → homepage;
 - opened in the owning browser → Consent's `js/withdrawal-banner.js` switches the mapped choice off only if that browser's current choice was withdrawn. Other categories and later explicit choices stay; another device's cookie is untouched. Purposes sharing the same category follow it together;
-- old `/cartreminder/optout?q=&t=` links authenticate the legacy signature and redirect to the shared Consent URL using the cart's retained consent id. If that cart or binding has gone, they redirect to the homepage.
+- old `/cartreminder/optout?q=&t=` links are retired and redirect to the homepage without reading or withdrawing any consent. A quote-only token cannot identify its original consent safely after a later explicit grant.
 
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 
-`cart gone`, `ordered / closed`, `empty`, `no email`, `no consent`, `already reminded`, `consent withdrawn / expired` (also: older banner/terms revision), `address reminded recently`, `disabled`. A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
+`cart gone`, `ordered / closed`, `empty`, `no email`, `no consent`, `already reminded`, `consent purpose / website mismatch`, `consent withdrawn / expired` (also: older banner/terms revision), `address reminded recently`, `disabled`. A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
 
 ## Known behaviour / limitations
 
@@ -103,6 +103,19 @@ The restore link works 7 days and uses `?q={cart id}&t={signature}`. Its signatu
 - The email shows the cart at **send** time. Merging recalculates Magento totals; restoring a guest cart into a session with no existing cart adopts it, and Magento's normal cart/checkout flow handles later recalculation.
 - Merge rollback covers database changes. External side effects from third-party quote observers cannot be rolled back by this transaction. Concurrent restore requests are tested; custom cart writers and checkout integrations need their own concurrency checks.
 
+## Endpoint safety
+
+Capture authorizes an active guest/customer quote on the current website before reading
+consent or changing data. It uses the quote's store configuration, requires the reminder
+purpose and the same consent website, and repeats the authorized store/customer/consent
+conditions in atomic updates and retry acknowledgements. Clearing a guest capture also
+keeps the authorized store predicate. The consumer rejects a wrong-purpose or wrong-website
+consent before claiming a quote.
+
+Storefront POST actions require a valid form key even for AJAX. Malformed form keys are
+rejected before Magento's string comparison; malformed purpose/link parameters and source
+cookies are refused without server errors. Signed withdrawal HEAD requests have no effects.
+
 ## Endpoints
 
 | Endpoint | Who | Purpose |
@@ -112,7 +125,7 @@ The restore link works 7 days and uses `?q={cart id}&t={signature}`. Its signatu
 | `GET /cartreminder/cart/restore?q=&t=` | email | validate ownership and show restore confirmation |
 | `POST /cartreminder/cart/restore` (form key, `q`, `t`) | confirmation page | adopt or merge the saved cart |
 | `GET /ckconsent/optout?c=&t=` (Consent module) | email | withdraw the consent and show confirmation |
-| `GET /cartreminder/optout?q=&t=` | legacy email | redirect to the shared consent link |
+| `GET /cartreminder/optout?q=&t=` | retired legacy email | return to the homepage without withdrawing |
 
 ## Settings (default scope unless noted)
 
@@ -155,7 +168,7 @@ vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/com
 node --test vendor/commercekings/module-abandoned-cart/Test/JavaScript/*.test.cjs
 ```
 
-`Test/Unit` – one test class per PHP class; `DbTestTrait` is a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, guest + customer capture (incl. the guard condition), withdrawal (guest vs customer, incl. the numeric-key `+` regression that wiped customer emails), legacy opt-out redirects, finder, consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, cleanup cron, email data (signed links, options, escaping), restore (every branch incl. other browser, merge, mini cart cookie), consent endpoints. Shared withdrawal links, confirmation and preference sync are tested in Consent.
+`Test/Unit` – one test class per PHP class; `DbTestTrait` is a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, guest + customer capture (incl. the guard condition), withdrawal (guest vs customer, incl. the numeric-key `+` regression that wiped customer emails), retired legacy opt-out links, finder, consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, cleanup cron, email data (signed links, options, escaping), restore (every branch incl. other browser, merge, mini cart cookie), consent endpoints. Shared withdrawal links, confirmation and preference sync are tested in Consent.
 
 JavaScript tests exercise the guest capture coordinator and Magento email-field mixin: acknowledgements, retries, rapid edits, withdrawal during a pending request, consent changes, offline recovery and component cleanup. `customer-consent.js` does not have an isolated unit test. Consent tests its shared withdrawal banner sync separately.
 
@@ -163,6 +176,15 @@ The quote integration tests require a **development database with Magento demo d
 
 ```sh
 MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Integration/CartRestoreTest.php
+```
+
+`CaptureScopeTest.php` adds five real SQL regressions with empty quotes and a temporary
+second website: cross-website capture/clear, allowed capture/retry/clear, a store change
+after authorization, wrong consent scope, and refused-write acknowledgements. It removes
+its quotes and website/store/group fixtures afterward and needs no demo products:
+
+```sh
+MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Integration/CaptureScopeTest.php
 ```
 
 Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, stock limits and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
@@ -205,7 +227,7 @@ The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for na
 **Opt-out**
 - Link → confirmation page; guest cart email + consent cleared, customer cart consent cleared; `ck_consent` row withdrawn via `email`, no email address stored anywhere in the consent tables.
 - Same link again → confirmation, with a later explicit consent preserved. Forged signature → homepage.
-- Original cart deleted → the new Consent link still withdraws; a legacy quote-based link needs its original cart and consent binding.
+- Original cart deleted → the new Consent link still withdraws; legacy quote-based links never withdraw.
 - Opted out on phone → laptop's old consent refused, also after changing an unrelated purpose; the choice mapped to `cart_reminder` off+on → stored again; other browser with fresh consent and same email → stored.
 - Same browser → banner switches the choice mapped to `cart_reminder` off if its current choice was withdrawn, preserving other categories and later explicit choices.
 

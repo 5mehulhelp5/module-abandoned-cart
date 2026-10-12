@@ -5,6 +5,7 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Model;
 
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\Consumer;
+use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\Consent\Api\ConsentInterface;
 use CommerceKings\AbandonedCart\Model\RecipientHistory;
 use CommerceKings\AbandonedCart\Model\ReminderData;
@@ -38,6 +39,7 @@ class ConsumerTest extends TestCase
     private bool $recipientClaim = true;
     private bool $recipientClaimFails = false;
     private bool $quoteModel = true;
+    private bool $scopeMatches = true;
 
     private function consumer(array|false $row = self::ROW, bool $enabled = true, bool $withdrawn = false): Consumer
     {
@@ -48,6 +50,9 @@ class ConsumerTest extends TestCase
         $config->method('getIdentity')->willReturn('custom1');
         $consent = $this->createStub(ConsentInterface::class);
         $consent->method('isValid')->willReturnCallback(fn ($id) => $id === 'cid-1' && !$withdrawn);
+        $consent->method('get')->willReturn(self::consent('cid-1'));
+        $scope = $this->createStub(QuoteScope::class);
+        $scope->method('matches')->willReturnCallback(fn () => $this->scopeMatches);
         $logger = $this->createStub(LoggerInterface::class);
         $logger->method('info')->willReturnCallback(function ($msg) { $this->logs[] = $msg; });
         $repo = $this->createStub(CartRepositoryInterface::class);
@@ -78,7 +83,7 @@ class ConsumerTest extends TestCase
             });
         }
         $builder->method('getTransport')->willReturn($transport);
-        return new Consumer($this->resource(), $repo, $data, $builder, $this->emulation, $config, $consent, $this->guard(), $this->recipients, $logger);
+        return new Consumer($this->resource(), $repo, $data, $builder, $this->emulation, $config, $consent, $this->guard(), $this->recipients, $logger, $scope);
     }
 
     /** @dataProvider skipCases */
@@ -103,6 +108,15 @@ class ConsumerTest extends TestCase
             'consent withdrawn / expired / old revision' => [self::ROW, true, true, 'consent withdrawn / expired'],
             'module disabled' => [self::ROW, false, false, 'disabled'],
         ];
+    }
+
+    public function testConsentFromAnotherWebsiteOrPurposeCannotClaimOrSend(): void
+    {
+        $this->scopeMatches = false;
+        $this->consumer()->process('42');
+        $this->assertSame([], $this->updates);
+        $this->assertSame([], $this->mail);
+        $this->assertSame(['CommerceKings_AbandonedCart: cart 42 skipped (consent purpose / website mismatch)'], $this->logs);
     }
 
     public function testAddressRemindedRecentlyIsSkippedEvenIfThatCartIsGone(): void

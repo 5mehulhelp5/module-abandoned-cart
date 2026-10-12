@@ -38,7 +38,8 @@ class Consumer
         private readonly ConsentInterface $consent,
         private readonly ConsentGuardInterface $guard,
         private readonly RecipientHistory $recipients,
-        private readonly LoggerInterface $logger
+        private readonly LoggerInterface $logger,
+        private readonly QuoteScope $scope
     ) {
     }
 
@@ -59,6 +60,7 @@ class Consumer
             $row['ck_abandoned_consent_id'] === null => 'no consent',
             $row['ck_abandoned_reminded_at'] !== null => 'already reminded',
             !$this->consent->isValid((string)$row['ck_abandoned_consent_id']) => 'consent withdrawn / expired',
+            !$this->matchesConsent($row) => 'consent purpose / website mismatch',
             $this->recipients->isRecent((string)$row['customer_email']) => 'address reminded recently',
             !$this->config->isEnabled((int)$row['store_id']) => 'disabled',
             default => null,
@@ -77,6 +79,7 @@ class Consumer
             ['ck_abandoned_reminded_at' => new \Zend_Db_Expr('NOW()')] + $keepUpdatedAt,
             [
                 'entity_id = ?' => $id,
+                'store_id = ?' => (int)$row['store_id'],
                 'ck_abandoned_reminded_at IS NULL',
                 'is_active = ?' => 1,
                 'items_count > 0',
@@ -132,5 +135,11 @@ class Consumer
             throw $e;
         }
         $this->logger->info(sprintf('CommerceKings_AbandonedCart: reminder sent for cart %d', $id));
+    }
+
+    private function matchesConsent(array $row): bool
+    {
+        $consent = $this->consent->get((string)$row['ck_abandoned_consent_id']);
+        return $consent !== null && $this->scope->matches($consent, (int)$row['store_id']);
     }
 }

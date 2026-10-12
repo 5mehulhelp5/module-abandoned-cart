@@ -12,6 +12,8 @@ use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Framework\Controller\Result\Json;
 use Magento\Framework\Controller\Result\JsonFactory;
+use Magento\Framework\App\RequestInterface;
+use Magento\Framework\Data\Form\FormKey\Validator;
 use Magento\Framework\Event;
 use Magento\Framework\Event\Observer;
 use PHPUnit\Framework\TestCase;
@@ -21,10 +23,22 @@ class ConsentEndpointsTest extends TestCase
     use DbTestTrait;
 
     private array $json = [];
+    private int $status = 200;
+
+    private function controller(CustomerSession $customer, CustomerConsentCapture $capture,
+        mixed $key = 'valid', bool $keyValid = true): Capture
+    {
+        $request = $this->createStub(RequestInterface::class);
+        $request->method('getParam')->willReturn($key);
+        $validator = $this->createStub(Validator::class);
+        $validator->method('validate')->willReturn($keyValid);
+        return new Capture($this->jsonFactory(), $this->checkout(42), $customer, $capture, $request, $validator);
+    }
 
     private function jsonFactory(): JsonFactory
     {
         $json = $this->createStub(Json::class);
+        $json->method('setHttpResponseCode')->willReturnCallback(function ($code) use ($json) { $this->status = $code; return $json; });
         $json->method('setData')->willReturnCallback(function ($d) use ($json) { $this->json = $d; return $json; });
         $factory = $this->createStub(JsonFactory::class);
         $factory->method('create')->willReturn($json);
@@ -63,7 +77,7 @@ class ConsentEndpointsTest extends TestCase
         $customer = $this->mockWith(CustomerSession::class, ['isLoggedIn' => true, 'getCustomerId' => 15]);
         $capture = $this->createMock(CustomerConsentCapture::class);
         $capture->expects($this->once())->method('execute')->with(42, 15)->willReturn(true);
-        (new Capture($this->jsonFactory(), $this->checkout(42), $customer, $capture))->execute();
+        $this->controller($customer, $capture)->execute();
         $this->assertSame(['stored' => true], $this->json);
     }
 
@@ -72,7 +86,24 @@ class ConsentEndpointsTest extends TestCase
         $customer = $this->mockWith(CustomerSession::class, ['isLoggedIn' => false, 'getCustomerId' => null]);
         $capture = $this->createMock(CustomerConsentCapture::class);
         $capture->expects($this->never())->method('execute');
-        (new Capture($this->jsonFactory(), $this->checkout(42), $customer, $capture))->execute();
+        $this->controller($customer, $capture)->execute();
         $this->assertSame(['stored' => false], $this->json);
+    }
+
+    /** @dataProvider invalidKeys */
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidKeys')]
+    public function testInvalidFormKeyCannotCaptureEvenForALoggedInCustomer(mixed $key, bool $valid): void
+    {
+        $customer = $this->mockWith(CustomerSession::class, ['isLoggedIn' => true, 'getCustomerId' => 15]);
+        $capture = $this->createMock(CustomerConsentCapture::class);
+        $capture->expects($this->never())->method('execute');
+        $this->controller($customer, $capture, $key, $valid)->execute();
+        $this->assertSame(403, $this->status);
+        $this->assertSame(['stored' => false], $this->json);
+    }
+
+    public static function invalidKeys(): array
+    {
+        return ['missing' => [null, true], 'array' => [['bad'], true], 'invalid' => ['bad', false]];
     }
 }

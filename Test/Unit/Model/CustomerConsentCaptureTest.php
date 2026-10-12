@@ -5,6 +5,7 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Model;
 
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\CustomerConsentCapture;
+use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use CommerceKings\Consent\Api\BrowserIdentityInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
@@ -13,6 +14,8 @@ use PHPUnit\Framework\TestCase;
 class CustomerConsentCaptureTest extends TestCase
 {
     use DbTestTrait;
+    private ?array $scopedQuote = ['store_id' => 3];
+    private bool $scopeMatches = true;
 
     private function capture(bool $consent = true, bool $enabled = true): CustomerConsentCapture
     {
@@ -20,9 +23,12 @@ class CustomerConsentCaptureTest extends TestCase
         $consentApi->method('getCurrent')->with('cart_reminder')->willReturn($consent ? self::consent('cid-1') : null);
         $browser = $this->createStub(BrowserIdentityInterface::class);
         $browser->method('hash')->willReturn('browser-hash');
-        $config = $this->createStub(Config::class);
-        $config->method('isEnabled')->willReturn($enabled);
-        return new CustomerConsentCapture($this->resource(), $consentApi, $this->guard(), $browser, $config);
+        $config = $this->createMock(Config::class);
+        $config->expects($this->any())->method('isEnabled')->with(3)->willReturn($enabled);
+        $scope = $this->createStub(QuoteScope::class);
+        $scope->method('find')->willReturnCallback(fn () => $this->scopedQuote);
+        $scope->method('matches')->willReturnCallback(fn () => $this->scopeMatches);
+        return new CustomerConsentCapture($this->resource(), $consentApi, $this->guard(), $browser, $config, $scope);
     }
 
     public function testStoresConsentOnTheCustomersCartOnly(): void
@@ -62,5 +68,37 @@ class CustomerConsentCaptureTest extends TestCase
             'no consent / withdrawn' => [42, 15, false, true],
             'module disabled' => [42, 15, true, false],
         ];
+    }
+
+    public function testOutOfScopeOrNonOwnedCartCannotCapture(): void
+    {
+        $this->scopedQuote = null;
+        $this->assertFalse($this->capture()->execute(42, 15));
+        $this->assertSame([], $this->updates);
+    }
+
+    public function testConsentFromAnotherWebsiteOrPurposeCannotBeCaptured(): void
+    {
+        $this->scopeMatches = false;
+        $this->assertFalse($this->capture()->execute(42, 15));
+        $this->assertSame([], $this->updates);
+    }
+
+    public function testRefusedWriteIsNotAcknowledged(): void
+    {
+        $this->updateResults = [0];
+        $this->assertFalse($this->capture()->execute(42, 15));
+        $this->assertContains(['customer_id = ?', 15], $this->selectWhere);
+        $this->assertContains(['store_id = ?', 3], $this->selectWhere);
+        $this->assertContains(["VALID('cid-1')", null], $this->selectWhere);
+    }
+
+    public function testIdenticalStoredRetryIsAcknowledged(): void
+    {
+        $this->updateResults = [0];
+        $this->fetchOneResult = 42;
+        $this->assertTrue($this->capture()->execute(42, 15));
+        $this->assertContains(['ck_abandoned_consent_id = ?', 'cid-1'], $this->selectWhere);
+        $this->assertContains(['ck_abandoned_browser_hash = ?', 'browser-hash'], $this->selectWhere);
     }
 }

@@ -37,7 +37,7 @@ trait DbTestTrait
     private function resource(): ResourceConnection
     {
         $select = $this->createStub(Select::class);
-        foreach (['from', 'order'] as $method) {
+        foreach (['from', 'order', 'joinInner'] as $method) {
             $select->method($method)->willReturnSelf();
         }
         $select->method('forUpdate')->willReturnCallback(function ($flag) use ($select) {

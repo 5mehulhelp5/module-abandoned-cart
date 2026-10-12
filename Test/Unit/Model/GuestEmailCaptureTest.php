@@ -6,6 +6,7 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Model;
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\ConsentWithdrawal;
 use CommerceKings\AbandonedCart\Model\GuestEmailCapture;
+use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use CommerceKings\Consent\Api\BrowserIdentityInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
@@ -23,6 +24,8 @@ class GuestEmailCaptureTest extends TestCase
     private ConsentWithdrawal $withdrawal;
     private ?string $askedPurpose = null;
     private array $maskLoads = [];
+    private ?array $scopedQuote = ['store_id' => 3];
+    private bool $scopeMatches = true;
 
     private function capture(int $quoteId = 42, bool $consent = true, bool $enabled = true): GuestEmailCapture
     {
@@ -43,10 +46,13 @@ class GuestEmailCaptureTest extends TestCase
         });
         $browser = $this->createStub(BrowserIdentityInterface::class);
         $browser->method('hash')->willReturn('browser-hash');
-        $config = $this->createStub(Config::class);
-        $config->method('isEnabled')->willReturn($enabled);
+        $config = $this->createMock(Config::class);
+        $config->expects($this->any())->method('isEnabled')->with(3)->willReturn($enabled);
+        $scope = $this->createStub(QuoteScope::class);
+        $scope->method('find')->willReturnCallback(fn () => $this->scopedQuote);
+        $scope->method('matches')->willReturnCallback(fn () => $this->scopeMatches);
         $this->withdrawal = $this->createMock(ConsentWithdrawal::class);
-        return new GuestEmailCapture($maskFactory, $maskResource, $this->resource(), $consentApi, $this->guard(), $browser, $this->withdrawal, $config);
+        return new GuestEmailCapture($maskFactory, $maskResource, $this->resource(), $consentApi, $this->guard(), $browser, $this->withdrawal, $config, $scope);
     }
 
     public function testUnknownCartKey(): void
@@ -84,7 +90,7 @@ class GuestEmailCaptureTest extends TestCase
     public function testWithoutConsentClearsInsteadOfStoring(bool $consent, bool $enabled): void
     {
         $capture = $this->capture(42, $consent, $enabled);
-        $this->withdrawal->expects($this->once())->method('execute')->with(42, true);
+        $this->withdrawal->expects($this->once())->method('execute')->with(42, true, 3);
         $this->assertFalse($capture->capture('masked', 'a@test.com'));
         $this->assertSame([], $this->updates);
     }
@@ -97,7 +103,7 @@ class GuestEmailCaptureTest extends TestCase
     public function testEmptyEmailWithConsentClearsTheGuestCapture(): void
     {
         $capture = $this->capture();
-        $this->withdrawal->expects($this->once())->method('execute')->with(42, true);
+        $this->withdrawal->expects($this->once())->method('execute')->with(42, true, 3);
         $this->assertFalse($capture->capture('masked', ''));
         $this->assertSame([], $this->updates);
     }
@@ -134,5 +140,32 @@ class GuestEmailCaptureTest extends TestCase
     public static function invalidEmails(): array
     {
         return [['not-an-email'], ['a@'], [str_repeat('a', 250) . '@test.com']];
+    }
+
+    public function testOutOfScopeCartCannotStoreOrClearAndDoesNotRecordConsent(): void
+    {
+        $this->scopedQuote = null;
+        $capture = $this->capture();
+        $this->withdrawal->expects($this->never())->method('execute');
+        $this->assertFalse($capture->capture('masked', 'a@test.com'));
+        $this->assertFalse($capture->capture('masked', ''));
+        $this->assertSame([], $this->updates);
+        $this->assertNull($this->askedPurpose);
+    }
+
+    public function testConsentFromAnotherWebsiteOrPurposeCannotBeCaptured(): void
+    {
+        $this->scopeMatches = false;
+        $this->assertFalse($this->capture()->capture('masked', 'a@test.com'));
+        $this->assertSame([], $this->updates);
+    }
+
+    public function testAtomicWriteAndRetryKeepTheAuthorizedStore(): void
+    {
+        $capture = $this->capture();
+        $this->updateResults = [0];
+        $this->assertFalse($capture->capture('masked', 'a@test.com'));
+        $this->assertSame(3, $this->updates[0]['where']['store_id = ?']);
+        $this->assertContains(['store_id = ?', 3], $this->selectWhere);
     }
 }

@@ -20,9 +20,13 @@ class ConsentWithdrawal
     }
 
     /** One cart (e.g. the visitor's own, when the capture finds no consent). */
-    public function execute(int $quoteId, bool $guestOnly = false): bool
+    public function execute(int $quoteId, bool $guestOnly = false, ?int $storeId = null): bool
     {
-        return $quoteId && $this->clear(['entity_id = ?' => $quoteId], $guestOnly) > 0;
+        $where = ['entity_id = ?' => $quoteId];
+        if ($storeId !== null) {
+            $where['store_id = ?'] = $storeId;
+        }
+        return $quoteId && $this->clear($where, $guestOnly) > 0;
     }
 
     /** @param string[] $consentIds every open cart captured with one of these consents */
