@@ -59,7 +59,9 @@ class Restore implements HttpGetActionInterface, HttpPostActionInterface
             return $redirect->setPath('');
         }
         if (!$this->access->isAvailable($quote)) {
-            $this->messageManager->addNoticeMessage(__('This cart is no longer available.'));
+            $this->messageManager->addNoticeMessage(
+                __('This reminder link is no longer available. You can continue shopping with your current cart.')
+            );
             return $redirect->setPath('checkout/cart');
         }
         if ($quote->getCustomerId()) {

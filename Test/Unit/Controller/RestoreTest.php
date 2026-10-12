@@ -247,7 +247,10 @@ class RestoreTest extends TestCase
     {
         $this->restore($cart);
         $this->assertSame('checkout/cart', $this->path);
-        $this->assertSame(['This cart is no longer available.'], $this->messages);
+        $this->assertSame(
+            ['This reminder link is no longer available. You can continue shopping with your current cart.'],
+            $this->messages
+        );
         $this->assertSame([], $this->replaced);
     }
 

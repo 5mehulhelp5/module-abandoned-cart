@@ -20,7 +20,7 @@ Cart > Email template. Variables above; items_html is ready-made HTML rows.
 <h1 style="margin: 0 0 20px; font-size: 26px; line-height: 32px; color: #333333;">{{trans "Your cart is waiting"}}</h1>
 <p style="margin: 0 0 20px; font-size: 15px; line-height: 23px;">
     {{if customer_name}}{{trans "Hi %name," name=$customer_name}}<br>{{/if}}
-    {{trans "We saved your cart. Pick up where you left off whenever you are ready."}}
+    {{trans "You left some items in your cart. Follow the link below to continue shopping."}}
 </p>
 {{var items_html|raw}}
 <p style="margin: 12px 0 24px; font-size: 15px; font-weight: bold; text-align: right;">{{trans "Total: %total" total=$grand_total}}</p>

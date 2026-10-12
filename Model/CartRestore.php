@@ -35,7 +35,9 @@ class CartRestore
             if (!$source instanceof Quote || !$this->access->isOwner($source, $token)
                 || !$this->access->isAvailable($source) || $source->getCustomerId()
             ) {
-                throw new LocalizedException(__('This cart is no longer available.'));
+                throw new LocalizedException(
+                    __('This reminder link is no longer available. You can continue shopping with your current cart.')
+                );
             }
             $destination = $destinationId ? $repository->get($destinationId) : $sessionQuote;
             if (!$destination instanceof Quote || ($destinationId && !$destination->getIsActive())

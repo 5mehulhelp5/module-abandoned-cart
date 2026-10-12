@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Clarify reminder email wording without promising a saved cart snapshot, and distinguish an unavailable reminder link from the current cart.
 - Serialize guest email capture, acknowledge saved data, retry transient failures and clear stale guest capture on invalid or empty input.
 - Require confirmation and a form-key POST for guest restores; lock and reload carts, preserve destination details, validate stock and save merges atomically.
 - Add guest capture JavaScript tests and real quote integration tests for merging, concurrent requests and rollback.

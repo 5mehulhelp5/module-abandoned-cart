@@ -71,7 +71,7 @@ The opt-out link never expires; the restore link works 7 days. Both links are `?
 
 - invalid/forged signature, old `?c=` links → homepage;
 - the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's (`ck_abandoned_browser_hash`), and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
-- cart ordered/closed or emptied, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `ck_abandoned_reminded_at`) → notice "This cart is no longer available." (owner only);
+- cart ordered/closed or emptied, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `ck_abandoned_reminded_at`) → notice "This reminder link is no longer available. You can continue shopping with your current cart." (owner only);
 - customer cart → cart page if logged in as that customer, otherwise login page with "Sign in to continue shopping – your cart is waiting for you.";
 - guest cart → **GET shows a confirmation page without merging or replacing the session cart**. If it is already the session cart, the visitor goes straight to the cart page;
 - confirmation → **POST with a valid Magento form key**. Source and destination quote rows are locked in id order, then freshly loaded. Browser ownership, store, expiry and destination account/active status are checked again;
@@ -93,7 +93,7 @@ The opt-out link never expires; the restore link works 7 days. Both links are `?
 ## Known behaviour / limitations
 
 - **One reminder per cart, ever**, and at most one per address per 7 days. Adding products after the reminder does not send another.
-- **The restore link opens the cart as it is now**, not as it was in the email. Products the customer removed are not brought back (no snapshot); an emptied cart shows "This cart is no longer available."
+- **The restore link opens the cart as it is now**, not as it was in the email. Products the customer removed are not brought back (no snapshot); an emptied cart shows "This reminder link is no longer available. You can continue shopping with your current cart."
 - **Another device / cleared cookie / expired cookie → homepage.** The link only works in the browser that gave the consent (deliberate: nobody else sees the cart, email or address).
 - Visitors who answered the banner **before** the category existed are not asked again unless **Banner revision** (Consent section) is raised; until then the category stays off for them.
 - **One-click opt-out:** mail scanners that open every link (mostly Microsoft 365) can opt a recipient out unknowingly. Harmless – they just miss the one reminder.
@@ -197,7 +197,7 @@ The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for na
 - Owner browser: GET shows confirmation and leaves both carts unchanged; confirmation POST restores into a lost session or merges into the current cart; mini cart count correct.
 - Matching products add quantities once; distinct configurations remain separate; current email, addresses and coupon survive.
 - Repeated/concurrent POSTs do not duplicate products. Invalid form key, wrong store/account, stock errors and save failures leave the current cart intact.
-- Owner emptied the cart → "This cart is no longer available."
+- Owner emptied the cart → "This reminder link is no longer available. You can continue shopping with your current cart."
 - Customer cart: logged in → cart page; logged out → login page with notice.
 
 **Opt-out**
