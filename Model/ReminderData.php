@@ -21,7 +21,7 @@ class ReminderData
 {
     /**
      * Custom option types shown in the email: only the store's own predefined choices. Free text
-     * ("Naslov na korici"), file names and the like come from the visitor - anyone can create a
+     * (such as an engraved message), file names and the like come from the visitor - anyone can create a
      * cart with any text and any recipient, so they must never reach an email we send.
      */
     private const SAFE_OPTION_TYPES = ['drop_down', 'radio', 'checkbox', 'multiple'];

@@ -51,7 +51,7 @@ class ConsumerTest extends TestCase
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturn($this->createStub(CartInterface::class));
         $data = $this->createStub(ReminderData::class);
-        $data->method('build')->willReturn(['customer_name' => 'Jelena', 'items_html' => '']);
+        $data->method('build')->willReturn(['customer_name' => 'Jane', 'items_html' => '']);
         $this->emulation = $this->createMock(Emulation::class);
         $this->recipients = $this->createMock(RecipientHistory::class);
         $this->recipients->method('isRecent')->willReturnCallback(fn () => $this->recentRecipient);
@@ -159,7 +159,7 @@ class ConsumerTest extends TestCase
         $consumer = $this->consumer();
         $this->recipients->expects($this->once())->method('claim')->with('a@test.com')->willReturn(true);
         $consumer->process('42');
-        $this->assertSame(['a@test.com', 'Jelena'], $this->mail['addTo']);
+        $this->assertSame(['a@test.com', 'Jane'], $this->mail['addTo']);
     }
 
     public function testClaimsThenSends(): void
@@ -183,7 +183,7 @@ class ConsumerTest extends TestCase
 
         $this->assertSame(['tpl'], $this->mail['setTemplateIdentifier']);
         $this->assertSame(['custom1', 1], $this->mail['setFromByScope']);
-        $this->assertSame(['a@test.com', 'Jelena'], $this->mail['addTo']);
+        $this->assertSame(['a@test.com', 'Jane'], $this->mail['addTo']);
         $this->assertSame(['CommerceKings_AbandonedCart: reminder sent for cart 42'], $this->logs);
     }
 

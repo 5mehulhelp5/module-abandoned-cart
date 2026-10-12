@@ -47,7 +47,7 @@ class OptoutTest extends TestCase
         $controller = $this->controller('good');
         $this->optOut->expects($this->once())->method('withdraw')->with(42)->willReturn(true);
         $this->assertInstanceOf(Page::class, $controller->execute());
-        $this->assertSame(['title' => 'Odjava od podsetnika o korpi', 'robots' => 'NOINDEX,NOFOLLOW'], $this->page);
+        $this->assertSame(['title' => 'Unsubscribe from cart reminders', 'robots' => 'NOINDEX,NOFOLLOW'], $this->page);
         $this->assertNull($this->path);
     }
 

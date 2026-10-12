@@ -1,9 +1,17 @@
 # Abandoned cart reminder
 
 Install in a Magento project with `composer require commercekings/module-abandoned-cart:^0.1` after the first
-release is published. Enable the Magento module(s) listed below and run `bin/magento setup:upgrade`.
-For development/tests use source checkouts (`--prefer-source`); release archives omit `Test/`.
+release is published. Then enable its modules:
 
+```sh
+bin/magento module:enable CommerceKings_Consent CommerceKings_AbandonedCart
+bin/magento setup:upgrade
+bin/magento cache:clean
+```
+
+Use the shop's normal DI compilation and static-content deployment process for production.
+For development/tests use source checkouts (`--prefer-source`); release archives omit `Test/`.
+See [compatibility and verification](COMPATIBILITY.md) and [changes](CHANGELOG.md).
 
 Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts, a RabbitMQ consumer sends the emails.
 
@@ -48,8 +56,8 @@ Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_cons
 
 Anyone can create a guest cart through Magento's REST API, fake the consent cookie and enter any recipient – so the reminder must not be usable for spam or phishing from the shop's domain:
 
-- **No visitor text in the email.** Custom options are shown only for the store's predefined choices (`drop_down`, `radio`, `checkbox`, `multiple`); free text ("Naslov na korici"), file names and other types are left out. Product and configurable option names come from the catalog.
-- **Greeting** uses only the first word of the name, letters/`-`/`'` only, max 20 characters – otherwise just "Zdravo".
+- **No visitor text in the email.** Custom options are shown only for the store's predefined choices (`drop_down`, `radio`, `checkbox`, `multiple`); free text (such as an engraved message), file names and other types are left out. Product and configurable option names come from the catalog.
+- **Greeting** uses only the first word of the name, letters/`-`/`'` only, max 20 characters. The default template uses "Hi %name," when a valid name is available and omits the greeting otherwise.
 - **One reminder per address per 7 days**, across all carts, kept in `ck_abandoned_cart_recipient` (not on the cart – it survives login merges, cart cleanup, email changes and opt-outs). The finder skips the address (looked up in PHP in one query per page – the key never goes into SQL or query logs; it reads page by page, so carts waiting out a cooldown don't hold up the batch, and queues one cart per address per run); the consumer claims the address atomically before sending (`INSERT … ON DUPLICATE KEY UPDATE`, only one of two parallel consumers wins), releases it if sending fails, and logs "address reminded recently" otherwise.
 - Not done (yet): a per-IP rate limit on the guest email endpoint.
 - The recorded consent shows what a browser sent; a scripted client can fake it, like with any cookie banner.
@@ -70,7 +78,7 @@ The opt-out link never expires; the restore link works 7 days. Both links are `?
 
 **Opt-out** `/cartreminder/optout` – one click (no confirm button):
 
-- valid link → consent withdrawn, page "Odjava od podsetnika o korpi" (`noindex`) with the confirmation;
+- valid link → consent withdrawn, page "Unsubscribe from cart reminders" (`noindex`) with the confirmation, translated per store locale;
 - already opted out (cart has no consent), invalid signature, cart cleaned up → homepage;
 - opened in the same browser → `js/optout-banner.js` switches only the choice mapped to `cart_reminder` off in the banner, other choices stay; on another device the cookie there is untouched.
 

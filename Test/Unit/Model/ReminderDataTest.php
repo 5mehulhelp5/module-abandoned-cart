@@ -30,7 +30,7 @@ class ReminderDataTest extends TestCase
         $configuration = $this->createStub(ProductConfiguration::class);
         $configuration->method('getCustomOptions')->willReturn($customOptions);
         $price = $this->createStub(PriceHelper::class);
-        $price->method('currency')->willReturnCallback(fn ($amount) => number_format((float)$amount, 2, ',', '.') . ' RSD');
+        $price->method('currency')->willReturnCallback(fn ($amount) => '€' . number_format((float)$amount, 2, '.', ','));
         $url = $this->createStub(UrlInterface::class);
         $url->method('getUrl')->willReturnCallback(function ($route, $params = []) {
             $this->urls[$route] = $params;
@@ -46,7 +46,7 @@ class ReminderDataTest extends TestCase
         return new ReminderData($image, $configuration, $price, $url, $escaper, $optOut, $signature);
     }
 
-    private function quote(array $items = [], ?string $firstname = 'Jelena', ?string $billingName = null): Quote
+    private function quote(array $items = [], ?string $firstname = 'Jane', ?string $billingName = null): Quote
     {
         $billing = $this->mockWith(Address::class, ['getFirstname' => $billingName]);
         return $this->mockWith(Quote::class, [
@@ -77,30 +77,30 @@ class ReminderDataTest extends TestCase
     public function testTotalAndGreeting(): void
     {
         $vars = $this->data()->build($this->quote());
-        $this->assertSame('2.400,00 RSD', $vars['grand_total']);
-        $this->assertSame('Jelena', $vars['customer_name']);
+        $this->assertSame('€2,400.00', $vars['grand_total']);
+        $this->assertSame('Jane', $vars['customer_name']);
     }
 
     public function testGreetingFallsBackToBillingNameThenEmpty(): void
     {
-        $this->assertSame('Ana', $this->data()->build($this->quote([], null, 'Ana'))['customer_name']);
+        $this->assertSame('Alice', $this->data()->build($this->quote([], null, 'Alice'))['customer_name']);
         $this->assertSame('', $this->data()->build($this->quote([], null, null))['customer_name']);
     }
 
     public function testItemsWithOptionsQtyPriceAndEscaping(): void
     {
         $html = $this->data([
-            ['label' => 'Broj strana', 'value' => '150', 'option_type' => 'radio'],
-            ['label' => 'Umetci', 'value' => ['Kalendar', 'Beleške'], 'option_type' => 'multiple'],
-            ['label' => 'Prazno', 'value' => '', 'option_type' => 'drop_down'],
-        ])->build($this->quote([$this->item('Moji recepti <script>x</script>')]))['items_html'];
+            ['label' => 'Page count', 'value' => '150', 'option_type' => 'radio'],
+            ['label' => 'Inserts', 'value' => ['Calendar', 'Notes'], 'option_type' => 'multiple'],
+            ['label' => 'Empty', 'value' => '', 'option_type' => 'drop_down'],
+        ])->build($this->quote([$this->item('Recipe book <script>x</script>')]))['items_html'];
 
-        $this->assertStringContainsString('Moji recepti &lt;script&gt;x&lt;/script&gt;', $html);
+        $this->assertStringContainsString('Recipe book &lt;script&gt;x&lt;/script&gt;', $html);
         $this->assertStringNotContainsString('<script>', $html);
-        $this->assertStringContainsString('<br>Broj strana: 150', $html);
-        $this->assertStringContainsString('<br>Umetci: Kalendar, Beleške', $html);
-        $this->assertStringNotContainsString('Prazno', $html, 'empty options are left out');
-        $this->assertStringContainsString('1 × 2.400,00 RSD', $html);
+        $this->assertStringContainsString('<br>Page count: 150', $html);
+        $this->assertStringContainsString('<br>Inserts: Calendar, Notes', $html);
+        $this->assertStringNotContainsString('Empty', $html, 'empty options are left out');
+        $this->assertStringContainsString('1 × €2,400.00', $html);
         $this->assertStringContainsString('src="https://shop/img.jpg"', $html);
     }
 
@@ -108,18 +108,18 @@ class ReminderDataTest extends TestCase
     {
         // anyone can create a cart with any text and any recipient - only the store's own choices are shown
         $html = $this->data([
-            ['label' => 'Naslov na korici', 'value' => 'Vas nalog je blokiran, idite na evil.example', 'option_type' => 'field'],
-            ['label' => 'Napomena', 'value' => 'phishing text', 'option_type' => 'area'],
+            ['label' => 'Engraved message', 'value' => 'Your account is blocked, visit evil.example', 'option_type' => 'field'],
+            ['label' => 'Comment', 'value' => 'phishing text', 'option_type' => 'area'],
             ['label' => 'Logo', 'value' => 'evil.example.png', 'option_type' => 'file'],
-            ['label' => 'Nepoznato', 'value' => 'x', 'option_type' => null],
-            ['label' => 'Broj strana', 'value' => '150', 'option_type' => 'radio'],
-            ['label' => 'Korice', 'value' => 'Plava', 'option_type' => 'checkbox'],
-        ])->build($this->quote([$this->item('Planer')]))['items_html'];
-        foreach (['Naslov na korici', 'evil.example', 'Napomena', 'phishing', 'Logo', 'Nepoznato'] as $text) {
+            ['label' => 'Unknown', 'value' => 'x', 'option_type' => null],
+            ['label' => 'Page count', 'value' => '150', 'option_type' => 'radio'],
+            ['label' => 'Cover', 'value' => 'Blue', 'option_type' => 'checkbox'],
+        ])->build($this->quote([$this->item('Notebook')]))['items_html'];
+        foreach (['Engraved message', 'evil.example', 'Comment', 'phishing', 'Logo', 'Unknown'] as $text) {
             $this->assertStringNotContainsString($text, $html);
         }
-        $this->assertStringContainsString('Broj strana: 150', $html);
-        $this->assertStringContainsString('Korice: Plava', $html);
+        $this->assertStringContainsString('Page count: 150', $html);
+        $this->assertStringContainsString('Cover: Blue', $html);
     }
 
     /** @dataProvider greetings */
@@ -132,16 +132,16 @@ class ReminderDataTest extends TestCase
     public static function greetings(): array
     {
         return [
-            'plain' => ['Jelena', 'Jelena'],
-            'first word only' => ['Jelena Marija Test', 'Jelena'],
-            'Serbian letters' => ['Đorđe', 'Đorđe'],
+            'plain' => ['Jane', 'Jane'],
+            'first word only' => ['Jane Mary Test', 'Jane'],
+            'Unicode letters' => ['Zoë', 'Zoë'],
             'hyphen, apostrophe' => ["Anne-Marie", 'Anne-Marie'],
-            'sentence' => ['Vas nalog je blokiran', 'Vas'],
+            'sentence' => ['Your account is blocked', 'Your'],
             'link' => ['evil.example', ''],
             'url' => ['https://evil.example', ''],
-            'digits' => ['Jelena123', ''],
+            'digits' => ['Jane123', ''],
             'too long' => [str_repeat('a', 21), ''],
-            'markup' => ['<b>Jelena</b>', ''],
+            'markup' => ['<b>Jane</b>', ''],
             'spaces only' => ['   ', ''],
         ];
     }
