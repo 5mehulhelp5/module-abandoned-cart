@@ -1,0 +1,25 @@
+{
+    "quote": {
+        "column": {
+            "ck_abandoned_queued_at": true,
+            "ck_abandoned_reminded_at": true,
+            "ck_abandoned_consent_id": true,
+            "ck_abandoned_browser_hash": true
+        },
+        "index": {
+            "QUOTE_CK_ABANDONED_CONSENT_ID": true
+        }
+    },
+    "ck_abandoned_cart_recipient": {
+        "column": {
+            "recipient_hash": true,
+            "reminded_at": true
+        },
+        "index": {
+            "CK_ABANDONED_CART_RECIPIENT_REMINDED_AT": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    }
+}

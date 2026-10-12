@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <preference for="CommerceKings\AbandonedCart\Api\GuestEmailCaptureInterface" type="CommerceKings\AbandonedCart\Model\GuestEmailCapture"/>
+    <!-- the consent purpose this feature uses (CommerceKings_Consent) - any consent source can grant it -->
+    <type name="CommerceKings\Consent\Model\PurposePool">
+        <arguments>
+            <argument name="purposes" xsi:type="array">
+                <item name="cart_reminder" xsi:type="array">
+                    <item name="label" xsi:type="string">Abandoned cart reminder</item>
+                    <!-- raise when what the visitor agrees to changes: older consents stop counting -->
+                    <item name="terms_revision" xsi:type="string">1</item>
+                </item>
+            </argument>
+        </arguments>
+    </type>
+</config>

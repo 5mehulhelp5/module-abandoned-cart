@@ -1,0 +1,32 @@
+{
+    "name": "commercekings/module-abandoned-cart",
+    "description": "Privacy-first abandoned cart reminder for Magento 2: consent per purpose (commercekings/module-consent), RabbitMQ queue, signed links, opt-out.",
+    "type": "magento2-module",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "CommerceKings"
+        }
+    ],
+    "require": {
+        "php": "~8.1.0||~8.2.0||~8.3.0",
+        "magento/framework": "*",
+        "magento/module-quote": "*",
+        "magento/module-checkout": "*",
+        "magento/module-message-queue": "*",
+        "commercekings/module-consent": "^0.1"
+    },
+    "autoload": {
+        "files": [
+            "registration.php"
+        ],
+        "psr-4": {
+            "CommerceKings\\AbandonedCart\\": ""
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "0.1.x-dev"
+        }
+    }
+}

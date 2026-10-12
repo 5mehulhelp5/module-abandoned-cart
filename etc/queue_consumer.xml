@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework-message-queue:etc/consumer.xsd">
+    <consumer name="commerceKingsAbandonedCartRemind" queue="commercekings.abandoned_cart.remind"
+              handler="CommerceKings\AbandonedCart\Model\Consumer::process"/>
+</config>

@@ -1,0 +1,78 @@
+<?php
+declare(strict_types=1);
+
+namespace CommerceKings\AbandonedCart\Test\Unit\Controller;
+
+use CommerceKings\AbandonedCart\Controller\Consent\Capture;
+use CommerceKings\AbandonedCart\Model\ConsentWithdrawal;
+use CommerceKings\AbandonedCart\Model\CustomerConsentCapture;
+use CommerceKings\AbandonedCart\Observer\ClearCartsOnConsentWithdrawn;
+use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
+use Magento\Checkout\Model\Session as CheckoutSession;
+use Magento\Customer\Model\Session as CustomerSession;
+use Magento\Framework\Controller\Result\Json;
+use Magento\Framework\Controller\Result\JsonFactory;
+use Magento\Framework\Event;
+use Magento\Framework\Event\Observer;
+use PHPUnit\Framework\TestCase;
+
+class ConsentEndpointsTest extends TestCase
+{
+    use DbTestTrait;
+
+    private array $json = [];
+
+    private function jsonFactory(): JsonFactory
+    {
+        $json = $this->createMock(Json::class);
+        $json->method('setData')->willReturnCallback(function ($d) use ($json) { $this->json = $d; return $json; });
+        $factory = $this->createMock(JsonFactory::class);
+        $factory->method('create')->willReturn($json);
+        return $factory;
+    }
+
+    private function checkout(?int $quoteId): CheckoutSession
+    {
+        return $this->mockWith(CheckoutSession::class, ['getQuoteId' => $quoteId]);
+    }
+
+    private function withdrawn(string $purpose, ConsentWithdrawal $withdrawal): void
+    {
+        (new ClearCartsOnConsentWithdrawn($withdrawal))->execute(new Observer(['event' => new Event([
+            'purpose' => $purpose, 'browser_hash' => 'bh', 'website_id' => 1, 'consent_ids' => ['c1', 'c2'], 'via' => 'banner',
+        ])]));
+    }
+
+    public function testWithdrawalClearsEveryCartCapturedWithTheWithdrawnConsents(): void
+    {
+        // also the abandoned cart of an expired session - found by its consent id, not the session
+        $withdrawal = $this->createMock(ConsentWithdrawal::class);
+        $withdrawal->expects($this->once())->method('forConsents')->with(['c1', 'c2']);
+        $this->withdrawn('cart_reminder', $withdrawal);
+    }
+
+    public function testOtherPurposesAreNotOurs(): void
+    {
+        $withdrawal = $this->createMock(ConsentWithdrawal::class);
+        $withdrawal->expects($this->never())->method('forConsents');
+        $this->withdrawn('newsletter', $withdrawal);
+    }
+
+    public function testCaptureForLoggedInCustomerUsesSessionIds(): void
+    {
+        $customer = $this->mockWith(CustomerSession::class, ['isLoggedIn' => true, 'getCustomerId' => 15]);
+        $capture = $this->createMock(CustomerConsentCapture::class);
+        $capture->expects($this->once())->method('execute')->with(42, 15)->willReturn(true);
+        (new Capture($this->jsonFactory(), $this->checkout(42), $customer, $capture))->execute();
+        $this->assertSame(['stored' => true], $this->json);
+    }
+
+    public function testCaptureIgnoresGuests(): void
+    {
+        $customer = $this->mockWith(CustomerSession::class, ['isLoggedIn' => false, 'getCustomerId' => null]);
+        $capture = $this->createMock(CustomerConsentCapture::class);
+        $capture->expects($this->never())->method('execute');
+        (new Capture($this->jsonFactory(), $this->checkout(42), $customer, $capture))->execute();
+        $this->assertSame(['stored' => false], $this->json);
+    }
+}

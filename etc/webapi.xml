@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Webapi:etc/webapi.xsd">
+    <!-- guest checkout: store the email typed in the email field on the cart. Authorised like
+         Magento's own guest-cart APIs: by the masked cart id. -->
+    <route url="/V1/guest-carts/:cartId/ck-abandoned-email" method="POST">
+        <service class="CommerceKings\AbandonedCart\Api\GuestEmailCaptureInterface" method="capture"/>
+        <resources>
+            <resource ref="anonymous"/>
+        </resources>
+    </route>
+</routes>

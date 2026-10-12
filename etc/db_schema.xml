@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!-- Abandoned cart reminder state, kept on Magento's own cart (quote) table -->
+<schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:Setup/Declaration/Schema/etc/schema.xsd">
+    <table name="quote">
+        <column xsi:type="timestamp" name="ck_abandoned_queued_at" nullable="true" comment="CK abandoned cart: reminder queued"/>
+        <column xsi:type="timestamp" name="ck_abandoned_reminded_at" nullable="true" comment="CK abandoned cart: reminder sent"/>
+        <!-- the consent (CommerceKings_Consent, purpose cart_reminder) the email was captured with - the evidence lives there -->
+        <column xsi:type="varchar" name="ck_abandoned_consent_id" nullable="true" length="32" comment="CK abandoned cart: consent id"/>
+        <!-- browser id hash (CommerceKings_Consent): the restore link only works in this browser -->
+        <column xsi:type="varchar" name="ck_abandoned_browser_hash" nullable="true" length="64" comment="CK abandoned cart: sha256 of the browser id"/>
+        <index referenceId="QUOTE_CK_ABANDONED_CONSENT_ID" indexType="btree">
+            <column name="ck_abandoned_consent_id"/>
+        </index>
+    </table>
+    <!-- who got a reminder recently (sha256 of the address) - kept apart from the carts, which Magento
+         deletes (login merge, old-cart cleanup); rows older than the 7-day cooldown are cleaned daily -->
+    <table name="ck_abandoned_cart_recipient" resource="default" engine="innodb" comment="CK abandoned cart: recent reminder recipients">
+        <column xsi:type="varchar" name="recipient_hash" nullable="false" length="64" comment="sha256 of the lowercased address"/>
+        <column xsi:type="timestamp" name="reminded_at" nullable="false" default="CURRENT_TIMESTAMP" comment="Last reminder sent"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="recipient_hash"/>
+        </constraint>
+        <index referenceId="CK_ABANDONED_CART_RECIPIENT_REMINDED_AT" indexType="btree">
+            <column name="reminded_at"/>
+        </index>
+    </table>
+</schema>

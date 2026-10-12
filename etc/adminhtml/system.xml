@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <tab id="commercekings" translate="label" sortOrder="900" class="commercekings-tab">
+            <label>CommerceKings</label>
+        </tab>
+        <section id="commercekings_abandoned_cart" translate="label" sortOrder="40" showInDefault="1" showInWebsite="1" showInStore="1">
+            <label>Abandoned Cart</label>
+            <tab>commercekings</tab>
+            <resource>CommerceKings_AbandonedCart::config</resource>
+            <group id="general" translate="label comment" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
+                <label>Cart reminder</label>
+                <comment><![CDATA[One reminder email for carts left untouched - only with consent for purpose cart_reminder (Stores > Configuration > CommerceKings > Consent; guests: email typed in checkout, customers: account email). Cron finds the carts, a RabbitMQ consumer (commerceKingsAbandonedCartRemind) sends the emails. See the module README.md.]]></comment>
+                <field id="enabled" translate="label" type="select" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Enabled</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+                <field id="delay_minutes" translate="label comment" type="text" sortOrder="20" showInDefault="1">
+                    <label>Send after (minutes untouched)</label>
+                    <comment>180 = 3 hours. Use 1-2 minutes for testing.</comment>
+                    <validate>validate-digits validate-greater-than-zero</validate>
+                </field>
+                <field id="max_age_days" translate="label comment" type="text" sortOrder="30" showInDefault="1">
+                    <label>Ignore carts older than (days)</label>
+                    <validate>validate-digits validate-greater-than-zero</validate>
+                </field>
+                <field id="template" translate="label" type="select" sortOrder="40" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Email template</label>
+                    <source_model>Magento\Config\Model\Config\Source\Email\Template</source_model>
+                </field>
+                <field id="identity" translate="label" type="select" sortOrder="50" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Sender</label>
+                    <source_model>Magento\Config\Model\Config\Source\Email\Identity</source_model>
+                </field>
+            </group>
+        </section>
+    </system>
+</config>

@@ -1,0 +1,39 @@
+<!--@subject {{trans "Your cart is waiting"}} @-->
+<!--@vars {
+"var customer_name":"Customer first name",
+"var items_html|raw":"Cart items",
+"var grand_total":"Cart total",
+"var restore_url":"Restore cart link",
+"var store_url":"Store URL",
+"var contact_url":"Contact page URL",
+"var optout_url":"Opt-out link"
+} @-->
+<!--
+Neutral default. Make your own: Marketing > Email Templates > Add New Template > Load "Abandoned Cart
+Reminder", change text and design, then select it in Stores > Configuration > CommerceKings > Abandoned
+Cart > Email template. Variables above; items_html is ready-made HTML rows.
+-->
+{{template config_path="design/email/header_template"}}
+
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width: 100%; font-family: Arial, Helvetica, sans-serif; color: #333333;">
+<tr><td>
+<h1 style="margin: 0 0 20px; font-size: 26px; line-height: 32px; color: #333333;">{{trans "Your cart is waiting"}}</h1>
+<p style="margin: 0 0 20px; font-size: 15px; line-height: 23px;">
+    {{if customer_name}}{{trans "Hi %name," name=$customer_name}}<br>{{/if}}
+    {{trans "We saved your cart. Pick up where you left off whenever you are ready."}}
+</p>
+{{var items_html|raw}}
+<p style="margin: 12px 0 24px; font-size: 15px; font-weight: bold; text-align: right;">{{trans "Total: %total" total=$grand_total}}</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+    <tr>
+        <td align="center" bgcolor="#333333" style="background-color: #333333; border-radius: 4px;">
+            <a href="{{var restore_url}}" target="_blank" style="display: inline-block; padding: 14px 28px; color: #ffffff; font-size: 15px; font-weight: bold; text-decoration: none;">{{trans "Continue shopping"}}</a>
+        </td>
+    </tr>
+</table>
+<p style="margin: 24px 0 0; font-size: 13px; line-height: 20px; color: #666666;">{{trans "Questions? <a href=\"%url\" style=\"color: #333333;\">Contact us</a>." url=$contact_url|raw}}</p>
+<p style="margin: 12px 0 0; font-size: 12px; line-height: 18px; color: #999999;">{{trans "You get this one-time reminder because you allowed it in our cookie settings. Don't want it? <a href=\"%url\" style=\"color: #999999;\">Unsubscribe</a>." url=$optout_url|raw}}</p>
+</td></tr>
+</table>
+
+{{template config_path="design/email/footer_template" cart_reminder_email="1"}}
