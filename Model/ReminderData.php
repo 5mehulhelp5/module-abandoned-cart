@@ -8,9 +8,9 @@ use Magento\Catalog\Helper\Product\Configuration as ProductConfiguration;
 use Magento\Framework\Escaper;
 use Magento\Framework\Pricing\Helper\Data as PriceHelper;
 use Magento\Framework\UrlInterface;
-use Magento\Quote\Api\Data\CartInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\Quote\Item;
+use Magento\Quote\Model\Quote\Item\Option;
 
 /**
  * Template variables for the reminder email: greeting name, the cart items (picture, name,
@@ -40,8 +40,7 @@ class ReminderData
     ) {
     }
 
-    /** @param Quote $quote */
-    public function build(CartInterface $quote): array
+    public function build(Quote $quote): array
     {
         $this->url->setScope($quote->getStoreId());
         return [
@@ -67,13 +66,14 @@ class ReminderData
         /** @var Item $item */
         foreach ($quote->getAllVisibleItems() as $item) {
             $product = $item->getProduct();
-            $child = $item->getOptionByCode('simple_product')?->getProduct();
+            $simpleOption = $item->getOptionByCode('simple_product');
+            $child = $simpleOption instanceof Option ? $simpleOption->getProduct() : null;
             $imageProduct = ($child && $child->getThumbnail() && $child->getThumbnail() !== 'no_selection') ? $child : $product;
             $image = $this->imageHelper->init($imageProduct, 'cart_page_product_thumbnail')->getUrl();
 
             // configurable choices (e.g. the cover) + custom options (pages, inserts, title)
             $options = $item->getProductType() === 'configurable'
-                ? (array)$product->getTypeInstance()->getSelectedAttributesInfo($product)
+                ? (array)($product->getTypeInstance()->getOrderOptions($product)['attributes_info'] ?? [])
                 : [];
             $options = array_merge($options, array_filter(
                 $this->productConfiguration->getCustomOptions($item),

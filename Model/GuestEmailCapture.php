@@ -9,6 +9,7 @@ use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Quote\Model\QuoteIdMaskFactory;
+use Magento\Quote\Model\ResourceModel\Quote\QuoteIdMask as QuoteIdMaskResource;
 
 /**
  * Guest checkout email -> cart, only with a valid consent for purpose "cart_reminder"
@@ -22,6 +23,7 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
 {
     public function __construct(
         private readonly QuoteIdMaskFactory $quoteIdMaskFactory,
+        private readonly QuoteIdMaskResource $quoteIdMaskResource,
         private readonly ResourceConnection $resource,
         private readonly ConsentInterface $consent,
         private readonly ConsentGuardInterface $guard,
@@ -33,7 +35,9 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
 
     public function capture(string $cartId, string $email): bool
     {
-        $quoteId = (int)$this->quoteIdMaskFactory->create()->load($cartId, 'masked_id')->getQuoteId();
+        $mask = $this->quoteIdMaskFactory->create();
+        $this->quoteIdMaskResource->load($mask, $cartId, 'masked_id');
+        $quoteId = (int)$mask->getQuoteId();
         if (!$quoteId) {
             return false;
         }

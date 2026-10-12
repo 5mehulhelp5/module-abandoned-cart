@@ -18,6 +18,7 @@ use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\Cookie\PublicCookieMetadata;
 use Magento\Framework\Stdlib\CookieManagerInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
+use Magento\Quote\Api\Data\CartInterface;
 use Magento\Quote\Model\Quote;
 use PHPUnit\Framework\TestCase;
 
@@ -42,7 +43,8 @@ class RestoreTest extends TestCase
         ?array $current = null,
         int $loggedInCustomer = 0,
         string $token = 'good',
-        bool $cartExists = true
+        bool $cartExists = true,
+        bool $quoteModel = true
     ): Quote {
         $cart += ['id' => 42, 'active' => 1, 'items' => 2, 'customer' => null, 'browser' => 'bh-owner',
             'reminded' => gmdate('Y-m-d H:i:s', time() - 3600)];
@@ -63,11 +65,11 @@ class RestoreTest extends TestCase
         $browserId = $this->createStub(BrowserIdentityInterface::class);
         $browserId->method('hash')->willReturn((string)$browserHash);
         $repo = $this->createStub(CartRepositoryInterface::class);
-        $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists) {
+        $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists, $quoteModel) {
             if (!$cartExists) {
                 throw new NoSuchEntityException();
             }
-            return $quote;
+            return $quoteModel ? $quote : $this->createStub(CartInterface::class);
         });
         $repo->method('save')->willReturnCallback(function ($q) { $this->saved[] = $q; });
 
@@ -113,6 +115,16 @@ class RestoreTest extends TestCase
     {
         $this->restore([], 'bh-owner', null, 0, 'good', false);
         $this->assertSame('', $this->path);
+    }
+
+    public function testUnsupportedCartRepresentationGoesHomeWithoutRestoring(): void
+    {
+        $this->restore(quoteModel: false);
+        $this->assertSame('', $this->path);
+        $this->assertSame([], $this->messages);
+        $this->assertSame([], $this->replaced);
+        $this->assertSame([], $this->saved);
+        $this->assertSame([], $this->cookies);
     }
 
     /** @dataProvider otherBrowsers */

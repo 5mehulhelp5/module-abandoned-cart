@@ -13,6 +13,7 @@ use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Framework\Mail\TransportInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\Data\CartInterface;
+use Magento\Quote\Model\Quote;
 use Magento\Store\Model\App\Emulation;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -36,6 +37,7 @@ class ConsumerTest extends TestCase
     private bool $recentRecipient = false;
     private bool $recipientClaim = true;
     private bool $recipientClaimFails = false;
+    private bool $quoteModel = true;
 
     private function consumer(array|false $row = self::ROW, bool $enabled = true, bool $withdrawn = false): Consumer
     {
@@ -49,7 +51,7 @@ class ConsumerTest extends TestCase
         $logger = $this->createStub(LoggerInterface::class);
         $logger->method('info')->willReturnCallback(function ($msg) { $this->logs[] = $msg; });
         $repo = $this->createStub(CartRepositoryInterface::class);
-        $repo->method('get')->willReturn($this->createStub(CartInterface::class));
+        $repo->method('get')->willReturnCallback(fn () => $this->createStub($this->quoteModel ? Quote::class : CartInterface::class));
         $data = $this->createStub(ReminderData::class);
         $data->method('build')->willReturn(['customer_name' => 'Jane', 'items_html' => '']);
         $this->emulation = $this->createMock(Emulation::class);
@@ -152,6 +154,25 @@ class ConsumerTest extends TestCase
         $this->recipients->expects($this->once())->method('release')->with('a@test.com');
         $this->expectException(\RuntimeException::class);
         $consumer->process('42');
+    }
+
+    public function testUnsupportedCartRepresentationReleasesBothClaimsWithoutSending(): void
+    {
+        $consumer = $this->consumer();
+        $this->quoteModel = false;
+        $this->emulation->expects($this->once())->method('stopEnvironmentEmulation');
+        $this->recipients->expects($this->once())->method('release')->with('a@test.com');
+        try {
+            $consumer->process('42');
+            $this->fail('unsupported cart must not be sent');
+        } catch (\UnexpectedValueException $e) {
+            $this->assertSame('Cart repository must return a Magento quote for a reminder.', $e->getMessage());
+        }
+        $this->assertSame([], $this->mail);
+        $this->assertCount(2, $this->updates);
+        $this->assertNull($this->updates[1]['data']['ck_abandoned_reminded_at']);
+        $this->assertNull($this->updates[1]['data']['ck_abandoned_queued_at']);
+        $this->assertSame(42, $this->updates[1]['where']['entity_id = ?']);
     }
 
     public function testAddressIsClaimedBeforeSending(): void

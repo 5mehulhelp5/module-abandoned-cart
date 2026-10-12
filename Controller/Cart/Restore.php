@@ -16,6 +16,7 @@ use Magento\Framework\Message\ManagerInterface;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\CookieManagerInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
+use Magento\Quote\Model\Quote;
 
 /**
  * /cartreminder/cart/restore?q={cart id}&t={signature} - the "continue shopping" link in the reminder.
@@ -53,7 +54,7 @@ class Restore implements HttpGetActionInterface
         } catch (\Exception) {
             $quote = null;
         }
-        if (!$quote || !$this->signature->isValid('restore', $quoteId, (string)$this->request->getParam('t'))) {
+        if (!$quote instanceof Quote || !$this->signature->isValid('restore', $quoteId, (string)$this->request->getParam('t'))) {
             return $redirect->setPath('');
         }
         // only the browser that gave the consent - guests and customers alike (checked first, so a

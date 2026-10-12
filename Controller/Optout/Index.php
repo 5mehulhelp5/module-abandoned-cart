@@ -36,7 +36,7 @@ class Index implements HttpGetActionInterface
         }
 
         $page = $this->pageFactory->create();
-        $page->getConfig()->getTitle()->set(__('Unsubscribe from cart reminders'));
+        $page->getConfig()->getTitle()->set((string)__('Unsubscribe from cart reminders'));
         $page->getConfig()->setRobots('NOINDEX,NOFOLLOW');
         return $page;
     }

@@ -9,6 +9,7 @@ use Magento\Framework\App\Area;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Quote\Api\CartRepositoryInterface;
+use Magento\Quote\Model\Quote;
 use Magento\Store\Model\App\Emulation;
 use Psr\Log\LoggerInterface;
 
@@ -102,6 +103,9 @@ class Consumer
             $this->emulation->startEnvironmentEmulation($storeId, Area::AREA_FRONTEND, true);
             try {
                 $quote = $this->cartRepository->get($id);
+                if (!$quote instanceof Quote) {
+                    throw new \UnexpectedValueException('Cart repository must return a Magento quote for a reminder.');
+                }
                 $vars = $this->reminderData->build($quote);
                 $this->transportBuilder
                     ->setTemplateIdentifier($this->config->getTemplate($storeId))

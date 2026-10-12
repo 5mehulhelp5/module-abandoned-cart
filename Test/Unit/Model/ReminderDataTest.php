@@ -10,12 +10,14 @@ use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use Magento\Catalog\Helper\Image as ImageHelper;
 use Magento\Catalog\Helper\Product\Configuration as ProductConfiguration;
 use Magento\Catalog\Model\Product;
+use Magento\Catalog\Model\Product\Type\AbstractType;
 use Magento\Framework\Escaper;
 use Magento\Framework\Pricing\Helper\Data as PriceHelper;
 use Magento\Framework\UrlInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\Quote\Address;
 use Magento\Quote\Model\Quote\Item;
+use Magento\Quote\Model\Quote\Item\Option;
 use PHPUnit\Framework\TestCase;
 
 class ReminderDataTest extends TestCase
@@ -23,10 +25,15 @@ class ReminderDataTest extends TestCase
     use DbTestTrait;
 
     private array $urls = [];
+    private array $imageProducts = [];
 
     private function data(array $customOptions = []): ReminderData
     {
         $image = $this->mockWith(ImageHelper::class, ['init' => self::$SELF, 'getUrl' => 'https://shop/img.jpg']);
+        $image->method('init')->willReturnCallback(function ($product) use ($image) {
+            $this->imageProducts[] = $product;
+            return $image;
+        });
         $configuration = $this->createStub(ProductConfiguration::class);
         $configuration->method('getCustomOptions')->willReturn($customOptions);
         $price = $this->createStub(PriceHelper::class);
@@ -120,6 +127,30 @@ class ReminderDataTest extends TestCase
         }
         $this->assertStringContainsString('Page count: 150', $html);
         $this->assertStringContainsString('Cover: Blue', $html);
+    }
+
+    public function testConfigurableChoicesAndChildImageAreKeptWithoutVisitorText(): void
+    {
+        $type = $this->createStub(AbstractType::class);
+        $type->method('getOrderOptions')->willReturn([
+            'attributes_info' => [['label' => 'Color', 'value' => 'Blue & white']],
+            'options' => [['label' => 'Message', 'value' => 'evil.example', 'option_type' => 'field']],
+        ]);
+        $product = $this->createStub(Product::class);
+        $product->method('getTypeInstance')->willReturn($type);
+        $child = $this->mockWith(Product::class, ['getThumbnail' => 'child.jpg']);
+        $option = $this->createStub(Option::class);
+        $option->method('getProduct')->willReturn($child);
+        $item = $this->mockWith(Item::class, [
+            'getProduct' => $product, 'getOptionByCode' => $option, 'getProductType' => 'configurable',
+            'getName' => 'Configurable product', 'getQty' => 1, 'getPrice' => 2400.0,
+        ]);
+
+        $html = $this->data()->build($this->quote([$item]))['items_html'];
+        $this->assertSame([$child], $this->imageProducts);
+        $this->assertStringContainsString('Color: Blue &amp; white', $html);
+        $this->assertStringNotContainsString('evil.example', $html);
+        $this->assertStringNotContainsString('Message', $html);
     }
 
     /** @dataProvider greetings */

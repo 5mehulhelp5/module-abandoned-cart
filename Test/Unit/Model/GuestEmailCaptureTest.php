@@ -11,6 +11,7 @@ use CommerceKings\Consent\Api\BrowserIdentityInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use Magento\Quote\Model\QuoteIdMask;
 use Magento\Quote\Model\QuoteIdMaskFactory;
+use Magento\Quote\Model\ResourceModel\Quote\QuoteIdMask as QuoteIdMaskResource;
 use PHPUnit\Framework\TestCase;
 
 // Shared fixtures use scenario-specific expectations; other outcomes are asserted from captured data.
@@ -21,12 +22,19 @@ class GuestEmailCaptureTest extends TestCase
 
     private ConsentWithdrawal $withdrawal;
     private ?string $askedPurpose = null;
+    private array $maskLoads = [];
 
     private function capture(int $quoteId = 42, bool $consent = true, bool $enabled = true): GuestEmailCapture
     {
-        $mask = $this->mockWith(QuoteIdMask::class, ['load' => self::$SELF, 'getQuoteId' => $quoteId]);
+        $mask = $this->mockWith(QuoteIdMask::class, ['getQuoteId' => $quoteId]);
         $maskFactory = $this->createStub(QuoteIdMaskFactory::class);
         $maskFactory->method('create')->willReturn($mask);
+        $maskResource = $this->createStub(QuoteIdMaskResource::class);
+        $maskResource->method('load')->willReturnCallback(function ($model, $value, $field) use ($mask, $maskResource) {
+            $this->assertSame($mask, $model);
+            $this->maskLoads[] = [$value, $field];
+            return $maskResource;
+        });
         $consentApi = $this->createStub(ConsentInterface::class);
         $consentApi->method('getCurrent')->willReturnCallback(function ($purpose) use ($consent) {
             $this->askedPurpose = $purpose;
@@ -38,18 +46,20 @@ class GuestEmailCaptureTest extends TestCase
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturn($enabled);
         $this->withdrawal = $this->createMock(ConsentWithdrawal::class);
-        return new GuestEmailCapture($maskFactory, $this->resource(), $consentApi, $this->guard(), $browser, $this->withdrawal, $config);
+        return new GuestEmailCapture($maskFactory, $maskResource, $this->resource(), $consentApi, $this->guard(), $browser, $this->withdrawal, $config);
     }
 
     public function testUnknownCartKey(): void
     {
         $this->assertFalse($this->capture(0)->capture('nope', 'a@test.com'));
+        $this->assertSame([['nope', 'masked_id']], $this->maskLoads);
         $this->assertSame([], $this->updates);
     }
 
     public function testStoresEmailWithTheConsentIdForTheCartReminderPurpose(): void
     {
         $this->assertTrue($this->capture()->capture('masked', '  a@test.com '));
+        $this->assertSame([['masked', 'masked_id']], $this->maskLoads);
         $this->assertSame('cart_reminder', $this->askedPurpose);
         $this->assertSame([
             'customer_email' => 'a@test.com',
