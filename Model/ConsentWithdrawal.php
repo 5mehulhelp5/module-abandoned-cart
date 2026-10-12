@@ -20,9 +20,9 @@ class ConsentWithdrawal
     }
 
     /** One cart (e.g. the visitor's own, when the capture finds no consent). */
-    public function execute(int $quoteId): bool
+    public function execute(int $quoteId, bool $guestOnly = false): bool
     {
-        return $quoteId && $this->clear(['entity_id = ?' => $quoteId]) > 0;
+        return $quoteId && $this->clear(['entity_id = ?' => $quoteId], $guestOnly) > 0;
     }
 
     /** @param string[] $consentIds every open cart captured with one of these consents */
@@ -31,7 +31,7 @@ class ConsentWithdrawal
         return $consentIds ? $this->clear(['ck_abandoned_consent_id IN (?)' => array_values($consentIds)]) : 0;
     }
 
-    private function clear(array $where): int
+    private function clear(array $where, bool $guestOnly = false): int
     {
         $db = $this->resource->getConnection();
         $table = $this->resource->getTableName('quote');
@@ -42,7 +42,8 @@ class ConsentWithdrawal
             'ck_abandoned_browser_hash' => null,
             'updated_at' => new \Zend_Db_Expr('updated_at'),
         ];
-        return $db->update($table, ['customer_email' => null] + $consent, array_merge($where, ['customer_id IS NULL']))
-            + $db->update($table, $consent, array_merge($where, ['customer_id IS NOT NULL']));
+        $guests = $db->update($table, ['customer_email' => null] + $consent, array_merge($where, ['customer_id IS NULL']));
+        return $guestOnly ? $guests
+            : $guests + $db->update($table, $consent, array_merge($where, ['customer_id IS NOT NULL']));
     }
 }

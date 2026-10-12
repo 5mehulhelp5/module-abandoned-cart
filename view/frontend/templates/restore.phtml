@@ -1,0 +1,12 @@
+<?php
+/** @var \Magento\Framework\View\Element\Template $block */
+/** @var \Magento\Framework\Escaper $escaper */
+?>
+<p><?= $escaper->escapeHtml(__('Restore the products from your saved cart? Your current products and contact details will be kept. Matching products will have their quantities added.')) ?></p>
+<form action="<?= $escaper->escapeUrl($block->getUrl('cartreminder/cart/restore', ['_nosid' => true])) ?>" method="post" id="cartreminder-restore-form">
+    <?= $block->getBlockHtml('formkey') ?>
+    <input type="hidden" name="q" value="<?= $escaper->escapeHtmlAttr((string)$block->getRequest()->getParam('q')) ?>">
+    <input type="hidden" name="t" value="<?= $escaper->escapeHtmlAttr((string)$block->getRequest()->getParam('t')) ?>">
+    <button type="submit" class="action primary"><span><?= $escaper->escapeHtml(__('Restore saved cart')) ?></span></button>
+    <a href="<?= $escaper->escapeUrl($block->getUrl('checkout/cart')) ?>"><?= $escaper->escapeHtml(__('Keep my current cart')) ?></a>
+</form>

@@ -84,7 +84,7 @@ class GuestEmailCaptureTest extends TestCase
     public function testWithoutConsentClearsInsteadOfStoring(bool $consent, bool $enabled): void
     {
         $capture = $this->capture(42, $consent, $enabled);
-        $this->withdrawal->expects($this->once())->method('execute')->with(42);
+        $this->withdrawal->expects($this->once())->method('execute')->with(42, true);
         $this->assertFalse($capture->capture('masked', 'a@test.com'));
         $this->assertSame([], $this->updates);
     }
@@ -94,12 +94,33 @@ class GuestEmailCaptureTest extends TestCase
         return ['no consent / withdrawn' => [false, true], 'module disabled' => [true, false]];
     }
 
-    public function testEmptyEmailWithConsentStoresNothing(): void
+    public function testEmptyEmailWithConsentClearsTheGuestCapture(): void
     {
         $capture = $this->capture();
-        $this->withdrawal->expects($this->never())->method('execute');
+        $this->withdrawal->expects($this->once())->method('execute')->with(42, true);
         $this->assertFalse($capture->capture('masked', ''));
         $this->assertSame([], $this->updates);
+    }
+
+    public function testAWriteRejectedByTheGuardIsNotAcknowledged(): void
+    {
+        $capture = $this->capture();
+        $this->updateResults = [0];
+        $this->assertFalse($capture->capture('masked', 'a@test.com'));
+        $this->assertContains(['is_active = ?', 1], $this->selectWhere);
+        $this->assertContains(['customer_id IS NULL', null], $this->selectWhere);
+        $this->assertContains(["VALID('cid-1')", null], $this->selectWhere);
+    }
+
+    public function testIdenticalSuccessfulRetryIsAcknowledged(): void
+    {
+        $capture = $this->capture();
+        $this->updateResults = [0];
+        $this->fetchOneResult = 42;
+        $this->assertTrue($capture->capture('masked', 'a@test.com'));
+        $this->assertContains(['customer_email = ?', 'a@test.com'], $this->selectWhere);
+        $this->assertContains(['ck_abandoned_consent_id = ?', 'cid-1'], $this->selectWhere);
+        $this->assertContains(['ck_abandoned_browser_hash = ?', 'browser-hash'], $this->selectWhere);
     }
 
     /** @dataProvider invalidEmails */

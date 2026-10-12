@@ -17,7 +17,8 @@ use Magento\Quote\Model\ResourceModel\Quote\QuoteIdMask as QuoteIdMaskResource;
  * the consent id and this browser's id hash - in one UPDATE that also checks the consent is still valid,
  * so a withdrawal at the same moment can't be undone by this request. Without consent (never given,
  * switched off - the checkout calls again with an empty email - or withdrawn): whatever this module
- * stored on the cart is cleared. Direct UPDATEs - no quote save. Always answers the same way (no probing).
+ * stored on the guest cart is cleared. Direct UPDATEs - no quote save. The response acknowledges
+ * whether the requested email and consent were stored, including an identical successful retry.
  */
 class GuestEmailCapture implements GuestEmailCaptureInterface
 {
@@ -43,28 +44,40 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
         }
         $consent = $this->config->isEnabled() ? $this->consent->getCurrent(Config::PURPOSE) : null;
         $email = trim($email);
-        if (!$consent) {
-            $this->withdrawal->execute($quoteId);
+        if (!$consent || $email === '') {
+            $this->withdrawal->execute($quoteId, true);
             return false;
         }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
             return false;
         }
         $db = $this->resource->getConnection();
-        $db->update(
+        $where = [
+            'entity_id = ?' => $quoteId,
+            'is_active = ?' => 1,
+            'customer_id IS NULL',
+            $this->guard->validCondition($db->quote($consent->consentId)),
+        ];
+        $browserHash = $this->browser->hash();
+        $updated = $db->update(
             $this->resource->getTableName('quote'),
             [
                 'customer_email' => $email,
                 'ck_abandoned_consent_id' => $consent->consentId,
-                'ck_abandoned_browser_hash' => $this->browser->hash(),
+                'ck_abandoned_browser_hash' => $browserHash,
             ],
-            [
-                'entity_id = ?' => $quoteId,
-                'is_active = ?' => 1,
-                'customer_id IS NULL',
-                $this->guard->validCondition($db->quote($consent->consentId)),
-            ]
+            $where
         );
-        return true;
+        if ($updated) {
+            return true;
+        }
+        // Retrying an acknowledged-but-lost response may write identical values (zero rows changed).
+        $select = $db->select()->from($this->resource->getTableName('quote'), 'entity_id');
+        foreach ($where as $condition => $value) {
+            is_int($condition) ? $select->where($value) : $select->where($condition, $value);
+        }
+        return (bool)$db->fetchOne($select->where('customer_email = ?', $email)
+            ->where('ck_abandoned_consent_id = ?', $consent->consentId)
+            ->where('ck_abandoned_browser_hash = ?', $browserHash));
     }
 }

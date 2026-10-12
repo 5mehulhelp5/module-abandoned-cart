@@ -3,7 +3,8 @@
  *
  * Only with consent for purpose cart_reminder (CommerceKings_Consent/js/consent/provider). On checkout
  * entry (prefilled email) and 1 s after the last
- * change of a valid email, POST /V1/guest-carts/:cartId/ck-abandoned-email (once per distinct email).
+ * change of a valid email, POST /V1/guest-carts/:cartId/ck-abandoned-email. Saves and clears are
+ * serialized, acknowledged by the server, and retried after transient failures.
  * If the consent is switched off while on checkout, the same endpoint is called with an empty email
  * and the server clears what it stored. The server re-reads the consent itself - this check only
  * avoids sending the email without consent. Logged-in customers are skipped (js/customer-consent.js).
@@ -13,19 +14,16 @@ define([
     'mage/storage',
     'Magento_Checkout/js/model/quote',
     'Magento_Checkout/js/model/url-builder',
-    'Magento_Customer/js/model/customer'
-], function (consent, storage, quote, urlBuilder, customer) {
+    'Magento_Customer/js/model/customer',
+    'CommerceKings_AbandonedCart/js/guest-email-capture'
+], function (consent, storage, quote, urlBuilder, customer, capture) {
     'use strict';
 
-    var EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
-        PURPOSE = 'cart_reminder';
+    var PURPOSE = 'cart_reminder';
 
-    function send(email) {
-        if (!quote.getQuoteId()) {
-            return;
-        }
-        storage.post(
-            urlBuilder.createUrl('/guest-carts/:cartId/ck-abandoned-email', {cartId: quote.getQuoteId()}),
+    function send(cartId, email) {
+        return storage.post(
+            urlBuilder.createUrl('/guest-carts/:cartId/ck-abandoned-email', {cartId: cartId}),
             JSON.stringify({email: email}),
             false
         );
@@ -33,19 +31,21 @@ define([
 
     return function (Component) {
         return Component.extend({
-            ckLastSent: null,
             ckTimer: null,
 
             initialize: function () {
                 var self = this;
                 this._super();
+                this.ckCapture = capture(send);
+                this.ckOnline = function () { self.ckCapture.online(); };
+                window.addEventListener('online', this.ckOnline);
                 // consent given / switched on or off while on checkout
                 consent.onChange(PURPOSE, function () {
                     self.ckSync(true);
                 });
                 // an email Magento prefilled (typed earlier, maybe before consent was given) - no
                 // change event fires for it, so sync once on checkout entry
-                setTimeout(function () {
+                this.ckTimer = setTimeout(function () {
                     self.ckSync(false);
                 }, 1000);
                 return this;
@@ -62,22 +62,19 @@ define([
             },
 
             ckSync: function (consentChanged) {
-                var email = (this.email() || '').trim();
-                if (customer.isLoggedIn()) {
-                    return;
-                }
-                if (!consent.hasConsent(PURPOSE)) {
-                    if (consentChanged && this.ckLastSent !== null) {
-                        this.ckLastSent = null;
-                        send('');   // withdraw
-                    }
-                    return;
-                }
-                if (!EMAIL.test(email) || email === this.ckLastSent) {
-                    return;
-                }
-                this.ckLastSent = email;
-                send(email);
+                this.ckCapture.update({
+                    cartId: quote.getQuoteId(),
+                    email: this.email(),
+                    allowed: consent.hasConsent(PURPOSE),
+                    loggedIn: customer.isLoggedIn()
+                }, consentChanged);
+            },
+
+            destroy: function () {
+                clearTimeout(this.ckTimer);
+                window.removeEventListener('online', this.ckOnline);
+                this.ckCapture.destroy();
+                return this._super();
             }
         });
     };

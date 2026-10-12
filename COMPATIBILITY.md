@@ -5,12 +5,14 @@ combination has passed runtime testing.
 
 | Magento Open Source | PHP | Runtime verification |
 | --- | --- | --- |
-| 2.4.9 | 8.5 | Passed locally: Composer, PHP lint, DI compilation and package unit tests |
+| 2.4.9 | 8.5 | Passed locally: Composer, PHP lint, DI compilation, PHPStan level 5, unit/JavaScript tests and quote integration tests |
 | Older supported releases | 8.1–8.4 | Pending; use a matching Magento dependency set and services |
 
 The five-package sandbox also checks consent mapping against temporary database tables,
-the JavaScript lifecycle, and native Vanilla consent choices, add-to-cart and checkout in
-a browser. Its database is MariaDB 11.8. These checks do not certify other themes, third-party
+the JavaScript lifecycle, and native Vanilla consent choices, guest checkout capture, local
+reminder delivery, confirmed restore/merge and unsubscribe in a browser. Quote integration
+tests use Magento demo data and cover rollback, stock limits and concurrent restores.
+Its database is MariaDB 11.8. These checks do not certify other themes, third-party
 tracking scripts, checkout customizations or Adobe Commerce-specific features.
 
 The GitHub workflow checks package metadata, PHP syntax on 8.1–8.5 and Git archive contents.

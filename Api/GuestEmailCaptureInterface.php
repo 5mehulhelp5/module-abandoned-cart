@@ -4,9 +4,9 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Api;
 
 /**
- * Stores the email a guest typed in checkout on their cart (only with the cookie-banner consent
- * the cart_reminder purpose of CommerceKings_Consent, read server-side), so an abandoned cart can be reminded. Called with an empty
- * email when the visitor switches the consent off - stored data is then cleared.
+ * Stores a guest checkout email only with valid cart_reminder consent, read server-side through
+ * CommerceKings_Consent. An empty email or missing consent clears the reminder data from a guest
+ * cart. Customer carts are never changed by this endpoint.
  * @api
  */
 interface GuestEmailCaptureInterface
@@ -14,7 +14,7 @@ interface GuestEmailCaptureInterface
     /**
      * @param string $cartId masked guest cart id
      * @param string $email
-     * @return bool true when stored (false: not stored / cleared)
+     * @return bool true when stored, including an identical successful retry; false when refused or cleared
      */
     public function capture(string $cartId, string $email): bool;
 }

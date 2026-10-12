@@ -54,6 +54,15 @@ class ConsentWithdrawalTest extends TestCase
         $this->assertContains('customer_id IS NOT NULL', self::conditions($this->updates[1]['where']));
     }
 
+    public function testGuestEndpointCannotClearACustomerCartConsent(): void
+    {
+        (new ConsentWithdrawal($this->resource()))->execute(42, true);
+        $this->assertCount(1, $this->updates);
+        foreach ($this->updates as $update) {
+            $this->assertContains('customer_id IS NULL', self::conditions($update['where']));
+        }
+    }
+
     public function testNoConsentIdsDoesNothing(): void
     {
         $this->assertSame(0, (new ConsentWithdrawal($this->resource()))->forConsents([]));

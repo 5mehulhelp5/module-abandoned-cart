@@ -5,11 +5,13 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Controller;
 
 use CommerceKings\AbandonedCart\Controller\Cart\Restore;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
+use CommerceKings\AbandonedCart\Model\CartRestore;
+use CommerceKings\AbandonedCart\Model\RestoreAccess;
 use CommerceKings\Consent\Api\BrowserIdentityInterface;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Customer\Model\Session as CustomerSession;
-use Magento\Framework\App\RequestInterface;
+use Magento\Framework\App\Request\Http;
 use Magento\Framework\Controller\Result\Redirect;
 use Magento\Framework\Controller\Result\RedirectFactory;
 use Magento\Framework\Exception\NoSuchEntityException;
@@ -17,9 +19,17 @@ use Magento\Framework\Message\ManagerInterface;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\Cookie\PublicCookieMetadata;
 use Magento\Framework\Stdlib\CookieManagerInterface;
+use Magento\Framework\Data\Form\FormKey\Validator;
+use Magento\Framework\View\Result\Page;
+use Magento\Framework\View\Result\PageFactory;
+use Magento\Framework\View\Page\Config as PageConfig;
+use Magento\Framework\View\Page\Title;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\Data\CartInterface;
 use Magento\Quote\Model\Quote;
+use Magento\Store\Api\Data\StoreInterface;
+use Magento\Store\Model\StoreManagerInterface;
+use Psr\Log\LoggerInterface;
 use PHPUnit\Framework\TestCase;
 
 class RestoreTest extends TestCase
@@ -31,6 +41,9 @@ class RestoreTest extends TestCase
     private array $saved = [];
     private array $replaced = [];
     private array $cookies = [];
+    private array $restores = [];
+    private array $errors = [];
+    private mixed $result = null;
     private ?string $sectionCookie = '{"cart":100,"customer":200}';
 
     /**
@@ -44,17 +57,21 @@ class RestoreTest extends TestCase
         int $loggedInCustomer = 0,
         string $token = 'good',
         bool $cartExists = true,
-        bool $quoteModel = true
+        bool $quoteModel = true,
+        bool $isPost = true,
+        bool $formKeyValid = true,
+        ?\Throwable $restoreError = null
     ): Quote {
-        $cart += ['id' => 42, 'active' => 1, 'items' => 2, 'customer' => null, 'browser' => 'bh-owner',
+        $cart += ['id' => 42, 'store' => 1, 'active' => 1, 'items' => 2, 'customer' => null, 'browser' => 'bh-owner',
             'reminded' => gmdate('Y-m-d H:i:s', time() - 3600)];
         $quote = $this->mockWith(Quote::class, [
-            'getId' => $cart['id'], 'getIsActive' => $cart['active'], 'getItemsCount' => $cart['items'],
+            'getId' => $cart['id'], 'getStoreId' => $cart['store'], 'getIsActive' => $cart['active'], 'getItemsCount' => $cart['items'],
             'getCustomerId' => $cart['customer'],
             'getData' => fn ($key = '') => ['ck_abandoned_browser_hash' => $cart['browser'], 'ck_abandoned_reminded_at' => $cart['reminded']][$key] ?? null,
             'setIsActive' => self::$SELF,
         ]);
-        $request = $this->createStub(RequestInterface::class);
+        $request = $this->createStub(Http::class);
+        $request->method('isPost')->willReturn($isPost);
         $request->method('getParam')->willReturnCallback(fn ($k) => ['q' => '42', 't' => $token][$k] ?? null);
         $redirect = $this->createStub(Redirect::class);
         $redirect->method('setPath')->willReturnCallback(function ($path) use ($redirect) { $this->path = $path; return $redirect; });
@@ -64,6 +81,11 @@ class RestoreTest extends TestCase
         $signature->method('isValid')->willReturnCallback(fn ($purpose, $id, $t) => $purpose === 'restore' && $id === 42 && $t === 'good');
         $browserId = $this->createStub(BrowserIdentityInterface::class);
         $browserId->method('hash')->willReturn((string)$browserHash);
+        $store = $this->createStub(StoreInterface::class);
+        $store->method('getId')->willReturn(1);
+        $stores = $this->createStub(StoreManagerInterface::class);
+        $stores->method('getStore')->willReturn($store);
+        $access = new RestoreAccess($signature, $browserId, $stores);
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists, $quoteModel) {
             if (!$cartExists) {
@@ -73,7 +95,7 @@ class RestoreTest extends TestCase
         });
         $repo->method('save')->willReturnCallback(function ($q) { $this->saved[] = $q; });
 
-        $currentQuote = null;
+        $currentQuote = $this->mockWith(Quote::class, ['getId' => null, 'getItemsCount' => 0]);
         if ($current) {
             $currentQuote = $this->mockWith(Quote::class, [
                 'getId' => $current['id'], 'getItemsCount' => $current['items'], 'merge' => self::$SELF, 'collectTotals' => self::$SELF,
@@ -90,7 +112,7 @@ class RestoreTest extends TestCase
         ]);
         $customer = $this->mockWith(CustomerSession::class, ['getCustomerId' => $loggedInCustomer ?: null]);
         $messages = $this->createStub(ManagerInterface::class);
-        foreach (['addNoticeMessage', 'addSuccessMessage'] as $method) {
+        foreach (['addNoticeMessage', 'addSuccessMessage', 'addErrorMessage'] as $method) {
             $messages->method($method)->willReturnCallback(function ($m) use ($messages) { $this->messages[] = (string)$m; return $messages; });
         }
         $cookieManager = $this->createStub(CookieManagerInterface::class);
@@ -100,7 +122,28 @@ class RestoreTest extends TestCase
         $metadataFactory = $this->createStub(CookieMetadataFactory::class);
         $metadataFactory->method('createPublicCookieMetadata')->willReturn($metadata);
 
-        (new Restore($request, $redirectFactory, $signature, $browserId, $repo, $checkout, $customer, $messages, $cookieManager, $metadataFactory))->execute();
+        $title = $this->createStub(Title::class);
+        $pageConfig = $this->createStub(PageConfig::class);
+        $pageConfig->method('getTitle')->willReturn($title);
+        $page = $this->createStub(Page::class);
+        $page->method('getConfig')->willReturn($pageConfig);
+        $pages = $this->createStub(PageFactory::class);
+        $pages->method('create')->willReturn($page);
+        $validator = $this->createStub(Validator::class);
+        $validator->method('validate')->willReturn($formKeyValid);
+        $restore = $this->createStub(CartRestore::class);
+        $restore->method('execute')->willReturnCallback(function ($id, $destination, $signature, $customerId) use ($quote, $current, $restoreError) {
+            $this->restores[] = [$id, (int)$destination->getId(), $signature, $customerId];
+            if ($restoreError) {
+                throw $restoreError;
+            }
+            return $current ? $destination : $quote;
+        });
+        $logger = $this->createStub(LoggerInterface::class);
+        $logger->method('error')->willReturnCallback(function ($message) { $this->errors[] = $message; });
+
+        $this->result = (new Restore($request, $redirectFactory, $access, $repo, $checkout, $customer, $messages,
+            $cookieManager, $metadataFactory, $pages, $validator, $restore, $logger))->execute();
         return $quote;
     }
 
@@ -125,6 +168,41 @@ class RestoreTest extends TestCase
         $this->assertSame([], $this->replaced);
         $this->assertSame([], $this->saved);
         $this->assertSame([], $this->cookies);
+    }
+
+    public function testGetOnlyShowsConfirmationAndDoesNotTouchTheCurrentCart(): void
+    {
+        $this->restore(current: ['id' => 7, 'items' => 1], isPost: false);
+        $this->assertInstanceOf(Page::class, $this->result);
+        $this->assertSame([], $this->restores);
+        $this->assertSame([], $this->replaced);
+        $this->assertSame([], $this->cookies);
+    }
+
+    public function testInvalidFormKeyDoesNotRestore(): void
+    {
+        $this->restore(formKeyValid: false);
+        $this->assertSame('checkout/cart', $this->path);
+        $this->assertSame([], $this->restores);
+        $this->assertSame([], $this->replaced);
+    }
+
+    public function testCrossStoreLinkDoesNotRevealOrRestoreTheCart(): void
+    {
+        $this->restore(['store' => 2]);
+        $this->assertSame('', $this->path);
+        $this->assertSame([], $this->messages);
+        $this->assertSame([], $this->restores);
+    }
+
+    public function testRestoreFailureKeepsTheSessionCartAndShowsARetryMessage(): void
+    {
+        $this->restore(restoreError: new \RuntimeException('second save failed'));
+        $this->assertSame('checkout/cart', $this->path);
+        $this->assertSame([], $this->replaced);
+        $this->assertSame([], $this->cookies);
+        $this->assertSame(['We could not restore your saved cart. Please try again.'], $this->messages);
+        $this->assertCount(1, $this->errors);
     }
 
     /** @dataProvider otherBrowsers */
@@ -160,7 +238,7 @@ class RestoreTest extends TestCase
     {
         $this->restore(['reminded' => gmdate('Y-m-d H:i:s', time() - 6 * 86400)]);
         $this->assertSame('checkout/cart', $this->path);
-        $this->assertSame([], $this->messages);
+        $this->assertSame(['Your saved cart has been restored.'], $this->messages);
     }
 
     /** @dataProvider unavailable */
@@ -180,6 +258,8 @@ class RestoreTest extends TestCase
             'emptied' => [['items' => 0]],
             'link older than 7 days' => [['reminded' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)]],
             'never reminded' => [['reminded' => null]],
+            'invalid timestamp' => [['reminded' => 'invalid']],
+            'future timestamp' => [['reminded' => gmdate('Y-m-d H:i:s', time() + 3600)]],
         ];
     }
 
@@ -219,7 +299,8 @@ class RestoreTest extends TestCase
     {
         $quote = $this->restore([], 'bh-owner', $current);
         $this->assertSame('checkout/cart', $this->path);
-        $this->assertSame([$quote], $this->replaced);
+        $this->assertCount(1, $this->replaced);
+        $this->assertSame($current['id'] ?? (int)$quote->getId(), (int)$this->replaced[0]->getId());
         $ids = json_decode($this->cookies['section_data_ids'], true);
         $this->assertGreaterThan(100, $ids['cart']);
         $this->assertSame(200, $ids['customer'], 'other sections untouched');
@@ -235,9 +316,9 @@ class RestoreTest extends TestCase
         $this->sectionCookie = null;
         $quote = $this->restore([], 'bh-owner', ['id' => 7, 'items' => 1]);
         $this->assertSame('checkout/cart', $this->path);
-        $this->assertCount(2, $this->saved, 'merged cart saved, saved cart closed');
-        $this->assertSame($quote, $this->saved[1]);
-        $this->assertSame(['We have added the products from your saved cart to your cart.'], $this->messages);
+        $this->assertSame([[42, 7, 'good', 0]], $this->restores);
+        $this->assertSame(7, (int)$this->replaced[0]->getId());
+        $this->assertSame(['Your saved cart has been restored.'], $this->messages);
         $this->assertArrayHasKey('cart', json_decode($this->cookies['section_data_ids'], true));
     }
 }

@@ -3,70 +3,65 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Controller\Cart;
 
-use CommerceKings\AbandonedCart\Model\Config;
-use CommerceKings\AbandonedCart\Model\LinkSignature;
-use CommerceKings\Consent\Api\BrowserIdentityInterface;
+use CommerceKings\AbandonedCart\Model\CartRestore;
+use CommerceKings\AbandonedCart\Model\RestoreAccess;
 use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Framework\App\Action\HttpGetActionInterface;
-use Magento\Framework\App\RequestInterface;
-use Magento\Framework\Controller\Result\Redirect;
+use Magento\Framework\App\Action\HttpPostActionInterface;
+use Magento\Framework\App\Request\Http;
+use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Controller\Result\RedirectFactory;
+use Magento\Framework\Data\Form\FormKey\Validator;
+use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Message\ManagerInterface;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\CookieManagerInterface;
+use Magento\Framework\View\Result\PageFactory;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Quote;
+use Psr\Log\LoggerInterface;
 
-/**
- * /cartreminder/cart/restore?q={cart id}&t={signature} - the "continue shopping" link in the reminder.
- * Invalid signature -> homepage. Only the browser that gave the consent gets the cart back - its
- * browser id (CommerceKings_Consent) must match the one stored on the cart. Anyone else (forwarded email,
- * another device) -> homepage, so nobody sees another person's cart, email or address.
- * The link expires Config::RESTORE_LINK_DAYS after sending (a "no longer available" notice for the owner).
- * Customer cart (with a match): ask to log in - Magento loads it on login. Guest cart:
- *  - browser has no cart (or an empty one): it takes over the saved cart;
- *  - browser already has items: the saved cart is MERGED into it (Magento's own Quote::merge, as on
- *    login), then closed - nothing the visitor already had is lost, and it is not reminded again.
- */
-class Restore implements HttpGetActionInterface
+/** GET validates the reminder link and shows a confirmation; only a form-key POST changes carts. */
+class Restore implements HttpGetActionInterface, HttpPostActionInterface
 {
     public function __construct(
-        private readonly RequestInterface $request,
+        private readonly Http $request,
         private readonly RedirectFactory $redirectFactory,
-        private readonly LinkSignature $signature,
-        private readonly BrowserIdentityInterface $browser,
+        private readonly RestoreAccess $access,
         private readonly CartRepositoryInterface $cartRepository,
         private readonly CheckoutSession $checkoutSession,
         private readonly CustomerSession $customerSession,
         private readonly ManagerInterface $messageManager,
         private readonly CookieManagerInterface $cookieManager,
-        private readonly CookieMetadataFactory $cookieMetadataFactory
+        private readonly CookieMetadataFactory $cookieMetadataFactory,
+        private readonly PageFactory $pageFactory,
+        private readonly Validator $formKeyValidator,
+        private readonly CartRestore $restore,
+        private readonly LoggerInterface $logger
     ) {
     }
 
-    public function execute(): Redirect
+    public function execute(): ResultInterface
     {
         $redirect = $this->redirectFactory->create();
         $quoteId = (int)$this->request->getParam('q');
+        $token = (string)$this->request->getParam('t');
+        if ($this->request->isPost() && !$this->formKeyValidator->validate($this->request)) {
+            return $redirect->setPath('checkout/cart');
+        }
         try {
             $quote = $quoteId ? $this->cartRepository->get($quoteId) : null;
         } catch (\Exception) {
             $quote = null;
         }
-        if (!$quote instanceof Quote || !$this->signature->isValid('restore', $quoteId, (string)$this->request->getParam('t'))) {
+        if (!$quote instanceof Quote || !$this->access->isOwner($quote, $token)) {
             return $redirect->setPath('');
         }
-        // only the browser that gave the consent - guests and customers alike (checked first, so a
-        // stranger can't even tell whether the cart was ordered)
-        if (!$this->isSameBrowser((string)$quote->getData('ck_abandoned_browser_hash'))) {
-            return $redirect->setPath('');
-        }
-        if (!$quote->getIsActive() || !$quote->getItemsCount() || !$this->isLinkFresh((string)$quote->getData('ck_abandoned_reminded_at'))) {
+        if (!$this->access->isAvailable($quote)) {
             $this->messageManager->addNoticeMessage(__('This cart is no longer available.'));
             return $redirect->setPath('checkout/cart');
         }
-        $id = (int)$quote->getId();
         if ($quote->getCustomerId()) {
             if ((int)$this->customerSession->getCustomerId() === (int)$quote->getCustomerId()) {
                 return $redirect->setPath('checkout/cart');
@@ -74,30 +69,30 @@ class Restore implements HttpGetActionInterface
             $this->messageManager->addNoticeMessage(__('Sign in to continue shopping – your cart is waiting for you.'));
             return $redirect->setPath('customer/account/login');
         }
-        $current = $this->checkoutSession->getQuoteId() ? $this->checkoutSession->getQuote() : null;
-        if ($current && (int)$current->getId() === $id) {
+        if ((int)$this->checkoutSession->getQuoteId() === $quoteId) {
             return $redirect->setPath('checkout/cart');
         }
-        if (!$current || !$current->getItemsCount()) {
-            $this->checkoutSession->replaceQuote($quote);
+        if (!$this->request->isPost()) {
+            $page = $this->pageFactory->create();
+            $page->getConfig()->getTitle()->set((string)__('Restore your saved cart'));
+            $page->getConfig()->setRobots('NOINDEX,NOFOLLOW');
+            return $page;
+        }
+        try {
+            $restored = $this->restore->execute($quoteId, $this->checkoutSession->getQuote(), $token,
+                (int)$this->customerSession->getCustomerId());
+            $this->checkoutSession->replaceQuote($restored);
             $this->refreshMiniCart();
-            return $redirect->setPath('checkout/cart');
+            $this->messageManager->addSuccessMessage(__('Your saved cart has been restored.'));
+        } catch (LocalizedException $error) {
+            $this->messageManager->addNoticeMessage($error->getMessage());
+        } catch (\Throwable $error) {
+            $this->logger->error('CommerceKings_AbandonedCart: cart restore failed.', ['exception' => $error]);
+            $this->messageManager->addErrorMessage(__('We could not restore your saved cart. Please try again.'));
         }
-        // merge the saved cart into the one this browser already has, then close the saved one
-        $current->merge($quote)->collectTotals();
-        $this->cartRepository->save($current);
-        $quote->setIsActive(false);
-        $this->cartRepository->save($quote);
-        $this->refreshMiniCart();
-        $this->messageManager->addSuccessMessage(__('We have added the products from your saved cart to your cart.'));
         return $redirect->setPath('checkout/cart');
     }
 
-    /**
-     * The mini cart is Magento's customer-data "cart" section, cached in the browser. It is only
-     * refreshed after POST requests or when the section_data_ids cookie disagrees with the cached
-     * copy - a restore is a plain GET link, so change the cookie's "cart" entry to force a reload.
-     */
     private function refreshMiniCart(): void
     {
         $ids = json_decode((string)$this->cookieManager->getCookie('section_data_ids'), true);
@@ -108,21 +103,5 @@ class Restore implements HttpGetActionInterface
             (string)json_encode($ids),
             $this->cookieMetadataFactory->createPublicCookieMetadata()->setPath('/')->setDuration(86400)
         );
-    }
-
-    /** The link works RESTORE_LINK_DAYS after the reminder was sent (stored in UTC). */
-    private function isLinkFresh(string $remindedAt): bool
-    {
-        if ($remindedAt === '') {
-            return false;
-        }
-        $sent = new \DateTimeImmutable($remindedAt, new \DateTimeZone('UTC'));
-        return $sent->modify('+' . Config::RESTORE_LINK_DAYS . ' days') > new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-    }
-
-    /** This browser's id (CommerceKings_Consent) == the one the cart was captured in. */
-    private function isSameBrowser(string $cartBrowserHash): bool
-    {
-        return $cartBrowserHash !== '' && hash_equals($cartBrowserHash, $this->browser->hash());
     }
 }

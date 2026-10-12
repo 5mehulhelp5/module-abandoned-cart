@@ -23,7 +23,8 @@ Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (featur
 
 1. **Consent** – a recorded consent from `CommerceKings_Consent` (`ConsentInterface::getCurrent('cart_reminder')` on the server, `CommerceKings_Consent/js/consent/provider` in the browser). Recording, validity (withdrawn, expired, banner/terms revision), browser recognition and withdrawals are that module's job; this module keeps only the **consent id**.
 2. **Capture** – the consent (and for guests the email) is stored on the cart:
-   - guest: typing a valid email in checkout, or entering checkout with an email Magento prefilled → `POST /V1/guest-carts/:cartId/ck-abandoned-email` (`GuestEmailCapture`), 1 s after the last change, once per distinct email;
+   - guest: typing a valid email in checkout, or entering checkout with an email Magento prefilled → `POST /V1/guest-carts/:cartId/ck-abandoned-email` (`GuestEmailCapture`), 1 s after the last change. Requests are serialized and rapid edits coalesce to the latest email. A save is deduplicated only after the server acknowledges it, including an identical successful retry;
+   - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also clears a previously captured guest email;
    - customer: opening checkout (or switching the consent on there) → `POST /cartreminder/consent/capture` (`CustomerConsentCapture`, `js/customer-consent.js`); the email comes from the account. Stored only when the consent changes, so re-opening checkout does not restart the delay.
    - Stored: the consent id and the browser id hash, in one UPDATE that also checks the consent is still valid (`ConsentGuardInterface`) – a capture request still on its way can't undo a withdrawal.
 3. **Finder** (cron `commercekings_abandoned_cart_find`, every 15 min) – carts that are active, have items, an email and a **valid** consent (guard condition – raised banner/terms revision or expiry cancels waiting reminders), untouched for **Delay**, not older than **Max age**, not yet queued/reminded, and whose **address got no reminder in the last 7 days** for any cart (`Config::RECIPIENT_COOLDOWN_DAYS`). Each cart is claimed (`ck_abandoned_queued_at`) and its id published to `commercekings.abandoned_cart.remind`.
@@ -69,11 +70,14 @@ The opt-out link never expires; the restore link works 7 days. Both links are `?
 **Restore** `/cartreminder/cart/restore`:
 
 - invalid/forged signature, old `?c=` links → homepage;
-- the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's (`ck_abandoned_browser_hash`), else → homepage. Checked **before** anything else, so a stranger cannot tell whether a cart was ordered;
+- the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's (`ck_abandoned_browser_hash`), and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
 - cart ordered/closed or emptied, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `ck_abandoned_reminded_at`) → notice "This cart is no longer available." (owner only);
 - customer cart → cart page if logged in as that customer, otherwise login page with "Sign in to continue shopping – your cart is waiting for you.";
-- guest cart, browser has no cart or an empty one → the saved cart becomes the browser's cart;
-- guest cart, browser has other items → merged (`Quote::merge`), saved cart closed, "We have added the products from your saved cart to your cart.";
+- guest cart → **GET shows a confirmation page without merging or replacing the session cart**. If it is already the session cart, the visitor goes straight to the cart page;
+- confirmation → **POST with a valid Magento form key**. Source and destination quote rows are locked in id order, then freshly loaded. Browser ownership, store, expiry and destination account/active status are checked again;
+- guest with no existing cart → the saved cart becomes the session cart. An existing cart, including an empty one or a logged-in customer's cart, keeps its identity and receives the saved products through `Quote::merge`;
+- a merge keeps the destination's contact details, account, addresses and coupon. Matching product configurations have their quantities added; distinct configurations remain separate. Totals and shipping rates are recalculated; unavailable products or quantity errors refuse the merge;
+- both carts are saved in one database transaction. Only after it commits does the session switch and the saved cart become closed. A failed save rolls back both carts; a repeated or concurrent restore cannot add the closed source twice. Success: "Your saved cart has been restored.";
 - after restore/merge the customer-data `cart` section is marked stale (`section_data_ids` cookie), so the mini cart shows the right count.
 
 **Opt-out** `/cartreminder/optout` – one click (no confirm button):
@@ -95,7 +99,8 @@ The opt-out link never expires; the restore link works 7 days. Both links are `?
 - **One-click opt-out:** mail scanners that open every link (mostly Microsoft 365) can opt a recipient out unknowingly. Harmless – they just miss the one reminder.
 - Guest carts are deleted by Magento's own `sales_clean_quotes` after "Quote Lifetime" (default 30 days) with their email; the consent record stays in `CommerceKings_Consent` until its own cleanup.
 - An ordered cart keeps its email in `sales_order` (needed for the order, unrelated to this consent).
-- The email shows the cart at **send** time; prices are not re-checked when restoring.
+- The email shows the cart at **send** time. Merging recalculates Magento totals; restoring a guest cart into a session with no existing cart adopts it, and Magento's normal cart/checkout flow handles later recalculation.
+- Merge rollback covers database changes. External side effects from third-party quote observers cannot be rolled back by this transaction. Concurrent restore requests are tested; custom cart writers and checkout integrations need their own concurrency checks.
 
 ## Endpoints
 
@@ -103,7 +108,8 @@ The opt-out link never expires; the restore link works 7 days. Both links are `?
 |---|---|---|
 | `POST /rest/V1/guest-carts/:cartId/ck-abandoned-email` (anonymous) | guest checkout | store email + consent, or clear with `""` |
 | `POST /cartreminder/consent/capture` (form key) | logged-in customer on checkout | store consent on the session cart |
-| `GET /cartreminder/cart/restore?q=&t=` | email | restore the cart |
+| `GET /cartreminder/cart/restore?q=&t=` | email | validate ownership and show restore confirmation |
+| `POST /cartreminder/cart/restore` (form key, `q`, `t`) | confirmation page | adopt or merge the saved cart |
 | `GET /cartreminder/optout?q=&t=` | email | withdraw the consent |
 
 ## Settings (default scope unless noted)
@@ -135,20 +141,31 @@ bin/magento setup:upgrade   # feature tables and consent schema
 - Run the finder now: `bin/magento cron:run` (job `commercekings_abandoned_cart_find`), or set *Send after* to a few minutes on a test shop; send queued reminders with `bin/magento queue:consumers:start commerceKingsAbandonedCartRemind --max-messages=10`.
 - Watch `var/log/system.log` for `CommerceKings_AbandonedCart:` lines (queued, sent, skipped with the reason).
 - Use a **fresh private window** per scenario (private windows of one browser share cookies while any is open) and a second browser as "another device".
-- Simulate a lost session: browser dev tools → Cookies → delete `PHPSESSID`, keep the banner cookie and `ck_consent_browser`.
+- Simulate a lost session: browser dev tools → Cookies → delete the Magento session cookie (its name can vary), keep the banner cookie and `ck_consent_browser`; clear local/session storage.
 - If checkout goes blank after clearing `pub/static`, delete `pub/static/frontend/sri-hashes.json` (stale SRI hash of `requirejs-config.js`).
 
-## Unit tests
+## Automated tests
 
 From the Magento root, with the package installed:
 
 ```sh
 vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Unit
+node --test vendor/commercekings/module-abandoned-cart/Test/JavaScript/*.test.cjs
 ```
 
 `Test/Unit` – one test class per PHP class; `DbTestTrait` is a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, guest + customer capture (incl. the guard condition), withdrawal (guest vs customer, incl. the numeric-key `+` regression that wiped customer emails), opt-out, finder, consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, cleanup cron, email data (signed links, options, escaping), restore (every branch incl. other browser, merge, mini cart cookie), opt-out page, consent endpoints.
 
-Not covered by unit tests – JavaScript (`customer-consent.js`, `email-capture-mixin.js`, `optout-banner.js`; consent JS is in CommerceKings_Consent and the chosen adapter), the banner, the REST/route wiring and the real DB queries. Those are covered by the browser test cases below.
+JavaScript tests exercise the guest capture coordinator and Magento email-field mixin: acknowledgements, retries, rapid edits, withdrawal during a pending request, consent changes, offline recovery and component cleanup. `customer-consent.js` and `optout-banner.js` do not have isolated unit tests.
+
+The quote integration tests require a **development database with Magento demo data** (SKUs `24-MB01`, `24-MB04`, `24-MB05` and configurable `MH01`). They create committed quote fixtures, test real Magento saves and remove the fixtures afterward. Use a disposable development database; do not run them against a production shop.
+
+```sh
+MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Integration/CartRestoreTest.php
+```
+
+Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, stock limits and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
+
+The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It checks finder eligibility and calls the real consumer for fixture carts; RabbitMQ transport and cron scheduling are separate checks.
 
 ## Test cases
 
@@ -177,7 +194,9 @@ Not covered by unit tests – JavaScript (`customer-consent.js`, `email-capture-
 **Restore**
 - No masked id in the email; forged signature and old `?c=` → homepage.
 - Other browser (with or without its own consent) → homepage, nothing added.
-- Owner browser: empty cart → restored; lost session → restored; other items → merged with message; mini cart count correct.
+- Owner browser: GET shows confirmation and leaves both carts unchanged; confirmation POST restores into a lost session or merges into the current cart; mini cart count correct.
+- Matching products add quantities once; distinct configurations remain separate; current email, addresses and coupon survive.
+- Repeated/concurrent POSTs do not duplicate products. Invalid form key, wrong store/account, stock errors and save failures leave the current cart intact.
 - Owner emptied the cart → "This cart is no longer available."
 - Customer cart: logged in → cart page; logged out → login page with notice.
 

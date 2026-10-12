@@ -31,6 +31,8 @@ trait DbTestTrait
     /** raw query() calls: [sql, bind]; queued rowCount() results, default 1 */
     private array $queries = [];
     private array $queryRowCounts = [];
+    private array $transactionEvents = [];
+    private array $rowLocks = [];
 
     private function resource(): ResourceConnection
     {
@@ -38,6 +40,10 @@ trait DbTestTrait
         foreach (['from', 'order'] as $method) {
             $select->method($method)->willReturnSelf();
         }
+        $select->method('forUpdate')->willReturnCallback(function ($flag) use ($select) {
+            $this->rowLocks[] = $flag;
+            return $select;
+        });
         $select->method('limit')->willReturnCallback(function ($count = null, $offset = null) use ($select) {
             $this->limits[] = [$count, $offset];
             return $select;
@@ -49,6 +55,16 @@ trait DbTestTrait
 
         $db = $this->createStub(AdapterInterface::class);
         $db->method('select')->willReturn($select);
+        foreach (['beginTransaction', 'commit', 'rollBack'] as $method) {
+            $db->method($method)->willReturnCallback(function () use ($method, $db) {
+                $this->transactionEvents[] = $method;
+                return $db;
+            });
+        }
+        $db->method('fetchAll')->willReturnCallback(function () {
+            $this->transactionEvents[] = 'lock';
+            return [];
+        });
         $db->method('update')->willReturnCallback(function ($table, array $data, $where = '') {
             $this->updates[] = ['table' => $table, 'data' => $data, 'where' => (array)$where];
             return $this->updateResults ? array_shift($this->updateResults) : 1;
