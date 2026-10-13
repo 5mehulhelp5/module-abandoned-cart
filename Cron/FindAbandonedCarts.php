@@ -4,24 +4,27 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Cron;
 
 use CommerceKings\AbandonedCart\Model\Config;
-use CommerceKings\AbandonedCart\Model\RecipientHistory;
+use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
+use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
+use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\MessageQueue\PublisherInterface;
+use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
  * Every 15 minutes: carts that have items and an email, were not ordered, have been untouched for
- * the configured delay and were never reminded -> one message per cart to the queue. The cart is
+ * the configured delay, unexpired under Magento's quote lifetime and eligible under the reminder
+ * policy -> one message per cart to the queue. The cart is
  * marked "queued" first, so the next run does not publish it again.
  *
  * Stale claims: a cart queued more than STALE_MINUTES ago but never reminded (publish failed, or the
  * message was lost) is released first, so this same run queues it again. A duplicate message is
  * harmless - the consumer's own claim lets only one delivery send.
  *
- * Addresses reminded within the cooldown are skipped here (RecipientHistory, keyed hash - computed in
- * PHP, never in SQL); the consumer's atomic address claim is the real guarantee. Carts are read page by
- * page, so carts waiting out a cooldown never fill the batch and hold up the others.
+ * Each cart is independent, including carts using the same email address. Store settings and policy
+ * conditions are repeated in the atomic queue claim so a stale selection cannot authorize delivery.
  */
 class FindAbandonedCarts
 {
@@ -34,14 +37,16 @@ class FindAbandonedCarts
         private readonly ResourceConnection $resource,
         private readonly ConsentGuardInterface $guard,
         private readonly PublisherInterface $publisher,
-        private readonly RecipientHistory $recipients,
+        private readonly ReminderPolicyInterface $policy,
+        private readonly QuoteLifetime $lifetime,
+        private readonly StoreManagerInterface $stores,
         private readonly LoggerInterface $logger
     ) {
     }
 
     public function execute(): int
     {
-        if (!$this->config->isEnabled()) {
+        if ($this->storeCondition('') === '0 = 1') {
             return 0;
         }
         $db = $this->resource->getConnection();
@@ -52,7 +57,7 @@ class FindAbandonedCarts
             ['ck_abandoned_queued_at' => null, 'updated_at' => new \Zend_Db_Expr('updated_at')],
             [
                 'ck_abandoned_queued_at < NOW() - INTERVAL ' . self::STALE_MINUTES . ' MINUTE',
-                'ck_abandoned_reminded_at IS NULL',
+                $this->storeCondition(''),
                 'is_active = ?' => 1,
             ]
         );
@@ -67,7 +72,7 @@ class FindAbandonedCarts
             $claimed = $db->update(
                 $quote,
                 ['ck_abandoned_queued_at' => new \Zend_Db_Expr('NOW()'), 'updated_at' => new \Zend_Db_Expr('updated_at')],
-                ['entity_id = ?' => (int)$id, 'ck_abandoned_queued_at IS NULL']
+                array_merge(['entity_id = ?' => (int)$id], $this->eligibleConditions(''))
             );
             if ($claimed) {
                 $this->publisher->publish(self::TOPIC, (string)$id);
@@ -81,45 +86,51 @@ class FindAbandonedCarts
     }
 
     /**
-     * Up to BATCH carts that may get a reminder now, oldest first, at most one per address.
+     * Up to BATCH eligible carts, oldest first. Email addresses do not group or suppress carts.
      *
      * @return int[]
      */
     private function dueCarts(): array
     {
         $db = $this->resource->getConnection();
-        $due = [];
-        $emails = [];
-        for ($page = 0; count($due) < self::BATCH; $page++) {
-            // the DB session runs in UTC, like quote.updated_at
-            $carts = $db->fetchPairs(
-                $db->select()->from(['q' => $this->resource->getTableName('quote')], ['entity_id', 'customer_email'])
-                    ->where('is_active = 1')
-                    ->where('items_count > 0')
-                    ->where("customer_email IS NOT NULL AND customer_email <> ''")
-                    // a valid consent for purpose cart_reminder (not withdrawn, expired or from an older revision)
-                    ->where('ck_abandoned_consent_id IS NOT NULL')
-                    ->where($this->guard->validCondition('q.ck_abandoned_consent_id'))
-                    ->where('ck_abandoned_reminded_at IS NULL')
-                    ->where('ck_abandoned_queued_at IS NULL')
-                    ->where('updated_at <= NOW() - INTERVAL ? MINUTE', $this->config->getDelayMinutes())
-                    ->where('updated_at >= NOW() - INTERVAL ? DAY', $this->config->getMaxAgeDays())
-                    ->order(['updated_at ASC', 'entity_id ASC'])
-                    ->limit(self::BATCH, $page * self::BATCH)
-            );
-            // one reminder per address per cooldown, whichever cart it was for
-            $recent = array_flip(array_map('mb_strtolower', array_map('trim', $this->recipients->recent(array_values($carts)))));
-            foreach ($carts as $id => $email) {
-                $address = mb_strtolower(trim((string)$email));
-                if (!isset($recent[$address]) && !isset($emails[$address]) && count($due) < self::BATCH) {
-                    $emails[$address] = true;
-                    $due[] = (int)$id;
-                }
-            }
-            if (count($carts) < self::BATCH) {
-                break;
-            }
+        $select = $db->select()->from(['q' => $this->resource->getTableName('quote')], ['entity_id']);
+        foreach ($this->eligibleConditions('q.') as $condition) {
+            $select->where($condition);
         }
-        return $due;
+        $select->order(['q.updated_at ASC', 'q.entity_id ASC'])->limit(self::BATCH);
+        return array_map('intval', $db->fetchCol($select));
+    }
+
+    private function eligibleConditions(string $prefix): array
+    {
+        return [
+            $prefix . 'is_active = 1',
+            $prefix . 'items_count > 0',
+            $prefix . "customer_email IS NOT NULL AND " . $prefix . "customer_email <> ''",
+            $prefix . 'ck_abandoned_consent_id IS NOT NULL',
+            $this->guard->validCondition($prefix . 'ck_abandoned_consent_id'),
+            $prefix . 'ck_abandoned_queued_at IS NULL',
+            $this->storeCondition($prefix),
+        ];
+    }
+
+    private function storeCondition(string $prefix): string
+    {
+        $branches = [];
+        foreach ($this->stores->getStores() as $store) {
+            $id = (int)$store->getId();
+            if (!$this->config->isEnabled($id)) {
+                continue;
+            }
+            $branches[] = sprintf('(%sstore_id = %d AND %supdated_at <= NOW() - INTERVAL %d MINUTE AND (%s) AND (%s))',
+                $prefix,
+                $id,
+                $prefix,
+                $this->config->getDelayMinutes($id),
+                $this->lifetime->validCondition($prefix . 'updated_at', $id),
+                $this->policy->dueCondition(new ReminderQuery($id, rtrim($prefix, '.')))
+            );
+        }
+        return $branches ? '(' . implode(' OR ', $branches) . ')' : '0 = 1';
     }
 }

@@ -13,7 +13,8 @@ class RestoreAccess
     public function __construct(
         private readonly LinkSignature $signature,
         private readonly BrowserIdentityInterface $browser,
-        private readonly StoreManagerInterface $stores
+        private readonly StoreManagerInterface $stores,
+        private readonly QuoteLifetime $lifetime
     ) {
     }
 
@@ -31,6 +32,7 @@ class RestoreAccess
         $sent = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, new \DateTimeZone('UTC'));
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         return $quote->getIsActive() && $quote->getItemsCount() && $sent
+            && !$this->lifetime->isExpired((string)$quote->getUpdatedAt(), (int)$quote->getStoreId())
             && $sent->format('Y-m-d H:i:s') === $value && $sent <= $now
             && $sent->modify('+' . Config::RESTORE_LINK_DAYS . ' days') > $now;
     }

@@ -34,7 +34,7 @@ while (!is_file($barrier . '.go')) {
     usleep(10000);
 }
 $signature = $om->get(LinkSignature::class);
-$service = new CartRestore($om->get(ResourceConnection::class), $factory, new RestoreAccess($signature, $browser, $stores));
+$service = new CartRestore($om->get(ResourceConnection::class), $factory, new RestoreAccess($signature, $browser, $stores, $om->get(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class)));
 try {
     $service->execute((int)$argv[1], $current, $signature->sign('restore', (int)$argv[1]), 0);
     echo json_encode(['restored' => true]), PHP_EOL;

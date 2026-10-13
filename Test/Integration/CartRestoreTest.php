@@ -84,7 +84,7 @@ class CartRestoreTest extends TestCase
     {
         $browser = $this->createStub(BrowserIdentityInterface::class);
         $browser->method('hash')->willReturn($hash);
-        return new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores);
+        return new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores, $this->om->get(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class));
     }
 
     private function service(?CartRepositoryInterfaceFactory $factory = null, ?RestoreAccess $access = null): CartRestore

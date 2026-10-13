@@ -16,7 +16,9 @@
         "magento/module-message-queue": "^100.4",
         "commercekings/module-consent": "^0.1",
         "magento/module-catalog": "^104.0",
-        "magento/module-customer": "^103.0"
+        "magento/module-customer": "^103.0",
+        "magento/module-config": "^101.2",
+        "magento/module-backend": "^102.0"
     },
     "autoload": {
         "files": [

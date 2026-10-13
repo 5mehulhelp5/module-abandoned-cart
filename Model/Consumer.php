@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Model;
 
+use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
+use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
+use CommerceKings\AbandonedCart\Api\Data\ReminderState;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use Magento\Framework\App\Area;
@@ -18,8 +21,8 @@ use Psr\Log\LoggerInterface;
  *
  * Messages can arrive twice or late, so everything is re-checked against the current cart:
  * still active (not ordered), has items, an email and a valid consent (CommerceKings_Consent: not
- * withdrawn, expired or from an older revision), not reminded yet, and the address got no reminder within
- * Config::RECIPIENT_COOLDOWN_DAYS (RecipientHistory - kept apart from the carts, which Magento may delete).
+ * withdrawn, expired or from an older revision), idle long enough, not expired under Magento's quote
+ * lifetime and eligible under ReminderPolicyInterface (one reminder per cart by default).
  * The cart is then claimed with one atomic UPDATE that repeats the cart and consent checks - only one
  * delivery can win, and none after a withdrawal is stored. Mail already handed to the mail server can't
  * be recalled.
@@ -37,9 +40,10 @@ class Consumer
         private readonly Config $config,
         private readonly ConsentInterface $consent,
         private readonly ConsentGuardInterface $guard,
-        private readonly RecipientHistory $recipients,
+        private readonly ReminderPolicyInterface $policy,
         private readonly LoggerInterface $logger,
-        private readonly QuoteScope $scope
+        private readonly QuoteScope $scope,
+        private readonly QuoteLifetime $lifetime
     ) {
     }
 
@@ -49,7 +53,7 @@ class Consumer
         $db = $this->resource->getConnection();
         $table = $this->resource->getTableName('quote');
         $row = $db->fetchRow(
-            $db->select()->from($table, ['is_active', 'items_count', 'customer_email', 'store_id', 'ck_abandoned_reminded_at', 'ck_abandoned_consent_id'])
+            $db->select()->from($table, ['is_active', 'items_count', 'customer_email', 'store_id', 'updated_at', 'ck_abandoned_reminded_at', 'ck_abandoned_consent_id'])
                 ->where('entity_id = ?', $id)
         );
         $skip = match (true) {
@@ -58,10 +62,12 @@ class Consumer
             !(int)$row['items_count'] => 'empty',
             !$row['customer_email'] => 'no email',
             $row['ck_abandoned_consent_id'] === null => 'no consent',
-            $row['ck_abandoned_reminded_at'] !== null => 'already reminded',
+            !$this->policy->canSend(new ReminderState($id, (int)$row['store_id'], $row['ck_abandoned_reminded_at'],
+                ['updated_at' => $row['updated_at']])) => 'reminder policy',
+            $this->lifetime->isExpired((string)$row['updated_at'], (int)$row['store_id']) => 'quote expired',
+            (string)$row['updated_at'] > gmdate('Y-m-d H:i:s', time() - $this->config->getDelayMinutes((int)$row['store_id']) * 60) => 'cart recently updated',
             !$this->consent->isValid((string)$row['ck_abandoned_consent_id']) => 'consent withdrawn / expired',
             !$this->matchesConsent($row) => 'consent purpose / website mismatch',
-            $this->recipients->isRecent((string)$row['customer_email']) => 'address reminded recently',
             !$this->config->isEnabled((int)$row['store_id']) => 'disabled',
             default => null,
         };
@@ -80,11 +86,16 @@ class Consumer
             [
                 'entity_id = ?' => $id,
                 'store_id = ?' => (int)$row['store_id'],
-                'ck_abandoned_reminded_at IS NULL',
+                $this->policy->dueCondition(new ReminderQuery((int)$row['store_id'])),
+                // Compare the state that was checked too, so parallel consumers cannot claim it twice.
+                $row['ck_abandoned_reminded_at'] === null ? 'ck_abandoned_reminded_at IS NULL'
+                    : $db->quoteInto('ck_abandoned_reminded_at = ?', $row['ck_abandoned_reminded_at']),
                 'is_active = ?' => 1,
                 'items_count > 0',
                 'customer_email = ?' => (string)$row['customer_email'],
                 'ck_abandoned_consent_id = ?' => (string)$row['ck_abandoned_consent_id'],
+                $this->lifetime->validCondition('updated_at', (int)$row['store_id']),
+                'updated_at <= NOW() - INTERVAL ' . $this->config->getDelayMinutes((int)$row['store_id']) . ' MINUTE',
                 $this->guard->validCondition('ck_abandoned_consent_id'),
             ]
         );
@@ -93,16 +104,7 @@ class Consumer
         }
         $email = (string)$row['customer_email'];
         $storeId = (int)$row['store_id'];
-        $addressClaimed = false;
         try {
-            // and the address: only one reminder per cooldown, also across consumers running in parallel
-            if (!$this->recipients->claim($email)) {
-                $db->update($table, ['ck_abandoned_reminded_at' => null] + $keepUpdatedAt, ['entity_id = ?' => $id]);
-                $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (address reminded recently)', $id));
-                return;
-            }
-            $addressClaimed = true;
-
             $this->emulation->startEnvironmentEmulation($storeId, Area::AREA_FRONTEND, true);
             try {
                 $quote = $this->cartRepository->get($id);
@@ -122,16 +124,12 @@ class Consumer
                 $this->emulation->stopEnvironmentEmulation();
             }
         } catch (\Throwable $e) {
-            // nothing was sent: release the cart so the next cron run queues it again, and the
-            // address only if this attempt claimed it (otherwise it belongs to another reminder)
+            // Restore the previous policy state and release queuing so the next cron run can retry.
             $db->update(
                 $table,
-                ['ck_abandoned_reminded_at' => null, 'ck_abandoned_queued_at' => null] + $keepUpdatedAt,
+                ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'], 'ck_abandoned_queued_at' => null] + $keepUpdatedAt,
                 ['entity_id = ?' => $id]
             );
-            if ($addressClaimed) {
-                $this->recipients->release($email);
-            }
             throw $e;
         }
         $this->logger->info(sprintf('CommerceKings_AbandonedCart: reminder sent for cart %d', $id));

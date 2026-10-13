@@ -21,9 +21,15 @@
                     <comment>180 = 3 hours. Use 1-2 minutes for testing.</comment>
                     <validate>validate-digits validate-greater-than-zero</validate>
                 </field>
-                <field id="max_age_days" translate="label comment" type="text" sortOrder="30" showInDefault="1">
-                    <label>Ignore carts older than (days)</label>
-                    <validate>validate-digits validate-greater-than-zero</validate>
+                <field id="quote_lifetime" translate="label comment" type="label" sortOrder="30" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Magento quote lifetime (read-only)</label>
+                    <frontend_model>CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\QuoteLifetime</frontend_model>
+                    <comment>Inherited from Sales &gt; Checkout &gt; Shopping Cart &gt; Quote Lifetime (days). Measured from the cart's last update. Restore links work for up to seven days after sending, while the quote remains unexpired.</comment>
+                </field>
+                <field id="reminders_per_cart" translate="label comment" type="label" sortOrder="35" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Reminders per cart (read-only)</label>
+                    <frontend_model>CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\ReminderPolicy</frontend_model>
+                    <comment>Defined by the delivery policy in code. Distinct eligible carts using the same email address can each receive a reminder.</comment>
                 </field>
                 <field id="template" translate="label" type="select" sortOrder="40" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Email template</label>

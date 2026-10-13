@@ -1,0 +1,242 @@
+<?php
+declare(strict_types=1);
+
+namespace CommerceKings\AbandonedCart\Test\Integration;
+
+use CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\QuoteLifetime as LifetimeField;
+use CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\ReminderPolicy as PolicyField;
+use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
+use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
+use CommerceKings\AbandonedCart\Model\Config;
+use CommerceKings\AbandonedCart\Model\Consumer;
+use CommerceKings\AbandonedCart\Model\LinkSignature;
+use CommerceKings\AbandonedCart\Model\QuoteLifetime;
+use CommerceKings\AbandonedCart\Model\QuoteScope;
+use CommerceKings\AbandonedCart\Model\ReminderData;
+use CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart;
+use CommerceKings\AbandonedCart\Model\RestoreAccess;
+use CommerceKings\Consent\Api\BrowserIdentityInterface;
+use CommerceKings\Consent\Api\ConsentGuardInterface;
+use CommerceKings\Consent\Api\ConsentInterface;
+use CommerceKings\Consent\Api\Data\Consent;
+use Magento\Framework\App\Bootstrap;
+use Magento\Framework\App\Config\ScopeConfigInterface;
+use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\App\State;
+use Magento\Framework\Data\FormFactory;
+use Magento\Framework\Mail\Template\TransportBuilder;
+use Magento\Framework\Mail\TransportInterface;
+use Magento\Framework\MessageQueue\PublisherInterface;
+use Magento\Framework\ObjectManagerInterface;
+use Magento\Quote\Api\CartRepositoryInterface;
+use Magento\Quote\Api\CartRepositoryInterfaceFactory;
+use Magento\Quote\Model\QuoteFactory;
+use Magento\Store\Model\App\Emulation;
+use Magento\Store\Model\StoreManagerInterface;
+use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+
+/** Real SQL, isolated store/quote fixtures. Transport and queue are stubs: no emails are sent. */
+class ReminderPolicyTest extends TestCase
+{
+    private ObjectManagerInterface $om;
+    private ResourceConnection $resource;
+    private StoreManagerInterface $stores;
+    private array $storeIds = [];
+    private array $quoteIds = [];
+    private array $published = [];
+    private int $sent = 0;
+
+    protected function setUp(): void
+    {
+        $root = getenv('MAGENTO_ROOT') ?: (defined('BP') ? BP : getcwd());
+        require_once $root . '/app/bootstrap.php';
+        $this->om = Bootstrap::create(BP, $_SERVER)->getObjectManager();
+        $this->om->get(State::class)->setAreaCode('frontend');
+        $this->resource = $this->om->get(ResourceConnection::class);
+        $this->stores = $this->om->get(StoreManagerInterface::class);
+        $this->stores->setCurrentStore('default');
+        $store = $this->stores->getStore();
+        foreach ([30, 2] as $days) {
+            $db = $this->resource->getConnection();
+            $db->insert($this->table('store'), ['code' => 'ck-reminder-' . bin2hex(random_bytes(6)),
+                'website_id' => $store->getWebsiteId(), 'group_id' => $store->getStoreGroupId(),
+                'name' => 'Reminder test', 'is_active' => 0]);
+            $this->storeIds[$days] = (int)$db->lastInsertId($this->table('store'));
+        }
+        $this->stores->reinitStores();
+        $this->stores->setCurrentStore('default');
+    }
+
+    protected function tearDown(): void
+    {
+        $db = $this->resource->getConnection();
+        if ($this->quoteIds) { $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quoteIds]); }
+        if ($this->storeIds) { $db->delete($this->table('store'), ['store_id IN (?)' => array_values($this->storeIds)]); }
+        $this->stores->reinitStores();
+        $this->stores->setCurrentStore('default');
+    }
+
+    private function table(string $name): string
+    {
+        return $this->resource->getTableName($name);
+    }
+
+    private function quote(int $days = 30, int $ageSeconds = 120): int
+    {
+        $quote = $this->om->get(QuoteFactory::class)->create();
+        $quote->setStore($this->stores->getStore())->setIsActive(true)->setCustomerIsGuest(true);
+        $this->om->get(CartRepositoryInterface::class)->save($quote);
+        $id = (int)$quote->getId();
+        $this->quoteIds[] = $id;
+        $this->resource->getConnection()->update($this->table('quote'), ['store_id' => $this->storeIds[$days],
+            'items_count' => 1, 'customer_email' => 'same@example.test', 'ck_abandoned_consent_id' => 'fixture-consent',
+            'updated_at' => gmdate('Y-m-d H:i:s', time() - $ageSeconds)], ['entity_id = ?' => $id]);
+        return $id;
+    }
+
+    private function row(int $id): array
+    {
+        return $this->resource->getConnection()->fetchRow($this->resource->getConnection()->select()
+            ->from($this->table('quote'))->where('entity_id = ?', $id));
+    }
+
+    private function config(): Config
+    {
+        $config = $this->createStub(Config::class);
+        $config->method('isEnabled')->willReturnCallback(fn ($id) => in_array($id, $this->storeIds, true));
+        $config->method('getDelayMinutes')->willReturn(1);
+        $config->method('getTemplate')->willReturn('fixture');
+        $config->method('getIdentity')->willReturn('general');
+        return $config;
+    }
+
+    private function lifetime(): QuoteLifetime
+    {
+        $config = $this->createStub(ScopeConfigInterface::class);
+        $config->method('getValue')->willReturnCallback(fn ($path, $scope, $id) => array_search((int)$id, $this->storeIds, true));
+        return new QuoteLifetime($config);
+    }
+
+    private function guard(): ConsentGuardInterface
+    {
+        $guard = $this->createStub(ConsentGuardInterface::class);
+        $guard->method('validCondition')->willReturn('1 = 1');
+        return $guard;
+    }
+
+    private function finder(): FindAbandonedCarts
+    {
+        $stores = $this->createStub(StoreManagerInterface::class);
+        $stores->method('getStores')->willReturn(array_map(fn ($id) => $this->stores->getStore($id), $this->storeIds));
+        $publisher = $this->createStub(PublisherInterface::class);
+        $publisher->method('publish')->willReturnCallback(function ($topic, $id) { $this->published[] = (int)$id; });
+        return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $publisher,
+            new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class));
+    }
+
+    private function consumer(): Consumer
+    {
+        $consent = $this->createStub(ConsentInterface::class);
+        $consent->method('isValid')->willReturn(true);
+        $consent->method('get')->willReturn(new Consent('fixture-consent', 'cart_reminder',
+            (int)$this->stores->getStore()->getWebsiteId(), 'source', 'ref', '2026-01-01 00:00:00',
+            '1', '1', '2026-01-01 00:00:00', '2027-01-01 00:00:00'));
+        $transport = $this->createStub(TransportInterface::class);
+        $transport->method('sendMessage')->willReturnCallback(function () { $this->sent++; });
+        $builder = $this->createStub(TransportBuilder::class);
+        foreach (['setTemplateIdentifier', 'setTemplateOptions', 'setTemplateVars', 'setFromByScope', 'addTo'] as $method) {
+            $builder->method($method)->willReturnSelf();
+        }
+        $builder->method('getTransport')->willReturn($transport);
+        $data = $this->createStub(ReminderData::class);
+        $data->method('build')->willReturn(['customer_name' => '']);
+        return new Consumer($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
+            $data, $builder, $this->createStub(Emulation::class), $this->config(), $consent, $this->guard(),
+            new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime());
+    }
+
+    public function testFinderUsesEachQuotesStoreLifetimeRatherThanTheOldSevenDaySetting(): void
+    {
+        $longLived = $this->quote(30, 8 * 86400);
+        $this->quote(2, 3 * 86400);
+        $this->quote(30, 31 * 86400);
+        $this->assertSame(1, $this->finder()->execute());
+        $this->assertSame([$longLived], $this->published);
+    }
+
+    public function testSameAddressCartsAreBothQueuedOnceWithoutExtendingLifetime(): void
+    {
+        $first = $this->quote();
+        $second = $this->quote();
+        $updated = [$this->row($first)['updated_at'], $this->row($second)['updated_at']];
+        $finder = $this->finder();
+        $this->assertSame(2, $finder->execute());
+        $this->assertSame(0, $finder->execute());
+        $this->assertEqualsCanonicalizing([$first, $second], $this->published);
+        $this->assertSame($updated, [$this->row($first)['updated_at'], $this->row($second)['updated_at']]);
+    }
+
+    public function testSameAddressCartsBothSendAndDuplicateMessagesDoNotSendAgain(): void
+    {
+        $first = $this->quote();
+        $second = $this->quote();
+        $updated = $this->row($first)['updated_at'];
+        $consumer = $this->consumer();
+        foreach ([$first, $second, $first, $second] as $id) { $consumer->process((string)$id); }
+        $this->assertSame(2, $this->sent);
+        $this->assertNotNull($this->row($first)['ck_abandoned_reminded_at']);
+        $this->assertNotNull($this->row($second)['ck_abandoned_reminded_at']);
+        $this->assertSame($updated, $this->row($first)['updated_at']);
+    }
+
+    public function testDelayedMessagesCannotSendForExpiredOrRecentlyChangedQuotes(): void
+    {
+        $expired = $this->quote(2, 3 * 86400);
+        $recent = $this->quote(30, 0);
+        $consumer = $this->consumer();
+        foreach ([$expired, $recent] as $id) { $consumer->process((string)$id); }
+        $this->assertSame(0, $this->sent);
+        $this->assertNull($this->row($expired)['ck_abandoned_reminded_at']);
+        $this->assertNull($this->row($recent)['ck_abandoned_reminded_at']);
+    }
+
+    public function testRestoreStopsAtQuoteExpiryEvenBeforeMagentoDeletesTheRow(): void
+    {
+        $id = $this->quote(2, 3 * 86400);
+        $this->resource->getConnection()->update($this->table('quote'), [
+            'ck_abandoned_reminded_at' => gmdate('Y-m-d H:i:s'),
+            'updated_at' => new \Zend_Db_Expr('updated_at'),
+        ], ['entity_id = ?' => $id]);
+        $browser = $this->createStub(BrowserIdentityInterface::class);
+        $access = new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores, $this->lifetime());
+        $quote = $this->om->get(CartRepositoryInterfaceFactory::class)->create()->get($id);
+        $this->assertFalse($access->isAvailable($quote));
+    }
+
+    public function testAdminPreviewIsReadOnlyAndUsesTheSelectedStoreScope(): void
+    {
+        $form = $this->om->get(FormFactory::class)->create();
+        $element = $form->addField('quote_lifetime', 'label', ['label' => 'Magento quote lifetime',
+            'scope' => 'stores', 'scope_id' => $this->storeIds[2], 'can_use_default_value' => true]);
+        $block = $this->om->create(LifetimeField::class, ['lifetime' => $this->lifetime()]);
+        $html = $block->render($element);
+        $this->assertStringContainsString('2 days', $html);
+        $this->assertStringNotContainsString('<input', $html);
+
+        $element = $form->addField('reminders_per_cart', 'label', ['label' => 'Reminders per cart',
+            'can_use_default_value' => true, 'can_use_website_value' => true, 'can_restore_to_default' => true]);
+        $block = $this->om->create(PolicyField::class);
+        $html = $block->render($element);
+        $this->assertStringContainsString('1 (one-time)', $html);
+        $this->assertStringNotContainsString('<input', $html);
+
+        // A replaced policy supplies its own description; the renderer escapes it and stays read-only.
+        $policy = $this->createStub(ReminderPolicyInterface::class);
+        $policy->method('getDescription')->willReturn('<b>Custom frequency</b>');
+        $html = $this->om->create(PolicyField::class, ['policy' => $policy])->render($element);
+        $this->assertStringContainsString('&lt;b&gt;Custom frequency&lt;/b&gt;', $html);
+        $this->assertStringNotContainsString('<b>Custom frequency</b>', $html);
+        $this->assertStringNotContainsString('<input', $html);
+    }
+}

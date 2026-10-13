@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Finalize the new policy API around typed state and SQL contexts before first publication, allowing additive state and history-backed policies without changing existing method signatures later.
+
+- Keep one reminder per cart through a replaceable policy API; remove cross-cart email cooldown and recipient history. Inherit Magento quote lifetime per store, show read-only admin previews for lifetime and delivery frequency, and recheck delay/expiry during delivery and restore.
+
 - Authorize capture by quote website/store, retain scope in atomic writes and clears, verify customer acknowledgements, reject mismatched queue consents, and retire unsafe quote-only opt-out links.
 
 - Use Consent's shared withdrawal-link API and confirmation page; retain a redirect for legacy quote-based email links, and keep cart cleanup in the withdrawal observer.

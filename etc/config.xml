@@ -6,7 +6,6 @@
             <general>
                 <enabled>0</enabled>
                 <delay_minutes>180</delay_minutes>
-                <max_age_days>7</max_age_days>
                 <template>commercekings_abandoned_cart_general_template</template>
                 <identity>general</identity>
             </general>

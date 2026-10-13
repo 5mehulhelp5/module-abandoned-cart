@@ -2,6 +2,7 @@
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
     <preference for="CommerceKings\AbandonedCart\Api\GuestEmailCaptureInterface" type="CommerceKings\AbandonedCart\Model\GuestEmailCapture"/>
+    <preference for="CommerceKings\AbandonedCart\Api\ReminderPolicyInterface" type="CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart"/>
     <!-- the consent purpose this feature uses (CommerceKings_Consent) - any consent source can grant it -->
     <type name="CommerceKings\Consent\Model\PurposePool">
         <arguments>

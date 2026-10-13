@@ -13,9 +13,6 @@ class Config
     /** The consent purpose of the reminder (CommerceKings_Consent) - declared in etc/di.xml. */
     public const PURPOSE = 'cart_reminder';
 
-    /** One reminder per email address within this many days, across all carts (anti-flooding). */
-    public const RECIPIENT_COOLDOWN_DAYS = 7;
-
     /** The restore link in a reminder works this many days after it was sent. */
     public const RESTORE_LINK_DAYS = 7;
 
@@ -30,14 +27,9 @@ class Config
         return $this->scopeConfig->isSetFlag(self::PREFIX . 'enabled', ScopeInterface::SCOPE_STORE, $storeId);
     }
 
-    public function getDelayMinutes(): int
+    public function getDelayMinutes(?int $storeId = null): int
     {
-        return max(1, (int)$this->scopeConfig->getValue(self::PREFIX . 'delay_minutes'));
-    }
-
-    public function getMaxAgeDays(): int
-    {
-        return max(1, (int)$this->scopeConfig->getValue(self::PREFIX . 'max_age_days'));
+        return max(1, (int)$this->scopeConfig->getValue(self::PREFIX . 'delay_minutes', ScopeInterface::SCOPE_STORE, $storeId));
     }
 
 

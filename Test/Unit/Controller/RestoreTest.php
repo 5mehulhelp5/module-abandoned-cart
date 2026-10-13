@@ -66,10 +66,10 @@ class RestoreTest extends TestCase
         mixed $formKey = 'valid-key'
     ): Quote {
         $cart += ['id' => 42, 'store' => 1, 'active' => 1, 'items' => 2, 'customer' => null, 'browser' => 'bh-owner',
-            'reminded' => gmdate('Y-m-d H:i:s', time() - 3600)];
+            'reminded' => gmdate('Y-m-d H:i:s', time() - 3600), 'updated' => gmdate('Y-m-d H:i:s', time() - 3600)];
         $quote = $this->mockWith(Quote::class, [
             'getId' => $cart['id'], 'getStoreId' => $cart['store'], 'getIsActive' => $cart['active'], 'getItemsCount' => $cart['items'],
-            'getCustomerId' => $cart['customer'],
+            'getCustomerId' => $cart['customer'], 'getUpdatedAt' => $cart['updated'],
             'getData' => fn ($key = '') => ['ck_abandoned_browser_hash' => $cart['browser'], 'ck_abandoned_reminded_at' => $cart['reminded']][$key] ?? null,
             'setIsActive' => self::$SELF,
         ]);
@@ -88,7 +88,9 @@ class RestoreTest extends TestCase
         $store->method('getId')->willReturn(1);
         $stores = $this->createStub(StoreManagerInterface::class);
         $stores->method('getStore')->willReturn($store);
-        $access = new RestoreAccess($signature, $browserId, $stores);
+        $lifetime = $this->createStub(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class);
+        $lifetime->method('isExpired')->willReturnCallback(fn ($updated) => $updated === 'expired');
+        $access = new RestoreAccess($signature, $browserId, $stores, $lifetime);
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists, $quoteModel) {
             $this->lookups++;
@@ -263,6 +265,7 @@ class RestoreTest extends TestCase
         return [
             'ordered' => [['active' => 0]],
             'emptied' => [['items' => 0]],
+            'quote expired under Magento lifetime' => [['updated' => 'expired']],
             'link older than 7 days' => [['reminded' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)]],
             'never reminded' => [['reminded' => null]],
             'invalid timestamp' => [['reminded' => 'invalid']],
