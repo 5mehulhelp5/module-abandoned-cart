@@ -1,5 +1,7 @@
 # Abandoned cart reminder
 
+**Development status:** preparing the first public release.
+
 Install in a Magento project with `composer require commercekings/module-abandoned-cart:^0.1` after the first
 release is published. Then enable its modules:
 
@@ -235,7 +237,7 @@ MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/aut
 
 Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, stock limits and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
 
-The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It checks finder eligibility and calls the real consumer for fixture carts; RabbitMQ transport and cron scheduling are separate checks.
+The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It runs the production finder, an isolated RabbitMQ exchange/queue and Magento consumer dispatch for fixture carts. The 28 browser scenarios also cover authenticated checkout, independent same-address carts, variant images, expiry and queued withdrawal. Cron scheduling is checked separately.
 
 ## Test cases
 

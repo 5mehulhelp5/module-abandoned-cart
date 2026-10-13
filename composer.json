@@ -40,5 +40,10 @@
             "/.gitignore",
             "/.gitattributes"
         ]
+    },
+    "homepage": "https://github.com/commercekings/module-abandoned-cart",
+    "support": {
+        "issues": "https://github.com/commercekings/module-abandoned-cart/issues",
+        "source": "https://github.com/commercekings/module-abandoned-cart"
     }
 }
