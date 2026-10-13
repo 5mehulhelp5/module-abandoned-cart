@@ -21,12 +21,22 @@ class LinkSignature
 
     public function sign(string $purpose, int $quoteId): string
     {
-        $key = (string)$this->deploymentConfig->get('crypt/key');
+        $key = $this->deploymentConfig->get('crypt/key');
+        if (!is_string($key) || trim($key) === '') {
+            throw new \LogicException('The deployment crypt key is required for cart recovery links.');
+        }
         return substr(hash_hmac('sha256', $purpose . '|' . $quoteId, $key), 0, 32);
     }
 
     public function isValid(string $purpose, int $quoteId, string $signature): bool
     {
-        return $quoteId > 0 && hash_equals($this->sign($purpose, $quoteId), $signature);
+        if ($quoteId <= 0) {
+            return false;
+        }
+        try {
+            return hash_equals($this->sign($purpose, $quoteId), $signature);
+        } catch (\LogicException) {
+            return false;
+        }
     }
 }

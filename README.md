@@ -106,7 +106,8 @@ The restore link works for up to 7 days after sending, capped by Magento's confi
 
 **Restore** `/cartreminder/cart/restore`:
 
-- invalid/forged signature, old `?c=` links → homepage;
+- invalid/forged signature, changed quote id or old `?c=` links → homepage before any quote lookup;
+- link generation requires a nonempty string deployment `crypt/key`; missing, blank or invalid keys stop generation and signature validation rejects safely;
 - the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's (`ck_abandoned_browser_hash`), and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
 - cart ordered/closed, emptied or expired under Magento's quote lifetime, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `ck_abandoned_reminded_at`) → notice "This reminder link is no longer available. You can continue shopping with your current cart." (owner only);
 - customer cart → cart page if logged in as that customer, otherwise login page with "Sign in to continue shopping – your cart is waiting for you.";

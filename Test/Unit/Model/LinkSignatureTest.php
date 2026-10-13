@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 
 class LinkSignatureTest extends TestCase
 {
-    private function signer(string $key = 'secret-key'): LinkSignature
+    private function signer(mixed $key = 'secret-key'): LinkSignature
     {
         $config = $this->createMock(DeploymentConfig::class);
         $config->method('get')->with('crypt/key')->willReturn($key);
@@ -56,5 +56,27 @@ class LinkSignatureTest extends TestCase
         // links in a sent email must survive an email change on the cart
         $method = new \ReflectionMethod(LinkSignature::class, 'sign');
         $this->assertSame(['purpose', 'quoteId'], array_map(fn ($p) => $p->getName(), $method->getParameters()));
+    }
+
+    /** @dataProvider invalidKeys */
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidKeys')]
+    public function testSigningRejectsMissingOrInvalidDeploymentKeys(mixed $key): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('The deployment crypt key is required for cart recovery links.');
+        $this->signer($key)->sign('restore', 10);
+    }
+
+    /** @dataProvider invalidKeys */
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidKeys')]
+    public function testInvalidDeploymentKeyCannotValidateAPredictableSignature(mixed $key): void
+    {
+        $predictable = substr(hash_hmac('sha256', 'restore|10', (string)$key), 0, 32);
+        $this->assertFalse($this->signer($key)->isValid('restore', 10, $predictable));
+    }
+
+    public static function invalidKeys(): array
+    {
+        return ['missing' => [null], 'empty' => [''], 'whitespace' => [" \t\n"], 'non-string' => [42]];
     }
 }

@@ -18,11 +18,17 @@ class RestoreAccess
     ) {
     }
 
+    /** Reject forged links before the controller loads any quote. */
+    public function isSigned(int $quoteId, string $token): bool
+    {
+        return $this->signature->isValid('restore', $quoteId, $token);
+    }
+
     public function isOwner(Quote $quote, string $token): bool
     {
         $hash = (string)$quote->getData('ck_abandoned_browser_hash');
         return (int)$quote->getStoreId() === (int)$this->stores->getStore()->getId()
-            && $this->signature->isValid('restore', (int)$quote->getId(), $token)
+            && $this->isSigned((int)$quote->getId(), $token)
             && $hash !== '' && hash_equals($hash, $this->browser->hash());
     }
 

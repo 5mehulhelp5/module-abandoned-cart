@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject forged recovery signatures before loading a quote; refuse signing with missing, empty or invalid deployment keys and reject validation safely.
+
 - Finalize the new policy API around typed state and SQL contexts before first publication, allowing additive state and history-backed policies without changing existing method signatures later.
 
 - Keep one reminder per cart through a replaceable policy API; remove cross-cart email cooldown and recipient history. Inherit Magento quote lifetime per store, show read-only admin previews for lifetime and delivery frequency, and recheck delay/expiry during delivery and restore.

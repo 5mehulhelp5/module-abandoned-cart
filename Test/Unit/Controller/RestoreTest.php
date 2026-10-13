@@ -160,6 +160,32 @@ class RestoreTest extends TestCase
         $this->assertSame([], $this->replaced);
     }
 
+    /** @dataProvider forgedRequests */
+    #[\PHPUnit\Framework\Attributes\DataProvider('forgedRequests')]
+    public function testWellFormedForgedLinksAreRejectedBeforeQuoteLookup(string $quoteId, string $token, bool $isPost): void
+    {
+        $this->restore(quoteId: $quoteId, token: $token, isPost: $isPost);
+        $this->assertSame('', $this->path);
+        $this->assertSame(0, $this->lookups);
+        $this->assertSame([], $this->restores);
+        $this->assertSame([], $this->replaced);
+        $this->assertSame([], $this->saved);
+        $this->assertSame([], $this->messages);
+        $this->assertSame([], $this->cookies);
+    }
+
+    public static function forgedRequests(): array
+    {
+        $valid = str_repeat('a', 32);
+        $forged = str_repeat('b', 32);
+        return [
+            'forged GET signature' => ['42', $forged, false],
+            'forged POST signature' => ['42', $forged, true],
+            'changed GET quote id' => ['43', $valid, false],
+            'changed POST quote id' => ['43', $valid, true],
+        ];
+    }
+
     public function testMissingCartGoesHome(): void
     {
         $this->restore([], 'bh-owner', null, 0, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', false);

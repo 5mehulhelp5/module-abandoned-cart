@@ -56,7 +56,7 @@ class Restore implements HttpGetActionInterface, HttpPostActionInterface, CsrfAw
             return $redirect->setPath('');
         }
         $quoteId = filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        if ($quoteId === false) {
+        if ($quoteId === false || !$this->access->isSigned($quoteId, $token)) {
             return $redirect->setPath('');
         }
         if ($this->request->isPost() && (!is_string($this->request->getParam('form_key'))
