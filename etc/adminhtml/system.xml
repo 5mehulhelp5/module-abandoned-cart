@@ -11,7 +11,7 @@
             <resource>CommerceKings_AbandonedCart::config</resource>
             <group id="general" translate="label comment" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
                 <label>Cart reminder</label>
-                <comment><![CDATA[One reminder email for carts left untouched - only with consent for purpose cart_reminder (Stores > Configuration > CommerceKings > Consent; guests: email typed in checkout, customers: account email). Cron finds the carts, a RabbitMQ consumer (commerceKingsAbandonedCartRemind) sends the emails. See the module README.md.]]></comment>
+                <comment><![CDATA[One reminder email for carts left untouched - only with consent for purpose cart_reminder (Stores > Configuration > CommerceKings > Consent; guests: email typed in checkout, customers: account email). Cron finds the carts, a Magento message queue consumer (commerceKingsAbandonedCartRemind) sends the emails using RabbitMQ or the database transport. See the module README.md.]]></comment>
                 <field id="enabled" translate="label" type="select" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Enabled</label>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Document Magento's native SQL queue setup alongside RabbitMQ, remove RabbitMQ-only package/admin wording, and add transport-selectable sandbox delivery checks with failed-send retry and scoped SQL cleanup.
+
 - Reject forged recovery signatures before loading a quote; refuse signing with missing, empty or invalid deployment keys and reject validation safely.
 
 - Finalize the new policy API around typed state and SQL contexts before first publication, allowing additive state and history-backed policies without changing existing method signatures later.

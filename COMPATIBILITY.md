@@ -16,6 +16,13 @@ Reminder SQL regressions also cover independent same-address carts, store-specif
 Endpoint regressions also cover website isolation, strict form keys, malformed input, HEAD safety and link replay. Its database is MariaDB 11.8. These checks do not certify other themes, third-party
 tracking scripts, checkout customizations or Adobe Commerce-specific features.
 
+Both native SQL (`Magento_MysqlMq`, connection `db`) and RabbitMQ 4.3 (`amqp`) passed all 29
+isolated browser scenarios each on Magento 2.4.9 / PHP 8.5 / MariaDB 11.8. Checks include native publication and
+consumer dispatch, duplicate protection, acknowledgement/rejection status, failed-send retry,
+restore/withdrawal and cleanup of run-owned queue rows. Selection without external broker
+configuration is checked through Magento's default connection provider. This does not prove
+throughput under load, other database versions or automatic migration of queued messages.
+
 The GitHub workflow checks package metadata, PHP syntax on 8.1–8.5 and Git archive contents.
 Local syntax checks passed on PHP 8.1.34, 8.2.30, 8.3.30, 8.4.26 and 8.5.11.
 The workflow does not install Magento or run runtime tests. Latest results are available in

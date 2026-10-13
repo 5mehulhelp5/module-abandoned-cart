@@ -15,7 +15,7 @@ Use the shop's normal DI compilation and static-content deployment process for p
 For development/tests use source checkouts (`--prefer-source`); release archives omit `Test/`.
 See [compatibility and verification](COMPATIBILITY.md) and [changes](CHANGELOG.md).
 
-Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts, a RabbitMQ consumer sends the emails.
+Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts, a Magento message queue consumer sends the emails through RabbitMQ or Magento's database transport.
 
 Depends on **`CommerceKings_Consent` only** – not on any consent source or banner module.
 
@@ -127,7 +127,7 @@ The restore link works for up to 7 days after sending, capped by Magento's confi
 
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 
-`cart gone`, `ordered / closed`, `empty`, `no email`, `no consent`, `already reminded`, `consent purpose / website mismatch`, `consent withdrawn / expired` (also: older banner/terms revision), `address reminded recently`, `disabled`. A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
+`cart gone`, `ordered / closed`, `empty`, `no email`, `no consent`, `already reminded`, `consent purpose / website mismatch`, `consent withdrawn / expired` (also: older banner/terms revision), `disabled`. A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
 
 ## Known behaviour / limitations
 
@@ -187,8 +187,55 @@ bin/magento setup:upgrade   # feature tables and consent schema
 - Check the selected sender in **Stores → Configuration → General → Store Email Addresses**.
 - Verify the sender domain's **SPF and DKIM** (and DMARC) for the no-reply address before launch – otherwise reminders land in spam.
 - After deploying new code, **restart the resident consumer** (it keeps the old code in memory): stop the running `queue:consumers:start commerceKingsAbandonedCartRemind` process; `cron_consumers_runner` starts it again on the next cron run.
-- Consumers run from cron (`cron_consumers_runner`) – no extra process needed. The consumer stays resident waiting for messages (`queue/consumers_wait_for_messages`).
+- Magento's cron consumer runner (`cron_consumers_runner`) can start the consumer. `queue/consumers_wait_for_messages` controls whether it waits for more messages when the queue is empty.
 - A custom theme email footer can use `cart_reminder_email` to identify reminder messages.
+
+## Queue transport
+
+The publisher, topology and consumer use Magento's deployment default connection. The same
+reminder handler and cart claims work with RabbitMQ (`amqp`) and Magento's database queue
+(`db`); no additional CommerceKings adapter module is required.
+
+For a shop without RabbitMQ, ensure `Magento_MysqlMq` is installed and enabled:
+
+```sh
+bin/magento module:status Magento_MysqlMq
+bin/magento module:enable Magento_MysqlMq
+```
+
+Merge these values into the existing `queue` section of `app/etc/env.php`:
+
+```php
+'queue' => [
+    'default_connection' => 'db',
+    'consumers_wait_for_messages' => 0,
+],
+```
+
+Keep the other deployment settings. `default_connection` affects every queue without an
+explicit XML connection; review other installed modules when changing it. Magento also
+defaults to `db` when no external broker or explicit default is configured. The optional
+`consumers_wait_for_messages` setting lets consumers exit when no messages remain.
+See Adobe's [deployment configuration reference](https://experienceleague.adobe.com/en/docs/commerce-operations/configuration-guide/files/config-reference-envphp).
+
+After enabling the module or changing transport, run:
+
+```sh
+bin/magento setup:upgrade
+bin/magento cache:clean config
+bin/magento queue:consumers:start commerceKingsAbandonedCartRemind --max-messages=100
+```
+
+Restart existing consumer processes after a transport change. Messages already queued are
+not moved between transports; drain the old queue before switching. Keep Magento cron
+running for cart discovery, consumer startup and the native SQL queue cleanup job.
+Ensure any `cron_consumers_runner/consumers` allowlist includes
+`commerceKingsAbandonedCartRemind`. Database delivery uses Magento's `queue`, `queue_message`
+and `queue_message_status` tables and adds work to the shop database.
+
+A failed send releases the cart claim. Magento rejects that message; a later finder run
+can publish a new one if the cart is still eligible. This is the same policy on both
+transports; switching to SQL does not add a per-cart retry limit or delivery backoff.
 
 ## Manual testing
 
@@ -238,7 +285,18 @@ MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/aut
 
 Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, stock limits and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
 
-The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It runs the production finder, an isolated RabbitMQ exchange/queue and Magento consumer dispatch for fixture carts. The 28 browser scenarios also cover authenticated checkout, independent same-address carts, variant images, expiry and queued withdrawal. Cron scheduling is checked separately.
+The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It runs the production finder, Magento's native publisher and consumer, and a run-specific queue using either `amqp` or `db`. The 29 browser scenarios also cover authenticated checkout, independent same-address carts, variant images, expiry, queued withdrawal and a failed send followed by successful retry. Cron scheduling is checked separately.
+
+From the sandbox root:
+
+```sh
+bash tools/verify-abandoned-cart-e2e.sh --transport=db
+bash tools/verify-abandoned-cart-e2e.sh --browser-only --transport=amqp
+```
+
+The fixture selects transport only inside its CLI processes; it keeps the shop's deployment
+default and shared queues unchanged. SQL runs verify native acknowledgement/rejection states
+and remove their own queue, message and status rows during cleanup.
 
 ## Test cases
 
