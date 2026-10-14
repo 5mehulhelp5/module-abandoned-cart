@@ -9,6 +9,7 @@ use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Sql\Expression;
 use Magento\Framework\MessageQueue\PublisherInterface;
 use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -54,7 +55,7 @@ class FindAbandonedCarts
 
         $released = $db->update(
             $quote,
-            ['ck_abandoned_queued_at' => null, 'updated_at' => new \Zend_Db_Expr('updated_at')],
+            ['ck_abandoned_queued_at' => null, 'updated_at' => new Expression('updated_at')],
             [
                 'ck_abandoned_queued_at < NOW() - INTERVAL ' . self::STALE_MINUTES . ' MINUTE',
                 $this->storeCondition(''),
@@ -71,7 +72,7 @@ class FindAbandonedCarts
             // claim it first: only the run that flips queued_at from NULL publishes
             $claimed = $db->update(
                 $quote,
-                ['ck_abandoned_queued_at' => new \Zend_Db_Expr('NOW()'), 'updated_at' => new \Zend_Db_Expr('updated_at')],
+                ['ck_abandoned_queued_at' => new Expression('NOW()'), 'updated_at' => new Expression('updated_at')],
                 array_merge(['entity_id = ?' => (int)$id], $this->eligibleConditions(''))
             );
             if ($claimed) {

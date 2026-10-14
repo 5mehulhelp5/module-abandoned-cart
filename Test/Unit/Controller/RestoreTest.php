@@ -16,6 +16,7 @@ use Magento\Framework\Controller\Result\Redirect;
 use Magento\Framework\Controller\Result\RedirectFactory;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\Message\ManagerInterface;
+use Magento\Framework\Serialize\Serializer\Json;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\Cookie\PublicCookieMetadata;
 use Magento\Framework\Stdlib\CookieManagerInterface;
@@ -45,7 +46,7 @@ class RestoreTest extends TestCase
     private array $restores = [];
     private array $errors = [];
     private mixed $result = null;
-    private ?string $sectionCookie = '{"cart":100,"customer":200}';
+    private mixed $sectionCookie = '{"cart":100,"customer":200}';
 
     /**
      * @param array $cart       saved cart: active, items, customer, ref
@@ -149,7 +150,7 @@ class RestoreTest extends TestCase
         $logger->method('error')->willReturnCallback(function ($message) { $this->errors[] = $message; });
 
         $this->result = (new Restore($request, $redirectFactory, $access, $repo, $checkout, $customer, $messages,
-            $cookieManager, $metadataFactory, $pages, $validator, $restore, $logger))->execute();
+            $cookieManager, $metadataFactory, $pages, $validator, $restore, $logger, new Json()))->execute();
         return $quote;
     }
 
@@ -356,6 +357,27 @@ class RestoreTest extends TestCase
         $this->assertSame(7, (int)$this->replaced[0]->getId());
         $this->assertSame(['Your saved cart has been restored.'], $this->messages);
         $this->assertArrayHasKey('cart', json_decode($this->cookies['section_data_ids'], true));
+    }
+
+    /** @dataProvider invalidSectionCookies */
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidSectionCookies')]
+    public function testMalformedOrScalarSectionCookieDoesNotBreakRestore(mixed $cookie): void
+    {
+        $this->sectionCookie = $cookie;
+        $this->restore();
+        $this->assertSame('checkout/cart', $this->path);
+        $this->assertCount(1, $this->replaced);
+        $ids = json_decode($this->cookies['section_data_ids'], true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame(['cart'], array_keys($ids));
+        $this->assertIsInt($ids['cart']);
+        $this->assertSame([], $this->errors);
+    }
+
+    public static function invalidSectionCookies(): array
+    {
+        return ['missing' => [null], 'array cookie' => [['cart' => 100]], 'broken JSON' => ['{broken'], 'JSON null' => ['null'],
+            'scalar' => ['42'], 'invalid UTF-8' => ["{\"cart\":\"\xFF\"}"],
+            'non-finite section value' => ['{"customer":1e400}']];
     }
 
     /** @dataProvider malformedRequests */

@@ -17,6 +17,7 @@ use Magento\Framework\Controller\Result\RedirectFactory;
 use Magento\Framework\Data\Form\FormKey\Validator;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Message\ManagerInterface;
+use Magento\Framework\Serialize\Serializer\Json;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\CookieManagerInterface;
 use Magento\Framework\View\Result\PageFactory;
@@ -41,7 +42,8 @@ class Restore implements HttpGetActionInterface, HttpPostActionInterface, CsrfAw
         private readonly PageFactory $pageFactory,
         private readonly Validator $formKeyValidator,
         private readonly CartRestore $restore,
-        private readonly LoggerInterface $logger
+        private readonly LoggerInterface $logger,
+        private readonly Json $json
     ) {
     }
 
@@ -111,12 +113,20 @@ class Restore implements HttpGetActionInterface, HttpPostActionInterface, CsrfAw
 
     private function refreshMiniCart(): void
     {
-        $ids = json_decode((string)$this->cookieManager->getCookie('section_data_ids'), true);
-        $ids = is_array($ids) ? $ids : [];
-        $ids['cart'] = time() + 1;
+        $value = $this->cookieManager->getCookie('section_data_ids');
+        $cartVersion = time() + 1;
+        try {
+            $ids = is_string($value) ? $this->json->unserialize($value) : [];
+            $ids = is_array($ids) ? $ids : [];
+            $ids['cart'] = $cartVersion;
+            $json = $this->json->serialize($ids);
+        } catch (\InvalidArgumentException) {
+            // Invalid or unencodable customer-data values must not undo a successful restore.
+            $json = $this->json->serialize(['cart' => $cartVersion]);
+        }
         $this->cookieManager->setPublicCookie(
             'section_data_ids',
-            (string)json_encode($ids),
+            (string)$json,
             $this->cookieMetadataFactory->createPublicCookieMetadata()->setPath('/')->setDuration(86400)
         );
     }

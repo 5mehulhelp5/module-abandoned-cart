@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Model;
 
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Sql\Expression;
 
 /**
  * Clears the reminder consent from open carts once it is withdrawn (switched off in the consent
@@ -44,7 +45,7 @@ class ConsentWithdrawal
         $consent = [
             'ck_abandoned_consent_id' => null,
             'ck_abandoned_browser_hash' => null,
-            'updated_at' => new \Zend_Db_Expr('updated_at'),
+            'updated_at' => new Expression('updated_at'),
         ];
         $guests = $db->update($table, ['customer_email' => null] + $consent, array_merge($where, ['customer_id IS NULL']));
         return $guestOnly ? $guests

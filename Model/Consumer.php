@@ -10,6 +10,7 @@ use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use Magento\Framework\App\Area;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Sql\Expression;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Quote;
@@ -79,10 +80,10 @@ class Consumer
         // claim: only one delivery of this message can flip reminded_at from NULL - and only while the cart
         // is still what was checked above and its consent is still valid, in the same statement: a
         // withdrawal stored before this point stops the send, one after it finds the reminder already out
-        $keepUpdatedAt = ['updated_at' => new \Zend_Db_Expr('updated_at')];
+        $keepUpdatedAt = ['updated_at' => new Expression('updated_at')];
         $claimed = $db->update(
             $table,
-            ['ck_abandoned_reminded_at' => new \Zend_Db_Expr('NOW()')] + $keepUpdatedAt,
+            ['ck_abandoned_reminded_at' => new Expression('NOW()')] + $keepUpdatedAt,
             [
                 'entity_id = ?' => $id,
                 'store_id = ?' => (int)$row['store_id'],
