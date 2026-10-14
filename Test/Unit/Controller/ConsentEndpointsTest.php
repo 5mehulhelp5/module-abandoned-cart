@@ -6,7 +6,9 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Controller;
 use CommerceKings\AbandonedCart\Controller\Consent\Capture;
 use CommerceKings\AbandonedCart\Model\ConsentWithdrawal;
 use CommerceKings\AbandonedCart\Model\CustomerConsentCapture;
-use CommerceKings\AbandonedCart\Observer\ClearCartsOnConsentWithdrawn;
+use CommerceKings\AbandonedCart\Model\WithdrawalHandler;
+use CommerceKings\Consent\Api\Data\WithdrawalContext;
+use CommerceKings\Consent\Model\WithdrawalPool;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Customer\Model\Session as CustomerSession;
@@ -14,8 +16,6 @@ use Magento\Framework\Controller\Result\Json;
 use Magento\Framework\Controller\Result\JsonFactory;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\Data\Form\FormKey\Validator;
-use Magento\Framework\Event;
-use Magento\Framework\Event\Observer;
 use PHPUnit\Framework\TestCase;
 
 class ConsentEndpointsTest extends TestCase
@@ -52,9 +52,10 @@ class ConsentEndpointsTest extends TestCase
 
     private function withdrawn(string $purpose, ConsentWithdrawal $withdrawal): void
     {
-        (new ClearCartsOnConsentWithdrawn($withdrawal))->execute(new Observer(['event' => new Event([
-            'purpose' => $purpose, 'browser_hash' => 'bh', 'website_id' => 1, 'consent_ids' => ['c1', 'c2'], 'via' => 'banner',
-        ])]));
+        $pool = new WithdrawalPool(['cart_reminder' => ['abandoned_cart' => new WithdrawalHandler($withdrawal)]]);
+        $pool->get($purpose, 'abandoned_cart')?->execute(new WithdrawalContext(
+            $purpose, ['c1', 'c2'], 1, 'bh', 'banner'
+        ));
     }
 
     public function testWithdrawalClearsEveryCartCapturedWithTheWithdrawnConsents(): void

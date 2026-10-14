@@ -77,9 +77,6 @@ class FindAbandonedCartsTest extends TestCase
         $this->fetchColResult = ['10', '11', '12'];
         $this->assertSame(3, $this->finder()->execute());
         $this->assertSame(['10', '11', '12'], array_column($this->published, 1));
-        foreach ($this->selectWhere as [$condition]) {
-            $this->assertStringNotContainsString('ck_abandoned_cart_recipient', (string)$condition);
-        }
     }
 
     public function testAlternativePolicyIsUsedInSelectionAndQueueClaims(): void

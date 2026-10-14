@@ -1,7 +1,0 @@
-<?xml version="1.0"?>
-<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Event/etc/events.xsd">
-    <!-- consent for the reminder switched off in the consent source (CommerceKings_Consent) -->
-    <event name="commercekings_consent_withdrawn">
-        <observer name="commercekings_abandoned_cart_clear_carts" instance="CommerceKings\AbandonedCart\Observer\ClearCartsOnConsentWithdrawn"/>
-    </event>
-</config>

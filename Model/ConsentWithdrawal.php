@@ -7,7 +7,7 @@ use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 
 /**
- * Clears the reminder consent from open carts once it is withdrawn (switched off in the consent
+ * Clears module-owned reminder capture from open carts once consent is withdrawn (switched off in the consent
  * source, "reject all", the unsubscribe link) or missing at capture. Captured reminder email is cleared;
  * Magento's checkout email is preserved. The browser binding goes with the consent (no consent, nothing to restore). Only
  * carts with a consent are touched. Direct UPDATEs - no quote save, updated_at kept.

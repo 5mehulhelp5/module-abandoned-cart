@@ -31,11 +31,11 @@ class LinkSignatureTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $signer->sign('restore', 10));
     }
 
-    public function testRestoreAndOptOutSignaturesDiffer(): void
+    public function testSignatureCannotBeReusedForAnotherPurpose(): void
     {
         $signer = $this->signer();
-        $this->assertNotSame($signer->sign('restore', 10), $signer->sign('optout', 10));
-        $this->assertFalse($signer->isValid('optout', 10, $signer->sign('restore', 10)));
+        $this->assertNotSame($signer->sign('restore', 10), $signer->sign('other-purpose', 10));
+        $this->assertFalse($signer->isValid('other-purpose', 10, $signer->sign('restore', 10)));
     }
 
     public function testOtherCartOrOtherKeyDoesNotValidate(): void
@@ -109,7 +109,7 @@ class LinkSignatureTest extends TestCase
         $this->assertTrue($signer->isValid('restore', 10, $native));
         $this->assertFalse($signer->isValid('restore', 10, $legacy));
         $this->assertFalse($signer->isValid('restore', 11, $native));
-        $this->assertFalse($signer->isValid('optout', 10, $native));
+        $this->assertFalse($signer->isValid('other-purpose', 10, $native));
         $this->assertFalse($this->signer('different-key')->isValid('restore', 10, $native));
         $this->assertFalse($signer->isValid('restore', 10, substr(hash_hmac('sha256', 'restore|10', 'old-key'), 0, 32)));
     }

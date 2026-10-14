@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Remove the development-only opt-out redirect, obsolete route fixtures/documentation and retired recipient-table migration metadata. Email opt-out belongs exclusively to Consent.
+
+- Register reminder cleanup through Consent's typed withdrawal pool instead of an event observer. Share the same field cleanup for guests and customers, preserve native Magento emails and delivery history, and allow durable retries against the original withdrawn consent IDs.
+
 - Keep captured guest reminder email and its change timestamp in dedicated quote columns. Preserve Magento checkout email during capture and withdrawal, resolve guest/customer recipients through a replaceable API, and include contact activity in the abandonment delay without extending quote lifetime or resetting delivery history.
 
 - Validate guest email through a global before plugin on `GuestEmailCaptureInterface`, using Magento's native `stringTrim` filter and `EmailAddress` / `StringLength` validators with the length limit in DI. Aggregate input errors without echoing email values; retain the single V1 endpoint, flat payload, explicit clearing and service authorization checks.
@@ -22,7 +26,7 @@
 
 - Authorize capture by quote website/store, retain scope in atomic writes and clears, verify customer acknowledgements, reject mismatched queue consents, and retire unsafe quote-only opt-out links.
 
-- Use Consent's shared withdrawal-link API and confirmation page; retain a redirect for legacy quote-based email links, and keep cart cleanup in the withdrawal observer.
+- Use Consent's shared withdrawal-link API and confirmation page, with module-owned cart cleanup.
 - Clarify reminder email wording without promising a saved cart snapshot, and distinguish an unavailable reminder link from the current cart.
 - Serialize guest email capture, acknowledge saved data, retry transient failures and clear stale guest capture on invalid or empty input.
 - Require confirmation and a form-key POST for guest restores; lock and reload carts, preserve destination details, validate stock and save merges atomically.

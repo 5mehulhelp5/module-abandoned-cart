@@ -2,7 +2,7 @@
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:App/etc/routes.xsd">
     <router id="standard">
-        <!-- /cartreminder/cart/restore?c=… : restore link from the reminder email -->
+        <!-- /cartreminder/cart/restore?q=…&amp;t=… : recovery link from the reminder email -->
         <route id="cartreminder" frontName="cartreminder">
             <module name="CommerceKings_AbandonedCart"/>
         </route>

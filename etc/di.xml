@@ -20,6 +20,15 @@
         </arguments>
     </type>
     <preference for="CommerceKings\AbandonedCart\Api\ReminderPolicyInterface" type="CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart"/>
+    <type name="CommerceKings\Consent\Model\WithdrawalPool">
+        <arguments>
+            <argument name="handlers" xsi:type="array">
+                <item name="cart_reminder" xsi:type="array">
+                    <item name="abandoned_cart" xsi:type="object">CommerceKings\AbandonedCart\Model\WithdrawalHandler</item>
+                </item>
+            </argument>
+        </arguments>
+    </type>
     <!-- the consent purpose this feature uses (CommerceKings_Consent) - any consent source can grant it -->
     <type name="CommerceKings\Consent\Model\PurposePool">
         <arguments>

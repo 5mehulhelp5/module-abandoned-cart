@@ -260,4 +260,42 @@ class CaptureScopeTest extends TestCase
         $this->resource->getConnection()->update($this->table('quote'), ['customer_id' => (int)$customer->getId()], ['entity_id = ?' => $id]);
         $this->assertSame('fixture@example.test', $this->om->get(ReminderEmailResolverInterface::class)->resolve($id));
     }
+
+    public function testRegisteredPoolHandlerClearsGuestsAndCustomersButPreservesNativeEmailsAndNewGrants(): void
+    {
+        [$guest] = $this->quote();
+        [$registered] = $this->quote();
+        [$newGrant] = $this->quote();
+        $customer = $this->om->get(CustomerInterfaceFactory::class)->create();
+        $customer->setWebsiteId((int)$this->stores->getStore()->getWebsiteId())->setStoreId((int)$this->stores->getStore()->getId())
+            ->setEmail('ck-withdrawal-' . bin2hex(random_bytes(6)) . '@example.test')->setFirstname('Fixture')->setLastname('Recipient');
+        $customer = $this->om->get(CustomerRepositoryInterface::class)->save($customer);
+        $this->customers[] = (int)$customer->getId();
+        $db = $this->resource->getConnection();
+        $oldConsent = bin2hex(random_bytes(16));
+        $db->update($this->table('quote'), ['ck_abandoned_consent_id' => $oldConsent,
+            'ck_abandoned_reminded_at' => '2026-01-01 00:00:00'], ['entity_id IN (?)' => [$guest, $registered]]);
+        $db->update($this->table('quote'), ['customer_id' => (int)$customer->getId()], ['entity_id = ?' => $registered]);
+        $before = [$guest => $this->row($guest), $registered => $this->row($registered)];
+        $newBefore = $this->row($newGrant);
+        $accountEmail = $customer->getEmail();
+        $pool = $this->om->get(\CommerceKings\Consent\Model\WithdrawalPool::class);
+        $handler = $pool->get(Config::PURPOSE, 'abandoned_cart');
+        $this->assertInstanceOf(\CommerceKings\Consent\Api\WithdrawalHandlerInterface::class, $handler);
+        $context = new \CommerceKings\Consent\Api\Data\WithdrawalContext(Config::PURPOSE, [$oldConsent],
+            (int)$this->stores->getStore()->getWebsiteId(), 'original-browser', 'email');
+        $handler->execute($context);
+        $handler->execute($context); // At-least-once retry is harmless.
+        foreach ([$guest, $registered] as $id) {
+            $after = $this->row($id);
+            foreach (['ck_abandoned_email', 'ck_abandoned_email_updated_at', 'ck_abandoned_consent_id', 'ck_abandoned_browser_hash'] as $field) {
+                $this->assertNull($after[$field]);
+            }
+            foreach (['customer_email', 'updated_at', 'ck_abandoned_reminded_at'] as $field) {
+                $this->assertSame($before[$id][$field], $after[$field]);
+            }
+        }
+        $this->assertSame($newBefore, $this->row($newGrant));
+        $this->assertSame($accountEmail, $this->om->get(CustomerRepositoryInterface::class)->getById((int)$customer->getId())->getEmail());
+    }
 }
