@@ -193,6 +193,84 @@ class ReminderPolicyTest extends TestCase
         $this->assertSame($updated, $this->row($first)['updated_at']);
     }
 
+    private function workers(string $mode, array $ids, int $count = 4): array
+    {
+        $barrier = tempnam(sys_get_temp_dir(), 'ck-reminder-barrier-');
+        $workers = [];
+        try {
+            for ($number = 1; $number <= $count; $number++) {
+                $pipes = [];
+                $process = proc_open([PHP_BINARY, '-d', 'opcache.enable_cli=0', __DIR__ . '/reminder-worker.php',
+                    $mode, (string)$this->storeIds[30], implode(',', $ids), $barrier, (string)$number],
+                    [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, BP);
+                $this->assertIsResource($process);
+                fclose($pipes[0]);
+                $workers[] = [$process, $pipes];
+            }
+            $deadline = microtime(true) + 30;
+            for ($number = 1; $number <= $count; $number++) {
+                while (!is_file($barrier . '.' . $number . '.ready')) {
+                    if (!proc_get_status($workers[$number - 1][0])['running']) {
+                        $this->fail('Reminder worker exited before the barrier: '
+                            . stream_get_contents($workers[$number - 1][1][2]));
+                    }
+                    if (microtime(true) > $deadline) { $this->fail('Reminder workers did not reach the barrier'); }
+                    usleep(10000);
+                }
+            }
+            file_put_contents($barrier . '.go', 'go');
+            $results = [];
+            foreach ($workers as [$process, $pipes]) {
+                $stdout = stream_get_contents($pipes[1]);
+                $stderr = stream_get_contents($pipes[2]);
+                fclose($pipes[1]); fclose($pipes[2]);
+                $this->assertSame(0, proc_close($process), $stderr . $stdout);
+                $results[] = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+            }
+            $workers = [];
+            return $results;
+        } finally {
+            foreach ($workers as [$process, $pipes]) {
+                if (is_resource($process)) {
+                    proc_terminate($process);
+                    foreach ($pipes as $pipe) { if (is_resource($pipe)) { fclose($pipe); } }
+                    proc_close($process);
+                }
+            }
+            foreach (glob($barrier . '*') as $file) { unlink($file); }
+        }
+    }
+
+    public function testConcurrentFindersPublishEachCartOnlyOnce(): void
+    {
+        $ids = [];
+        for ($i = 0; $i < 12; $i++) { $ids[] = $this->quote(); }
+        $results = $this->workers('finder', $ids);
+        $published = array_merge(...array_column($results, 'published'));
+        $this->assertCount(12, $published);
+        $this->assertEqualsCanonicalizing($ids, $published);
+        foreach ($ids as $id) { $this->assertNotNull($this->row($id)['ck_abandoned_queued_at']); }
+    }
+
+    public function testConcurrentConsumersClaimEachCartOnlyOnce(): void
+    {
+        $ids = [];
+        for ($i = 0; $i < 12; $i++) { $ids[] = $this->quote(); }
+        $results = $this->workers('consumer', $ids);
+        $this->assertSame(12, array_sum(array_column($results, 'sent')));
+        foreach ($ids as $id) { $this->assertNotNull($this->row($id)['ck_abandoned_reminded_at']); }
+    }
+
+    public function testInterruptedClaimIsNotAutomaticallyRetriedAsAnUnsentCart(): void
+    {
+        $id = $this->quote();
+        $result = $this->workers('interrupt', [$id], 1);
+        $this->assertTrue($result[0]['interrupted']);
+        $this->assertNotNull($this->row($id)['ck_abandoned_reminded_at']);
+        $this->assertSame(0, $this->workers('consumer', [$id], 1)[0]['sent']);
+        $this->assertSame(0, $this->finder()->execute());
+    }
+
     public function testDelayedMessagesCannotSendForExpiredOrRecentlyChangedQuotes(): void
     {
         $expired = $this->quote(2, 3 * 86400);

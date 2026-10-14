@@ -138,11 +138,11 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 - after restore/merge the customer-data `cart` section is marked stale (`section_data_ids` cookie), so the mini cart shows the right count.
 - that customer-data cookie uses Magento's configured cookie lifetime and domain (zero lifetime creates a session cookie). Its path stays `/`, matching Magento's customer-data JavaScript even when the session cookie has a narrower path.
 
-**Opt-out** `/ckconsent/optout` – Consent owns the one-click link and confirmation page (no confirm button):
+**Opt-out** `/ckconsent/optout` – Consent owns the signed link and explicit confirmation:
 
-- valid link → consent withdrawn, page "Consent withdrawn" (`noindex`) with the purpose-specific confirmation, translated per store locale; the registered handler clears captured reminder email and consent while preserving Magento checkout email, with durable retry if cleanup fails;
+- valid GET → read-only confirmation form; consent, captured email and banner preferences stay unchanged until the visitor submits its form-key-protected POST. After confirmation, the handler clears captured reminder email and consent while preserving Magento checkout email, with durable retry if cleanup fails;
 - already withdrawn → confirmation again, without withdrawing a later explicit consent. Deleting the original cart does not break the link; deleting the consent record, an invalid signature or another website → homepage;
-- opened in the owning browser → Consent's `js/withdrawal-banner.js` switches the mapped choice off only if that browser's current choice was withdrawn. Other categories and later explicit choices stay; another device's cookie is untouched. Purposes sharing the same category follow it together;
+- confirmed in the owning browser → Consent's `js/withdrawal-banner.js` switches the mapped choice off only if that browser's current choice was withdrawn. GET never synchronizes preferences; an already-withdrawn choice can be applied explicitly with the form. Another browser sees a generic question, then redirects home after submitting. Other categories and later explicit choices stay; another device's cookie is untouched. Purposes sharing the same category follow it together;
 
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 
@@ -154,7 +154,8 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 - **The restore link opens the cart as it is now**, not as it was in the email. Products the customer removed are not brought back (no snapshot); an emptied cart shows "This reminder link is no longer available. You can continue shopping with your current cart."
 - **Another device / cleared cookie / expired cookie → homepage.** The link only works in the browser that gave the consent (deliberate: nobody else sees the cart, email or address).
 - Visitors who answered the banner **before** the category existed are not asked again unless **Banner revision** (Consent section) is raised; until then the category stays off for them.
-- **One-click opt-out:** mail scanners that open every link (mostly Microsoft 365) can opt a recipient out unknowingly. Harmless – they just miss the one reminder.
+- **Scanner-safe opt-out:** GET/HEAD do not withdraw or change banner preferences; the visitor must explicitly submit the confirmation form. RFC 8058 email-client one-click unsubscribe is not implemented.
+- **Delivery is not atomic with SMTP.** The reminder timestamp is claimed before handoff. A hard worker interruption after claiming can leave a cart marked reminded even if nothing was sent; it is not automatically retried. Caught send failures release the claim, but an SMTP exception may itself be ambiguous. Review transport/provider evidence before manually retrying an uncertain attempt. Once `sendMessage()` returns successfully, a later emulation cleanup error keeps the claim to prevent a duplicate. The timestamp is not proof of inbox delivery.
 - Guest carts are deleted by Magento's own `sales_clean_quotes` after "Quote Lifetime" (default 30 days) with their email; the consent record stays in `CommerceKings_Consent` until its own cleanup.
 - An ordered cart keeps its email in `sales_order` (needed for the order, unrelated to this consent).
 - The email shows the cart at **send** time. Merging recalculates Magento totals; restoring a guest cart into a session with no existing cart adopts it, and Magento's normal cart/checkout flow handles later recalculation.
@@ -181,7 +182,8 @@ cookies are refused without server errors. Signed withdrawal HEAD requests have 
 | `POST /cartreminder/consent/capture` (form key) | logged-in customer on checkout | store consent on the session cart |
 | `GET /cartreminder/cart/restore?q=&t=` | email | validate ownership and show restore confirmation |
 | `POST /cartreminder/cart/restore` (form key, `q`, `t`) | confirmation page | adopt or merge the saved cart |
-| `GET /ckconsent/optout?c=&t=` (Consent module) | email | withdraw the consent and show confirmation |
+| `GET /ckconsent/optout?c=&t=` (Consent module) | email | show read-only withdrawal confirmation |
+| `POST /ckconsent/optout` (form key, `c`, `t`) | confirmation form | withdraw consent and apply owned-browser preferences |
 
 Guest capture accepts the flat payload `{"email":"visitor@example.test"}`. An explicit
 `{"email":""}` clears capture. Missing email, non-string values, invalid format and values over

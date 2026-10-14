@@ -286,4 +286,19 @@ class ConsumerTest extends TestCase
         $this->assertNull($release['data']['ck_abandoned_queued_at']);
         $this->assertSame('updated_at', (string)$release['data']['updated_at']);
     }
+
+    public function testPostSendCleanupFailureCannotReleaseTheClaimForAnotherEmail(): void
+    {
+        $consumer = $this->consumer();
+        $this->emulation->expects($this->once())->method('stopEnvironmentEmulation')
+            ->willThrowException(new \RuntimeException('emulation cleanup failed'));
+        try {
+            $consumer->process('42');
+            $this->fail('Expected cleanup failure');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('emulation cleanup failed', $error->getMessage());
+        }
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertCount(1, $this->updates, 'Keep the existing reminder claim after successful SMTP handoff');
+    }
 }

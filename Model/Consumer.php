@@ -115,6 +115,7 @@ class Consumer
             return;
         }
         $storeId = (int)$row['store_id'];
+        $sent = false;
         try {
             // A replaced resolver may read an external recipient source. Recheck it after claiming too.
             if ($this->recipients->resolve($id) !== $email) {
@@ -138,10 +139,17 @@ class Consumer
                     ->addTo($email, $vars['customer_name'] ?: null)
                     ->getTransport()
                     ->sendMessage();
+                $sent = true;
             } finally {
                 $this->emulation->stopEnvironmentEmulation();
             }
         } catch (\Throwable $e) {
+            if ($sent) {
+                // SMTP returned successfully. A later emulation cleanup error must not enable a duplicate.
+                $this->logger->error(sprintf('CommerceKings_AbandonedCart: cart %d sent; post-send cleanup failed', $id),
+                    ['exception_class' => get_class($e)]);
+                throw $e;
+            }
             // Restore the previous policy state and release queuing so the next cron run can retry.
             $db->update(
                 $table,
