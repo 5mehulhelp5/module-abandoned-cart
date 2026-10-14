@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Generate and verify recovery signatures exclusively through Magento's native encryptor, without a legacy raw-key fallback; test encoded/current keys, invalid keys, forged hashes and signer failures.
+
 - Document Magento's native SQL queue setup alongside RabbitMQ, remove RabbitMQ-only package/admin wording, and add transport-selectable sandbox delivery checks with failed-send retry and scoped SQL cleanup.
 
 - Reject forged recovery signatures before loading a quote; refuse signing with missing, empty or invalid deployment keys and reject validation safely.

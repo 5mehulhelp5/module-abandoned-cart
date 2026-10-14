@@ -102,7 +102,12 @@ Email content restricts visitor-controlled values and uses the shop's catalog da
 
 ## Links in the email
 
-The restore link works for up to 7 days after sending, capped by Magento's configured quote lifetime from the cart's last update, and uses `?q={cart id}&t={signature}`. Its signature (`LinkSignature`) is an HMAC with the store's `crypt/key` over purpose + cart id. The opt-out link comes from Consent's `WithdrawalLinkInterface`, uses `?c={consent id}&t={signature}`, and remains usable while that consent record is retained. Its separate HMAC binds the consent id and website. Neither signature includes the email, so changing a cart or account email does not invalidate it. Magento's masked cart id (the guest cart REST key) never appears in the email. Changing the deployment signing key invalidates existing links.
+The restore link works for up to 7 days after sending, capped by Magento's configured quote lifetime from the cart's last update, and uses `?q={cart id}&t={signature}`. Its signature (`LinkSignature`) uses Magento's `EncryptorInterface::hash()` over purpose + cart id, retaining the existing 32-hex token format. Magento supplies HMAC-SHA256 and selects/decodes its current deployment key. The opt-out link comes from Consent's `WithdrawalLinkInterface`, uses `?c={consent id}&t={signature}`, and remains usable while that consent record is retained. Its separate HMAC binds the consent id and website. Neither signature includes the email, so changing a cart or account email does not invalidate it. Magento's masked cart id (the guest cart REST key) never appears in the email. Changing the deployment signing key invalidates existing links.
+
+Generation and verification use only Magento's native signer, with no legacy raw-key fallback.
+Older development links can stop working when their raw-key signatures differ from Magento's
+current-key signatures. Use a fresh cart to generate a reminder when testing this change. Comparison uses
+`hash_equals`; password-hash formats and unkeyed hashes cannot authorize recovery.
 
 **Restore** `/cartreminder/cart/restore`:
 

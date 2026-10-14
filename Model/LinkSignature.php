@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Model;
 
 use Magento\Framework\App\DeploymentConfig;
+use Magento\Framework\Encryption\EncryptorInterface;
 
 /**
  * Signs restore links in the reminder email: HMAC with the store's crypt key over
@@ -15,28 +16,34 @@ use Magento\Framework\App\DeploymentConfig;
 class LinkSignature
 {
     public function __construct(
-        private readonly DeploymentConfig $deploymentConfig
+        private readonly DeploymentConfig $deploymentConfig,
+        private readonly EncryptorInterface $encryptor
     ) {
     }
 
     public function sign(string $purpose, int $quoteId): string
     {
-        $key = $this->deploymentConfig->get('crypt/key');
-        if (!is_string($key) || trim($key) === '') {
-            throw new \LogicException('The deployment crypt key is required for cart recovery links.');
-        }
-        return substr(hash_hmac('sha256', $purpose . '|' . $quoteId, $key), 0, 32);
+        $this->assertDeploymentKey();
+        return substr($this->encryptor->hash($purpose . '|' . $quoteId), 0, 32);
     }
 
     public function isValid(string $purpose, int $quoteId, string $signature): bool
     {
-        if ($quoteId <= 0) {
+        if ($quoteId <= 0 || !preg_match('/^[a-f0-9]{32}$/D', $signature)) {
             return false;
         }
         try {
             return hash_equals($this->sign($purpose, $quoteId), $signature);
-        } catch (\LogicException) {
+        } catch (\LogicException | \RuntimeException) {
             return false;
+        }
+    }
+
+    private function assertDeploymentKey(): void
+    {
+        $key = $this->deploymentConfig->get('crypt/key');
+        if (!is_string($key) || trim($key) === '') {
+            throw new \LogicException('The deployment crypt key is required for cart recovery links.');
         }
     }
 }
