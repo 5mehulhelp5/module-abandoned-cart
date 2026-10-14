@@ -18,6 +18,7 @@ use Magento\Framework\Data\Form\FormKey\Validator;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Message\ManagerInterface;
 use Magento\Framework\Serialize\Serializer\Json;
+use Magento\Framework\Session\Config\ConfigInterface as SessionConfigInterface;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\CookieManagerInterface;
 use Magento\Framework\View\Result\PageFactory;
@@ -43,7 +44,8 @@ class Restore implements HttpGetActionInterface, HttpPostActionInterface, CsrfAw
         private readonly Validator $formKeyValidator,
         private readonly CartRestore $restore,
         private readonly LoggerInterface $logger,
-        private readonly Json $json
+        private readonly Json $json,
+        private readonly SessionConfigInterface $sessionConfig
     ) {
     }
 
@@ -124,10 +126,20 @@ class Restore implements HttpGetActionInterface, HttpPostActionInterface, CsrfAw
             // Invalid or unencodable customer-data values must not undo a successful restore.
             $json = $this->json->serialize(['cart' => $cartVersion]);
         }
+        // Magento customer-data stores section_data_ids at the root, independently of the session path.
+        $metadata = $this->cookieMetadataFactory->createPublicCookieMetadata()
+            ->setPath('/')
+            ->setDomain($this->sessionConfig->getCookieDomain())
+            ->setSecure($this->request->isSecure())
+            ->setHttpOnly(false);
+        $lifetime = $this->sessionConfig->getCookieLifetime();
+        if ($lifetime > 0) {
+            $metadata->setDuration($lifetime);
+        }
         $this->cookieManager->setPublicCookie(
             'section_data_ids',
             (string)$json,
-            $this->cookieMetadataFactory->createPublicCookieMetadata()->setPath('/')->setDuration(86400)
+            $metadata
         );
     }
 }

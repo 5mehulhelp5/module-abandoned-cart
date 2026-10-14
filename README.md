@@ -122,6 +122,7 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 - a merge keeps the destination's contact details, account, addresses and coupon. Matching product configurations have their quantities added; distinct configurations remain separate. Totals and shipping rates are recalculated; unavailable products or quantity errors refuse the merge;
 - both carts are saved in one database transaction. Only after it commits does the session switch and the saved cart become closed. A failed save rolls back both carts; a repeated or concurrent restore cannot add the closed source twice. Success: "Your saved cart has been restored.";
 - after restore/merge the customer-data `cart` section is marked stale (`section_data_ids` cookie), so the mini cart shows the right count.
+- that customer-data cookie uses Magento's configured cookie lifetime and domain (zero lifetime creates a session cookie). Its path stays `/`, matching Magento's customer-data JavaScript even when the session cookie has a narrower path.
 
 **Opt-out** `/ckconsent/optout` – Consent owns the one-click link and confirmation page (no confirm button):
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refresh the mini-cart cookie using Magento's configured cookie lifetime and domain, with session cookies at zero lifetime; preserve Magento customer-data's root path.
+
 - Use Magento SQL expressions for queue/send claims and withdrawal cleanup; use Magento's JSON serializer for mini-cart cookie updates and tolerate malformed cookie values after restore.
 
 - Generate and verify recovery signatures exclusively through Magento's native encryptor, without a legacy raw-key fallback; test encoded/current keys, invalid keys, forged hashes and signer failures.

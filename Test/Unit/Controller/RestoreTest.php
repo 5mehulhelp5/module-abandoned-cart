@@ -17,6 +17,7 @@ use Magento\Framework\Controller\Result\RedirectFactory;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\Message\ManagerInterface;
 use Magento\Framework\Serialize\Serializer\Json;
+use Magento\Framework\Session\Config\ConfigInterface as SessionConfigInterface;
 use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
 use Magento\Framework\Stdlib\Cookie\PublicCookieMetadata;
 use Magento\Framework\Stdlib\CookieManagerInterface;
@@ -47,6 +48,8 @@ class RestoreTest extends TestCase
     private array $errors = [];
     private mixed $result = null;
     private mixed $sectionCookie = '{"cart":100,"customer":200}';
+    private int $cookieLifetime = 7200;
+    private ?PublicCookieMetadata $cookieMetadata = null;
 
     /**
      * @param array $cart       saved cart: active, items, customer, ref
@@ -76,6 +79,7 @@ class RestoreTest extends TestCase
         ]);
         $request = $this->createStub(Http::class);
         $request->method('isPost')->willReturn($isPost);
+        $request->method('isSecure')->willReturn(true);
         $request->method('getParam')->willReturnCallback(fn ($k) => ['q' => $quoteId, 't' => $token, 'form_key' => $formKey][$k] ?? null);
         $redirect = $this->createStub(Redirect::class);
         $redirect->method('setPath')->willReturnCallback(function ($path) use ($redirect) { $this->path = $path; return $redirect; });
@@ -124,10 +128,17 @@ class RestoreTest extends TestCase
         }
         $cookieManager = $this->createStub(CookieManagerInterface::class);
         $cookieManager->method('getCookie')->willReturnCallback(fn ($name) => $name === 'section_data_ids' ? $this->sectionCookie : null);
-        $cookieManager->method('setPublicCookie')->willReturnCallback(function ($name, $value) { $this->cookies[$name] = $value; });
-        $metadata = $this->mockWith(PublicCookieMetadata::class, ['setPath' => self::$SELF, 'setDuration' => self::$SELF]);
+        $cookieManager->method('setPublicCookie')->willReturnCallback(function ($name, $value, $metadata) {
+            $this->cookies[$name] = $value;
+            $this->cookieMetadata = $metadata;
+        });
+        $metadata = new PublicCookieMetadata();
         $metadataFactory = $this->createStub(CookieMetadataFactory::class);
         $metadataFactory->method('createPublicCookieMetadata')->willReturn($metadata);
+        $sessionConfig = $this->createStub(SessionConfigInterface::class);
+        $sessionConfig->method('getCookieLifetime')->willReturn($this->cookieLifetime);
+        $sessionConfig->method('getCookiePath')->willReturn('/shop/');
+        $sessionConfig->method('getCookieDomain')->willReturn('.example.test');
 
         $title = $this->createStub(Title::class);
         $pageConfig = $this->createStub(PageConfig::class);
@@ -150,7 +161,7 @@ class RestoreTest extends TestCase
         $logger->method('error')->willReturnCallback(function ($message) { $this->errors[] = $message; });
 
         $this->result = (new Restore($request, $redirectFactory, $access, $repo, $checkout, $customer, $messages,
-            $cookieManager, $metadataFactory, $pages, $validator, $restore, $logger, new Json()))->execute();
+            $cookieManager, $metadataFactory, $pages, $validator, $restore, $logger, new Json(), $sessionConfig))->execute();
         return $quote;
     }
 
@@ -357,6 +368,25 @@ class RestoreTest extends TestCase
         $this->assertSame(7, (int)$this->replaced[0]->getId());
         $this->assertSame(['Your saved cart has been restored.'], $this->messages);
         $this->assertArrayHasKey('cart', json_decode($this->cookies['section_data_ids'], true));
+    }
+
+    public function testMiniCartCookieUsesMagentoLifetimeAndCustomerDataScope(): void
+    {
+        $this->restore();
+        $this->assertSame(7200, $this->cookieMetadata->getDuration());
+        $this->assertSame('/', $this->cookieMetadata->getPath(), 'matches Magento customer-data even with a different session path');
+        $this->assertSame('.example.test', $this->cookieMetadata->getDomain());
+        $this->assertTrue($this->cookieMetadata->getSecure());
+        $this->assertFalse($this->cookieMetadata->getHttpOnly(), 'customer-data must read the cookie');
+    }
+
+    public function testZeroMagentoLifetimeCreatesSessionCookie(): void
+    {
+        $this->cookieLifetime = 0;
+        $this->restore();
+        $this->assertNull($this->cookieMetadata->getDuration(), 'setDuration(0) would expire immediately');
+        $this->assertSame('checkout/cart', $this->path);
+        $this->assertCount(1, $this->replaced);
     }
 
     /** @dataProvider invalidSectionCookies */
