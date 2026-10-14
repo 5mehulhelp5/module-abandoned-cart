@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep captured guest reminder email and its change timestamp in dedicated quote columns. Preserve Magento checkout email during capture and withdrawal, resolve guest/customer recipients through a replaceable API, and include contact activity in the abandonment delay without extending quote lifetime or resetting delivery history.
+
+- Validate guest email through a global before plugin on `GuestEmailCaptureInterface`, using Magento's native `stringTrim` filter and `EmailAddress` / `StringLength` validators with the length limit in DI. Aggregate input errors without echoing email values; retain the single V1 endpoint, flat payload, explicit clearing and service authorization checks.
+
 - Refresh the mini-cart cookie using Magento's configured cookie lifetime and domain, with session cookies at zero lifetime; preserve Magento customer-data's root path.
 
 - Use Magento SQL expressions for queue/send claims and withdrawal cleanup; use Magento's JSON serializer for mini-cart cookie updates and tolerate malformed cookie values after restore.

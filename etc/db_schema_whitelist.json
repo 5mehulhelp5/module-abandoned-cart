@@ -1,6 +1,8 @@
 {
     "quote": {
         "column": {
+            "ck_abandoned_email": true,
+            "ck_abandoned_email_updated_at": true,
             "ck_abandoned_queued_at": true,
             "ck_abandoned_reminded_at": true,
             "ck_abandoned_consent_id": true,

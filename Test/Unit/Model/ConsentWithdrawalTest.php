@@ -17,41 +17,30 @@ class ConsentWithdrawalTest extends TestCase
         $this->assertSame([], $this->updates);
     }
 
-    public function testGuestCartLosesEmailCustomerCartOnlyConsent(): void
+    public function testClearsOnlyReminderDataAndPreservesMagentoEmail(): void
     {
         $this->assertTrue((new ConsentWithdrawal($this->resource()))->execute(42));
-        $this->assertCount(2, $this->updates);
-        [$guest, $customer] = $this->updates;
-
-        $this->assertArrayHasKey('customer_email', $guest['data']);
-        $this->assertNull($guest['data']['customer_email']);
-        $this->assertContains('customer_id IS NULL', self::conditions($guest['where']));
-
-        // the customer's email belongs to the account - never cleared
-        $this->assertArrayNotHasKey('customer_email', $customer['data']);
-        $this->assertContains('customer_id IS NOT NULL', self::conditions($customer['where']));
-
-        foreach ([$guest, $customer] as $update) {
-            $this->assertNull($update['data']['ck_abandoned_consent_id']);
-            $this->assertNull($update['data']['ck_abandoned_browser_hash'], 'no consent, nothing to restore');
-            $this->assertSame('updated_at', (string)$update['data']['updated_at']);
-            $this->assertSame(42, $update['where']['entity_id = ?']);
-            $this->assertSame(1, $update['where']['is_active = ?']);
-            $this->assertContains('ck_abandoned_consent_id IS NOT NULL', self::conditions($update['where']));
+        $this->assertCount(1, $this->updates);
+        $update = $this->updates[0];
+        $this->assertArrayNotHasKey('customer_email', $update['data']);
+        foreach (['ck_abandoned_email', 'ck_abandoned_email_updated_at', 'ck_abandoned_consent_id', 'ck_abandoned_browser_hash'] as $field) {
+            $this->assertNull($update['data'][$field]);
         }
+        $this->assertSame('updated_at', (string)$update['data']['updated_at']);
+        $this->assertSame(42, $update['where']['entity_id = ?']);
+        $this->assertSame(1, $update['where']['is_active = ?']);
+        $this->assertContains('ck_abandoned_consent_id IS NOT NULL', self::conditions($update['where']));
     }
 
     public function testForConsentsClearsEveryCartCapturedWithThem(): void
     {
-        $this->assertSame(2, (new ConsentWithdrawal($this->resource()))->forConsents(['a', 'b']));
+        $this->assertSame(1, (new ConsentWithdrawal($this->resource()))->forConsents(['a', 'b']));
         foreach ($this->updates as $update) {
             $this->assertSame(['a', 'b'], $update['where']['ck_abandoned_consent_id IN (?)']);
             // regression: numeric-key conditions survive the merge (with `+` they were dropped and
             // customer emails were wiped)
             $this->assertContains('ck_abandoned_consent_id IS NOT NULL', self::conditions($update['where']));
         }
-        $this->assertContains('customer_id IS NULL', self::conditions($this->updates[0]['where']));
-        $this->assertContains('customer_id IS NOT NULL', self::conditions($this->updates[1]['where']));
     }
 
     public function testGuestEndpointCannotClearACustomerCartConsent(): void

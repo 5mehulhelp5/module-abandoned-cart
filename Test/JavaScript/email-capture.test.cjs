@@ -131,7 +131,11 @@ test('checkout mixin captures prefilled input, debounces edits and removes its o
     const f = fixture(); let email = 'prefilled@example.test', listener;
     const mixin = f.load('email-capture-mixin.js', {
         'CommerceKings_Consent/js/consent/provider': {hasConsent: () => true, onChange: (purpose, fn) => { listener = fn; }},
-        'mage/storage': {post: (url, body) => f.transport('cart-1', JSON.parse(body).email)},
+        'mage/storage': {post: (url, body) => {
+            const data = JSON.parse(body);
+            assert.deepEqual(Object.keys(data), ['email']);
+            return f.transport('cart-1', data.email);
+        }},
         'Magento_Checkout/js/model/quote': {getQuoteId: () => 'cart-1'},
         'Magento_Checkout/js/model/url-builder': {createUrl: () => '/guest-carts/cart-1/ck-abandoned-email'},
         'Magento_Customer/js/model/customer': {isLoggedIn: () => false},

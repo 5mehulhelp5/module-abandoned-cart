@@ -8,17 +8,19 @@ use CommerceKings\Consent\Api\BrowserIdentityInterface;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Sql\Expression;
 use Magento\Quote\Model\QuoteIdMaskFactory;
 use Magento\Quote\Model\ResourceModel\Quote\QuoteIdMask as QuoteIdMaskResource;
 
 /**
  * Guest checkout email -> cart, only with a valid consent for purpose "cart_reminder"
- * (CommerceKings_Consent). With consent: the email goes into Magento's own quote.customer_email, with
+ * (CommerceKings_Consent). With consent: the email goes into quote.ck_abandoned_email, with
  * the consent id and this browser's id hash - in one UPDATE that also checks the consent is still valid,
  * so a withdrawal at the same moment can't be undone by this request. Without consent (never given,
  * switched off - the checkout calls again with an empty email - or withdrawn): whatever this module
  * stored on the guest cart is cleared. Direct UPDATEs - no quote save. The response acknowledges
  * whether the requested email and consent were stored, including an identical successful retry.
+ * Email changes have their own timestamp; Magento's checkout email and cart updated_at are preserved.
  */
 class GuestEmailCapture implements GuestEmailCaptureInterface
 {
@@ -35,7 +37,7 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
     ) {
     }
 
-    public function capture(string $cartId, string $email): bool
+    public function capture(string $cartId, mixed $email): bool
     {
         $mask = $this->quoteIdMaskFactory->create();
         $this->quoteIdMaskResource->load($mask, $cartId, 'masked_id');
@@ -49,12 +51,11 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
         }
         $storeId = (int)$quote['store_id'];
         $consent = $this->config->isEnabled($storeId) ? $this->consent->getCurrent(Config::PURPOSE) : null;
-        $email = trim($email);
         if (!$consent || $email === '') {
             $this->withdrawal->execute($quoteId, true, $storeId);
             return false;
         }
-        if (!$this->scope->matches($consent, $storeId) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
+        if (!$this->scope->matches($consent, $storeId)) {
             return false;
         }
         $db = $this->resource->getConnection();
@@ -69,9 +70,16 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
         $updated = $db->update(
             $this->resource->getTableName('quote'),
             [
-                'customer_email' => $email,
+                // MySQL evaluates assignments in order: compare the old email before replacing it.
+                'ck_abandoned_email_updated_at' => new Expression((string)$db->getCheckSql(
+                    'ck_abandoned_email <=> ' . $db->quote($email) . ' AND ck_abandoned_email_updated_at IS NOT NULL',
+                    'ck_abandoned_email_updated_at',
+                    'NOW()'
+                )),
+                'ck_abandoned_email' => $email,
                 'ck_abandoned_consent_id' => $consent->consentId,
                 'ck_abandoned_browser_hash' => $browserHash,
+                'updated_at' => new Expression('updated_at'),
             ],
             $where
         );
@@ -83,7 +91,7 @@ class GuestEmailCapture implements GuestEmailCaptureInterface
         foreach ($where as $condition => $value) {
             is_int($condition) ? $select->where($value) : $select->where($condition, $value);
         }
-        return (bool)$db->fetchOne($select->where('customer_email = ?', $email)
+        return (bool)$db->fetchOne($select->where('ck_abandoned_email = ?', $email)
             ->where('ck_abandoned_consent_id = ?', $consent->consentId)
             ->where('ck_abandoned_browser_hash = ?', $browserHash));
     }

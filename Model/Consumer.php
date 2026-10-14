@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Model;
 
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
+use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Api\Data\ReminderState;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
@@ -44,7 +45,8 @@ class Consumer
         private readonly ReminderPolicyInterface $policy,
         private readonly LoggerInterface $logger,
         private readonly QuoteScope $scope,
-        private readonly QuoteLifetime $lifetime
+        private readonly QuoteLifetime $lifetime,
+        private readonly ReminderEmailResolverInterface $recipients
     ) {
     }
 
@@ -54,19 +56,23 @@ class Consumer
         $db = $this->resource->getConnection();
         $table = $this->resource->getTableName('quote');
         $row = $db->fetchRow(
-            $db->select()->from($table, ['is_active', 'items_count', 'customer_email', 'store_id', 'updated_at', 'ck_abandoned_reminded_at', 'ck_abandoned_consent_id'])
+            $db->select()->from($table, ['is_active', 'items_count', 'customer_id', 'customer_email', 'ck_abandoned_email',
+                'ck_abandoned_email_updated_at', 'store_id', 'updated_at', 'ck_abandoned_reminded_at', 'ck_abandoned_consent_id'])
                 ->where('entity_id = ?', $id)
         );
+        $email = $row ? $this->recipients->resolve($id) : null;
+        $activity = $row ? max((string)$row['updated_at'], (string)($row['customer_id'] === null
+            ? $row['ck_abandoned_email_updated_at'] : null)) : '';
         $skip = match (true) {
             !$row => 'cart gone',
             !(int)$row['is_active'] => 'ordered / closed',
             !(int)$row['items_count'] => 'empty',
-            !$row['customer_email'] => 'no email',
+            $email === null => 'no email',
             $row['ck_abandoned_consent_id'] === null => 'no consent',
             !$this->policy->canSend(new ReminderState($id, (int)$row['store_id'], $row['ck_abandoned_reminded_at'],
                 ['updated_at' => $row['updated_at']])) => 'reminder policy',
             $this->lifetime->isExpired((string)$row['updated_at'], (int)$row['store_id']) => 'quote expired',
-            (string)$row['updated_at'] > gmdate('Y-m-d H:i:s', time() - $this->config->getDelayMinutes((int)$row['store_id']) * 60) => 'cart recently updated',
+            $activity > gmdate('Y-m-d H:i:s', time() - $this->config->getDelayMinutes((int)$row['store_id']) * 60) => 'cart recently updated',
             !$this->consent->isValid((string)$row['ck_abandoned_consent_id']) => 'consent withdrawn / expired',
             !$this->matchesConsent($row) => 'consent purpose / website mismatch',
             !$this->config->isEnabled((int)$row['store_id']) => 'disabled',
@@ -93,19 +99,30 @@ class Consumer
                     : $db->quoteInto('ck_abandoned_reminded_at = ?', $row['ck_abandoned_reminded_at']),
                 'is_active = ?' => 1,
                 'items_count > 0',
-                'customer_email = ?' => (string)$row['customer_email'],
+                'customer_id <=> ?' => $row['customer_id'] ?? new Expression('NULL'),
+                'customer_email <=> ?' => $row['customer_email'] ?? new Expression('NULL'),
+                'ck_abandoned_email <=> ?' => $row['ck_abandoned_email'] ?? new Expression('NULL'),
+                'ck_abandoned_email_updated_at <=> ?' => $row['ck_abandoned_email_updated_at'] ?? new Expression('NULL'),
                 'ck_abandoned_consent_id = ?' => (string)$row['ck_abandoned_consent_id'],
                 $this->lifetime->validCondition('updated_at', (int)$row['store_id']),
                 'updated_at <= NOW() - INTERVAL ' . $this->config->getDelayMinutes((int)$row['store_id']) . ' MINUTE',
+                '(customer_id IS NOT NULL OR ck_abandoned_email_updated_at IS NULL OR ck_abandoned_email_updated_at <= NOW() - INTERVAL '
+                    . $this->config->getDelayMinutes((int)$row['store_id']) . ' MINUTE)',
                 $this->guard->validCondition('ck_abandoned_consent_id'),
             ]
         );
         if (!$claimed) {
             return;
         }
-        $email = (string)$row['customer_email'];
         $storeId = (int)$row['store_id'];
         try {
+            // A replaced resolver may read an external recipient source. Recheck it after claiming too.
+            if ($this->recipients->resolve($id) !== $email) {
+                $db->update($table, ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'],
+                    'ck_abandoned_queued_at' => null] + $keepUpdatedAt, ['entity_id = ?' => $id]);
+                $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (recipient changed)', $id));
+                return;
+            }
             $this->emulation->startEnvironmentEmulation($storeId, Area::AREA_FRONTEND, true);
             try {
                 $quote = $this->cartRepository->get($id);

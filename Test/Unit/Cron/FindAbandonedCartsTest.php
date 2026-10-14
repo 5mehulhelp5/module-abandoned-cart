@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Test\Unit\Cron;
 
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
+use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
 use CommerceKings\AbandonedCart\Model\Config;
@@ -22,6 +23,7 @@ class FindAbandonedCartsTest extends TestCase
 
     private array $published = [];
     private ?ReminderPolicyInterface $policy = null;
+    private array $unresolved = [];
 
     private function finder(bool $enabled = true): FindAbandonedCarts
     {
@@ -40,8 +42,10 @@ class FindAbandonedCartsTest extends TestCase
         $stores->method('getStores')->willReturn($values);
         $publisher = $this->createStub(PublisherInterface::class);
         $publisher->method('publish')->willReturnCallback(function ($topic, $id) { $this->published[] = [$topic, $id]; });
+        $recipients = $this->createStub(ReminderEmailResolverInterface::class);
+        $recipients->method('resolve')->willReturnCallback(fn ($id) => in_array($id, $this->unresolved, true) ? null : 'fixture@example.test');
         return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $publisher,
-            $this->policy ?? new OncePerCart(), $lifetime, $stores, $this->createStub(LoggerInterface::class));
+            $this->policy ?? new OncePerCart(), $lifetime, $stores, $this->createStub(LoggerInterface::class), $recipients);
     }
 
     public function testDisabledStoresDoNothing(): void
@@ -54,7 +58,7 @@ class FindAbandonedCartsTest extends TestCase
     {
         $this->finder()->execute();
         $conditions = array_column($this->selectWhere, 0);
-        foreach (['q.is_active = 1', 'q.items_count > 0', "q.customer_email IS NOT NULL AND q.customer_email <> ''",
+        foreach (['q.is_active = 1', 'q.items_count > 0',
             'q.ck_abandoned_consent_id IS NOT NULL', 'VALID(q.ck_abandoned_consent_id)', 'q.ck_abandoned_queued_at IS NULL'] as $condition) {
             $this->assertContains($condition, $conditions);
         }
@@ -65,7 +69,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertStringContainsString('q.updated_at > NOW() - INTERVAL 2 DAY', $branches);
         $this->assertStringNotContainsString('store_id = 3', $branches);
         $this->assertStringContainsString('q.ck_abandoned_reminded_at IS NULL', $branches);
-        $this->assertSame([[200, null]], $this->limits);
+        $this->assertSame([[200, 0]], $this->limits);
     }
 
     public function testEverySelectedCartIsQueuedWithoutAddressGrouping(): void
@@ -120,5 +124,14 @@ class FindAbandonedCartsTest extends TestCase
     {
         $this->assertSame(0, $this->finder()->execute());
         $this->assertSame([], $this->published);
+    }
+
+    public function testUnresolvedRecipientsDoNotBlockTheNextCandidatePage(): void
+    {
+        $this->unresolved = range(1, 200);
+        $this->fetchColResults = [range(1, 200), [201]];
+        $this->assertSame(1, $this->finder()->execute());
+        $this->assertSame([[FindAbandonedCarts::TOPIC, '201']], $this->published);
+        $this->assertSame([[200, 0], [200, 200]], $this->limits);
     }
 }

@@ -8,9 +8,8 @@ use Magento\Framework\DB\Sql\Expression;
 
 /**
  * Clears the reminder consent from open carts once it is withdrawn (switched off in the consent
- * source, "reject all", the unsubscribe link) or missing at capture. Guest carts: the email goes too
- * (this module stored it). Customer carts: only the consent - the email belongs to the account and
- * Magento needs it. The browser binding goes with the consent (no consent, nothing to restore). Only
+ * source, "reject all", the unsubscribe link) or missing at capture. Captured reminder email is cleared;
+ * Magento's checkout email is preserved. The browser binding goes with the consent (no consent, nothing to restore). Only
  * carts with a consent are touched. Direct UPDATEs - no quote save, updated_at kept.
  */
 class ConsentWithdrawal
@@ -43,12 +42,12 @@ class ConsentWithdrawal
         // array_merge, not +: conditions without a placeholder have numeric keys, and + would drop them
         $where = array_merge($where, ['is_active = ?' => 1, 'ck_abandoned_consent_id IS NOT NULL']);
         $consent = [
+            'ck_abandoned_email' => null,
+            'ck_abandoned_email_updated_at' => null,
             'ck_abandoned_consent_id' => null,
             'ck_abandoned_browser_hash' => null,
             'updated_at' => new Expression('updated_at'),
         ];
-        $guests = $db->update($table, ['customer_email' => null] + $consent, array_merge($where, ['customer_id IS NULL']));
-        return $guestOnly ? $guests
-            : $guests + $db->update($table, $consent, array_merge($where, ['customer_id IS NOT NULL']));
+        return $db->update($table, $consent, $guestOnly ? array_merge($where, ['customer_id IS NULL']) : $where);
     }
 }

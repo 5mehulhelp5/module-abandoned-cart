@@ -3,6 +3,8 @@
 <schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:Setup/Declaration/Schema/etc/schema.xsd">
     <table name="quote">
+        <column xsi:type="varchar" name="ck_abandoned_email" nullable="true" length="255" comment="CK abandoned cart: captured guest reminder email"/>
+        <column xsi:type="timestamp" name="ck_abandoned_email_updated_at" on_update="false" nullable="true" comment="CK abandoned cart: guest reminder email changed"/>
         <column xsi:type="timestamp" name="ck_abandoned_queued_at" nullable="true" comment="CK abandoned cart: reminder queued"/>
         <column xsi:type="timestamp" name="ck_abandoned_reminded_at" nullable="true" comment="CK abandoned cart: reminder sent"/>
         <!-- the consent (CommerceKings_Consent, purpose cart_reminder) the email was captured with - the evidence lives there -->

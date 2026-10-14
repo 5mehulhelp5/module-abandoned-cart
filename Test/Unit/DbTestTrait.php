@@ -24,6 +24,7 @@ trait DbTestTrait
     private mixed $fetchRowResult = false;
     private mixed $fetchOneResult = false;
     private array $fetchColResult = [];
+    private array $fetchColResults = [];
     /** queued fetchPairs() results, one per call; [] when none left */
     private array $fetchPairsResults = [];
     /** limit() calls of selects: [count, offset] */
@@ -79,7 +80,8 @@ trait DbTestTrait
         });
         $db->method('fetchRow')->willReturnCallback(fn () => $this->fetchRowResult);
         $db->method('fetchOne')->willReturnCallback(fn () => $this->fetchOneResult);
-        $db->method('fetchCol')->willReturnCallback(fn () => $this->fetchColResult);
+        $db->method('fetchCol')->willReturnCallback(fn () => $this->fetchColResults ? array_shift($this->fetchColResults) : $this->fetchColResult);
+        $db->method('getCheckSql')->willReturnCallback(fn ($condition, $yes, $no) => 'IF(' . $condition . ', ' . $yes . ', ' . $no . ')');
         $db->method('fetchPairs')->willReturnCallback(fn () => $this->fetchPairsResults ? array_shift($this->fetchPairsResults) : []);
         $db->method('query')->willReturnCallback(function ($sql, $bind = []) {
             $this->queries[] = [$sql, $bind];

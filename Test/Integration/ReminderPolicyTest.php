@@ -8,6 +8,7 @@ use CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\ReminderPolicy as 
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
 use CommerceKings\AbandonedCart\Model\Config;
+use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Model\Consumer;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
@@ -90,7 +91,7 @@ class ReminderPolicyTest extends TestCase
         $id = (int)$quote->getId();
         $this->quoteIds[] = $id;
         $this->resource->getConnection()->update($this->table('quote'), ['store_id' => $this->storeIds[$days],
-            'items_count' => 1, 'customer_email' => 'same@example.test', 'ck_abandoned_consent_id' => 'fixture-consent',
+            'items_count' => 1, 'ck_abandoned_email' => 'same@example.test', 'ck_abandoned_consent_id' => 'fixture-consent',
             'updated_at' => gmdate('Y-m-d H:i:s', time() - $ageSeconds)], ['entity_id = ?' => $id]);
         return $id;
     }
@@ -132,7 +133,8 @@ class ReminderPolicyTest extends TestCase
         $publisher = $this->createStub(PublisherInterface::class);
         $publisher->method('publish')->willReturnCallback(function ($topic, $id) { $this->published[] = (int)$id; });
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $publisher,
-            new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class));
+            new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
+            $this->om->get(ReminderEmailResolverInterface::class));
     }
 
     private function consumer(): Consumer
@@ -153,7 +155,8 @@ class ReminderPolicyTest extends TestCase
         $data->method('build')->willReturn(['customer_name' => '']);
         return new Consumer($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
             $data, $builder, $this->createStub(Emulation::class), $this->config(), $consent, $this->guard(),
-            new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime());
+            new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
+            $this->om->get(ReminderEmailResolverInterface::class));
     }
 
     public function testFinderUsesEachQuotesStoreLifetimeRatherThanTheOldSevenDaySetting(): void
@@ -238,5 +241,19 @@ class ReminderPolicyTest extends TestCase
         $this->assertStringContainsString('&lt;b&gt;Custom frequency&lt;/b&gt;', $html);
         $this->assertStringNotContainsString('<b>Custom frequency</b>', $html);
         $this->assertStringNotContainsString('<input', $html);
+    }
+
+    public function testGuestEmailActivityPostponesQueueingAndSendingWithoutExtendingQuoteLifetime(): void
+    {
+        $id = $this->quote(30, 120);
+        $this->resource->getConnection()->update($this->table('quote'), [
+            'ck_abandoned_email_updated_at' => gmdate('Y-m-d H:i:s'),
+            'updated_at' => new \Magento\Framework\DB\Sql\Expression('updated_at'),
+        ], ['entity_id = ?' => $id]);
+        $updated = $this->row($id)['updated_at'];
+        $this->assertSame(0, $this->finder()->execute());
+        $this->consumer()->process((string)$id);
+        $this->assertSame(0, $this->sent);
+        $this->assertSame($updated, $this->row($id)['updated_at']);
     }
 }

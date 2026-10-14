@@ -64,14 +64,16 @@ class GuestEmailCaptureTest extends TestCase
 
     public function testStoresEmailWithTheConsentIdForTheCartReminderPurpose(): void
     {
-        $this->assertTrue($this->capture()->capture('masked', '  a@test.com '));
+        $this->assertTrue($this->capture()->capture('masked', 'a@test.com'));
         $this->assertSame([['masked', 'masked_id']], $this->maskLoads);
         $this->assertSame('cart_reminder', $this->askedPurpose);
-        $this->assertSame([
-            'customer_email' => 'a@test.com',
-            'ck_abandoned_consent_id' => 'cid-1',
-            'ck_abandoned_browser_hash' => 'browser-hash',
-        ], $this->updates[0]['data']);
+        $data = $this->updates[0]['data'];
+        $this->assertSame('a@test.com', $data['ck_abandoned_email']);
+        $this->assertSame('cid-1', $data['ck_abandoned_consent_id']);
+        $this->assertSame('browser-hash', $data['ck_abandoned_browser_hash']);
+        $this->assertArrayNotHasKey('customer_email', $data);
+        $this->assertSame('updated_at', (string)$data['updated_at']);
+        $this->assertStringContainsString("ck_abandoned_email <=> 'a@test.com'", (string)$data['ck_abandoned_email_updated_at']);
         $where = $this->updates[0]['where'];
         $this->assertSame(42, $where['entity_id = ?']);
         $this->assertSame(1, $where['is_active = ?']);
@@ -124,22 +126,9 @@ class GuestEmailCaptureTest extends TestCase
         $this->updateResults = [0];
         $this->fetchOneResult = 42;
         $this->assertTrue($capture->capture('masked', 'a@test.com'));
-        $this->assertContains(['customer_email = ?', 'a@test.com'], $this->selectWhere);
+        $this->assertContains(['ck_abandoned_email = ?', 'a@test.com'], $this->selectWhere);
         $this->assertContains(['ck_abandoned_consent_id = ?', 'cid-1'], $this->selectWhere);
         $this->assertContains(['ck_abandoned_browser_hash = ?', 'browser-hash'], $this->selectWhere);
-    }
-
-    /** @dataProvider invalidEmails */
-    #[\PHPUnit\Framework\Attributes\DataProvider('invalidEmails')]
-    public function testInvalidEmailStoresNothing(string $email): void
-    {
-        $this->assertFalse($this->capture()->capture('masked', $email));
-        $this->assertSame([], $this->updates);
-    }
-
-    public static function invalidEmails(): array
-    {
-        return [['not-an-email'], ['a@'], [str_repeat('a', 250) . '@test.com']];
     }
 
     public function testOutOfScopeCartCannotStoreOrClearAndDoesNotRecordConsent(): void
