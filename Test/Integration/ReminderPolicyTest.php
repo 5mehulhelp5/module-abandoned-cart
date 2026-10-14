@@ -156,7 +156,8 @@ class ReminderPolicyTest extends TestCase
         return new Consumer($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
             $data, $builder, $this->createStub(Emulation::class), $this->config(), $consent, $this->guard(),
             new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
-            $this->om->get(ReminderEmailResolverInterface::class));
+            $this->om->get(ReminderEmailResolverInterface::class),
+            $this->createStub(\CommerceKings\Consent\Model\Config::class));
     }
 
     public function testFinderUsesEachQuotesStoreLifetimeRatherThanTheOldSevenDaySetting(): void

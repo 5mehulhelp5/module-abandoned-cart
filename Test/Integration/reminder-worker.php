@@ -107,7 +107,7 @@ if ($mode === 'finder') {
 } else {
     $consumer = new Consumer($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
         $builder, $emulation, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
-        $om->get(QuoteScope::class), $lifetime, $recipients);
+        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class));
     foreach ($ids as $id) { $consumer->process((string)$id); }
 }
 echo json_encode(['published' => $published, 'sent' => $sent]), PHP_EOL;

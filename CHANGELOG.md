@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Optionally add RFC 8058 headers to reminder emails without replacing their confirmation link or changing withdrawal cleanup.
+
 - Keep the delivery claim after SMTP returns successfully even if subsequent environment cleanup fails, preventing another reminder from a post-send exception. Add concurrent finder/consumer and interrupted-worker regressions; keep independent-cart sending without a recipient cooldown.
 
 - Remove the development-only opt-out redirect, obsolete route fixtures/documentation and retired recipient-table migration metadata. Email opt-out belongs exclusively to Consent.

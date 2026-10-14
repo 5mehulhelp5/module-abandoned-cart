@@ -46,6 +46,10 @@ class ConsumerTest extends TestCase
     private bool $quoteModel = true;
     private bool $scopeMatches = true;
     private ?array $recipientSequence = null;
+    private bool $oneClick = false;
+    private bool $headerSupport = true;
+    private \Symfony\Component\Mime\Email $nativeMessage;
+    private string $optoutUrl = 'https://shop.test/ckconsent/optout?c=id&t=signature';
 
     private function consumer(array|false $row = self::ROW, bool $enabled = true, bool $withdrawn = false): Consumer
     {
@@ -65,17 +69,24 @@ class ConsumerTest extends TestCase
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(fn () => $this->createStub($this->quoteModel ? Quote::class : CartInterface::class));
         $data = $this->createStub(ReminderData::class);
-        $data->method('build')->willReturn(['customer_name' => 'Jane', 'items_html' => '']);
+        $data->method('build')->willReturn(['customer_name' => 'Jane', 'items_html' => '', 'optout_url' => $this->optoutUrl]);
         $this->emulation = $this->createMock(Emulation::class);
         $lifetime = $this->createStub(QuoteLifetime::class);
         $lifetime->method('isExpired')->willReturnCallback(fn () => $this->expired);
         $lifetime->method('validCondition')->willReturn('NOT_EXPIRED(updated_at,1)');
 
+        $this->nativeMessage = (new \Symfony\Component\Mime\Email())->from('shop@example.test')->to('guest@example.test')->text('Reminder');
+        $message = $this->createStub(\Magento\Framework\Mail\EmailMessage::class);
+        $message->method('getSymfonyMessage')->willReturn($this->nativeMessage);
+        $consentConfig = $this->createStub(\CommerceKings\Consent\Model\Config::class);
+        $consentConfig->method('isOneClickUnsubscribeEnabled')->willReturnCallback(fn () => $this->oneClick);
         $transport = $this->createStub(TransportInterface::class);
+        $transport->method('getMessage')->willReturnCallback(fn () => $this->headerSupport ? $message : null);
         $transport->method('sendMessage')->willReturnCallback(function () {
             if ($this->sendFails) {
                 throw new \RuntimeException('SMTP down');
             }
+            if ($this->oneClick) { $this->assertNotNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'Apply headers before sending'); }
             $this->sentMessages++;
         });
         $builder = $this->createStub(TransportBuilder::class);
@@ -89,7 +100,7 @@ class ConsumerTest extends TestCase
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn () => $this->recipientSequence !== null
             ? array_shift($this->recipientSequence) : ($row ? ($row['customer_id'] === null ? $row['ck_abandoned_email'] : $row['customer_email']) : null));
-        return new Consumer($this->resource(), $repo, $data, $builder, $this->emulation, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients);
+        return new Consumer($this->resource(), $repo, $data, $builder, $this->emulation, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig);
     }
 
     /** @dataProvider skipCases */
@@ -285,6 +296,51 @@ class ConsumerTest extends TestCase
         $this->assertNull($release['data']['ck_abandoned_reminded_at']);
         $this->assertNull($release['data']['ck_abandoned_queued_at']);
         $this->assertSame('updated_at', (string)$release['data']['updated_at']);
+    }
+
+    public function testOneClickHeadersAreOptionalAndDoNotReplaceTemplateVariables(): void
+    {
+        $consumer = $this->consumer();
+        $consumer->process('42');
+        $this->assertNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'));
+        $originalVars = $this->mail['setTemplateVars'];
+        $this->nativeMessage->getHeaders()->addTextHeader('List-Unsubscribe', '<https://old.test/unsubscribe>');
+        $this->oneClick = true;
+        $consumer->process('43');
+        $this->assertSame('<' . $this->optoutUrl . '>', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe'));
+        $this->assertSame('List-Unsubscribe=One-Click', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe-Post'));
+        $this->assertSame(1, substr_count($this->nativeMessage->toString(), 'List-Unsubscribe:'));
+        $this->assertSame($originalVars, $this->mail['setTemplateVars']);
+        $this->assertSame(2, $this->sentMessages);
+    }
+
+    public function testInsecureOptoutCannotBeAdvertisedAsOneClick(): void
+    {
+        $this->oneClick = true;
+        $this->optoutUrl = 'http://shop.test/ckconsent/optout';
+        try {
+            $this->consumer()->process('42');
+            $this->fail('Expected HTTPS requirement');
+        } catch (\UnexpectedValueException $error) {
+            $this->assertStringContainsString('HTTPS', $error->getMessage());
+        }
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertNull($this->updates[1]['data']['ck_abandoned_reminded_at']);
+    }
+
+    public function testUnsupportedOneClickMessageDoesNotSendAndReleasesTheClaim(): void
+    {
+        $this->oneClick = true;
+        $this->headerSupport = false;
+        try {
+            $this->consumer()->process('42');
+            $this->fail('Expected unsupported message');
+        } catch (\UnexpectedValueException $error) {
+            $this->assertStringContainsString('does not support one-click', $error->getMessage());
+        }
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertCount(2, $this->updates);
+        $this->assertNull($this->updates[1]['data']['ck_abandoned_reminded_at']);
     }
 
     public function testPostSendCleanupFailureCannotReleaseTheClaimForAnotherEmail(): void

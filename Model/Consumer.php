@@ -9,6 +9,7 @@ use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Api\Data\ReminderState;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
+use CommerceKings\Consent\Model\Config as ConsentConfig;
 use Magento\Framework\App\Area;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
@@ -46,7 +47,8 @@ class Consumer
         private readonly LoggerInterface $logger,
         private readonly QuoteScope $scope,
         private readonly QuoteLifetime $lifetime,
-        private readonly ReminderEmailResolverInterface $recipients
+        private readonly ReminderEmailResolverInterface $recipients,
+        private readonly ConsentConfig $consentConfig
     ) {
     }
 
@@ -131,14 +133,29 @@ class Consumer
                     throw new \UnexpectedValueException('Cart repository must return a Magento quote for a reminder.');
                 }
                 $vars = $this->reminderData->build($quote);
-                $this->transportBuilder
+                $transport = $this->transportBuilder
                     ->setTemplateIdentifier($this->config->getTemplate($storeId))
                     ->setTemplateOptions(['area' => Area::AREA_FRONTEND, 'store' => $storeId])
                     ->setTemplateVars($vars)
                     ->setFromByScope($this->config->getIdentity($storeId), $storeId)
                     ->addTo($email, $vars['customer_name'] ?: null)
-                    ->getTransport()
-                    ->sendMessage();
+                    ->getTransport();
+                if ($this->consentConfig->isOneClickUnsubscribeEnabled()) {
+                    $message = $transport->getMessage();
+                    if (!is_object($message) || !method_exists($message, 'getSymfonyMessage')) {
+                        throw new \UnexpectedValueException('The reminder mail transport does not support one-click headers.');
+                    }
+                    $url = $vars['optout_url'];
+                    if (parse_url($url, PHP_URL_SCHEME) !== 'https') {
+                        throw new \UnexpectedValueException('One-click unsubscribe requires an HTTPS opt-out URL.');
+                    }
+                    $headers = $message->getSymfonyMessage()->getHeaders();
+                    $headers->remove('List-Unsubscribe');
+                    $headers->remove('List-Unsubscribe-Post');
+                    $headers->addTextHeader('List-Unsubscribe', '<' . $url . '>');
+                    $headers->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+                }
+                $transport->sendMessage();
                 $sent = true;
             } finally {
                 $this->emulation->stopEnvironmentEmulation();
