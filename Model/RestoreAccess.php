@@ -3,11 +3,16 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Model;
 
+use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\Consent\Api\BrowserIdentityInterface;
+use CommerceKings\Notification\Api\SubscriptionRepositoryInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Store\Model\StoreManagerInterface;
 
-/** Restore authorization is checked again against locked, freshly loaded carts on POST. */
+/**
+ * Restore authorization is checked again against locked, freshly loaded carts on POST. The link works only in
+ * the browser that subscribed the cart; a withdrawal deletes the subscription, and with it the restore.
+ */
 class RestoreAccess
 {
     public function __construct(
@@ -15,7 +20,8 @@ class RestoreAccess
         private readonly BrowserIdentityInterface $browser,
         private readonly StoreManagerInterface $stores,
         private readonly QuoteLifetime $lifetime,
-        private readonly CartTable $carts
+        private readonly CartTable $carts,
+        private readonly SubscriptionRepositoryInterface $subscriptions
     ) {
     }
 
@@ -27,7 +33,8 @@ class RestoreAccess
 
     public function isOwner(Quote $quote, string $token): bool
     {
-        $hash = (string)($this->carts->load((int)$quote->getId())['browser_hash'] ?? '');
+        $subscription = $this->subscriptions->find(CartReminder::CODE, (int)$quote->getId())[0] ?? null;
+        $hash = $subscription?->browserHash ?? '';
         return (int)$quote->getStoreId() === (int)$this->stores->getStore()->getId()
             && $this->isSigned((int)$quote->getId(), $token)
             && $hash !== '' && hash_equals($hash, $this->browser->hash());

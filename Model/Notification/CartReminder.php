@@ -27,7 +27,8 @@ use Magento\Quote\Model\Quote;
 use Psr\Log\LoggerInterface;
 
 /**
- * Notification type "cart_reminder" (CommerceKings_Notification's shared consumer). Reference = quote id.
+ * Notification type "cart_reminder" (CommerceKings_Notification's shared consumer). Reference = the cart's
+ * subscription id (CartSubscription: who subscribed, with which consent); the send history is per cart.
  *
  * Messages can arrive twice or late, so everything is re-checked against the current cart:
  * still active (not ordered), has items, an email and a valid consent (CommerceKings_Consent: not
@@ -64,19 +65,19 @@ class CartReminder implements NotificationTypeInterface
 
     public function process(string $reference): void
     {
-        $id = (int)$reference;
         $db = $this->resource->getConnection();
-        $row = $db->fetchRow($this->carts->select(['contact_id', 'captured_at', 'reminded_at', 'consent_id'],
-            ['is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'])
-            ->where('c.quote_id = ?', $id));
+        $row = $db->fetchRow($this->carts->select(['reminded_at'],
+            ['entity_id', 'is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'],
+            ['subscription_id', 'contact_id', 'captured_at', 'consent_id'])
+            ->where('s.subscription_id = ?', (int)$reference));
+        $id = $row ? (int)$row['entity_id'] : 0;
         $email = $row ? $this->recipients->resolve($id) : null;
         $activity = $row ? max((string)$row['updated_at'], (string)$row['captured_at']) : '';
         $skip = match (true) {
-            !$row => 'cart gone',
+            !$row => 'subscription or cart gone',
             !(int)$row['is_active'] => 'ordered / closed',
             !(int)$row['items_count'] => 'empty',
             $email === null => 'no email',
-            $row['consent_id'] === null => 'no consent',
             !$this->policy->canSend(new ReminderState($id, (int)$row['store_id'], $row['reminded_at'],
                 ['updated_at' => $row['updated_at']])) => 'reminder policy',
             $this->lifetime->isExpired((string)$row['updated_at'], (int)$row['store_id']) => 'quote expired',
@@ -87,7 +88,8 @@ class CartReminder implements NotificationTypeInterface
             default => null,
         };
         if ($skip !== null) {
-            $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $skip));
+            $this->logger->info($id ? sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $skip)
+                : sprintf('CommerceKings_AbandonedCart: subscription %d skipped (%s)', (int)$reference, $skip));
             return;
         }
 
@@ -95,11 +97,13 @@ class CartReminder implements NotificationTypeInterface
         // is still what was checked above and its consent is still valid, in the same statement: a
         // withdrawal stored before this point stops the send, one after it finds the reminder already out
         $delay = $this->config->getDelayMinutes((int)$row['store_id']);
+        $this->carts->ensure($id);
         $claimed = $db->update(
             $this->carts->joined(),
             ['c.reminded_at' => new Expression('NOW()')],
             [
                 'c.quote_id = ?' => $id,
+                's.subscription_id = ?' => (int)$row['subscription_id'],
                 'q.store_id = ?' => (int)$row['store_id'],
                 $this->policy->dueCondition(new ReminderQuery((int)$row['store_id'], 'c')),
                 // Compare the state that was checked too, so parallel consumers cannot claim it twice.
@@ -109,13 +113,13 @@ class CartReminder implements NotificationTypeInterface
                 'q.items_count > 0',
                 'q.customer_id <=> ?' => $row['customer_id'] ?? new Expression('NULL'),
                 'q.customer_email <=> ?' => $row['customer_email'] ?? new Expression('NULL'),
-                'c.contact_id <=> ?' => $row['contact_id'] ?? new Expression('NULL'),
-                'c.captured_at <=> ?' => $row['captured_at'] ?? new Expression('NULL'),
-                'c.consent_id = ?' => (string)$row['consent_id'],
+                's.contact_id <=> ?' => $row['contact_id'] ?? new Expression('NULL'),
+                's.captured_at = ?' => (string)$row['captured_at'],
+                's.consent_id = ?' => (string)$row['consent_id'],
                 $this->lifetime->validCondition('q.updated_at', (int)$row['store_id']),
                 'q.updated_at <= NOW() - INTERVAL ' . $delay . ' MINUTE',
-                '(c.captured_at IS NULL OR c.captured_at <= NOW() - INTERVAL ' . $delay . ' MINUTE)',
-                $this->guard->validCondition('c.consent_id'),
+                's.captured_at <= NOW() - INTERVAL ' . $delay . ' MINUTE',
+                $this->guard->validCondition('s.consent_id'),
             ]
         );
         if (!$claimed) {

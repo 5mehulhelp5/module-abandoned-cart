@@ -21,8 +21,9 @@ use Psr\Log\LoggerInterface;
 /**
  * Every 15 minutes: carts that have items and an email, were not ordered, have been untouched for
  * the configured delay, unexpired under Magento's quote lifetime and eligible under the reminder
- * policy -> one message per cart to CommerceKings_Notification's queue. The cart is
- * marked "queued" first, so the next run does not publish it again.
+ * policy -> one message per cart (its CommerceKings_Notification subscription id) to Notification's queue.
+ * Only carts with a subscription whose consent is still valid qualify. The cart is marked "queued"
+ * first, so the next run does not publish it again.
  *
  * Stale claims: a cart queued more than STALE_MINUTES ago but never reminded (publish failed, or the
  * message was lost) is released first, so this same run queues it again. A duplicate message is
@@ -73,15 +74,17 @@ class FindAbandonedCarts
 
         $due = $this->dueCarts();
         $published = 0;
-        foreach ($due as $id) {
+        foreach ($due as $id => $subscriptionId) {
             // claim it first: only the run that flips queued_at from NULL publishes
+            $this->carts->ensure($id);
             $claimed = $db->update(
                 $this->carts->joined(),
                 ['c.queued_at' => new Expression('NOW()')],
-                array_merge(['c.quote_id = ?' => (int)$id], $this->eligibleConditions())
+                array_merge(['c.quote_id = ?' => $id, 's.subscription_id = ?' => $subscriptionId],
+                    $this->eligibleConditions())
             );
             if ($claimed) {
-                $this->queue->publish(CartReminder::CODE, (string)$id);
+                $this->queue->publish(CartReminder::CODE, (string)$subscriptionId);
                 $published++;
             }
         }
@@ -94,32 +97,32 @@ class FindAbandonedCarts
     /**
      * Up to BATCH eligible carts, oldest first, excluding recipients still in cooldown.
      *
-     * @return int[]
+     * @return array<int, int> quote id => subscription id
      */
     private function dueCarts(): array
     {
         $db = $this->resource->getConnection();
-        $select = $this->carts->select(['c.quote_id']);
+        $select = $this->carts->select([], ['entity_id'], ['subscription_id']);
         foreach ($this->eligibleConditions() as $condition) {
             $select->where($condition);
         }
-        $select->order(['q.updated_at ASC', 'c.quote_id ASC']);
+        $select->order(['q.updated_at ASC', 'q.entity_id ASC']);
         $due = [];
         $offset = 0;
         // Read pages before claiming, so carts without a resolvable email cannot block later carts.
         do {
-            $ids = $db->fetchCol((clone $select)->limit(self::BATCH, $offset));
-            foreach ($ids as $id) {
+            $rows = $db->fetchPairs((clone $select)->limit(self::BATCH, $offset));
+            foreach ($rows as $id => $subscriptionId) {
                 $email = $this->recipients->resolve((int)$id);
                 if ($email !== null && !$this->cooldown->isRecent($email)) {
-                    $due[] = (int)$id;
+                    $due[(int)$id] = (int)$subscriptionId;
                     if (count($due) === self::BATCH) {
                         return $due;
                     }
                 }
             }
             $offset += self::BATCH;
-        } while (count($ids) === self::BATCH);
+        } while (count($rows) === self::BATCH);
         return $due;
     }
 
@@ -128,8 +131,7 @@ class FindAbandonedCarts
         return [
             'q.is_active = 1',
             'q.items_count > 0',
-            'c.consent_id IS NOT NULL',
-            $this->guard->validCondition('c.consent_id'),
+            $this->guard->validCondition('s.consent_id'),
             'c.queued_at IS NULL',
             $this->storeCondition(),
         ];
@@ -145,7 +147,7 @@ class FindAbandonedCarts
             }
             $delay = $this->config->getDelayMinutes($id);
             $branches[] = sprintf('(q.store_id = %d AND q.updated_at <= NOW() - INTERVAL %d MINUTE'
-                . ' AND (c.captured_at IS NULL OR c.captured_at <= NOW() - INTERVAL %d MINUTE) AND (%s) AND (%s))',
+                . ' AND s.captured_at <= NOW() - INTERVAL %d MINUTE AND (%s) AND (%s))',
                 $id,
                 $delay,
                 $delay,

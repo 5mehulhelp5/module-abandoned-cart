@@ -17,7 +17,7 @@ class ReminderEmailResolverTest extends TestCase
     {
         $this->fetchOneResult = $value;
         $this->assertSame($expected, (new ReminderEmailResolver($this->resource(), $this->carts()))->resolve(42));
-        $this->assertContains(['c.quote_id = ?', 42], $this->selectWhere);
+        $this->assertContains(['q.entity_id = ?', 42], $this->selectWhere);
         $this->assertSame([], $this->updates);
     }
 

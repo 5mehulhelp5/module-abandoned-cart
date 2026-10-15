@@ -7,7 +7,7 @@ use CommerceKings\Consent\Api\Data\Consent;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Store\Model\StoreManagerInterface;
 
-/** Authorize capture against the current website before reading consent or changing the cart's reminder state. */
+/** The cart a visitor may subscribe: active, in the current website, theirs (guest or customer); consent website check. */
 class QuoteScope
 {
     public function __construct(

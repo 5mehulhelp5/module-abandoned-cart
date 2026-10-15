@@ -94,11 +94,15 @@ class RestoreTest extends TestCase
         $stores->method('getStore')->willReturn($store);
         $lifetime = $this->createStub(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class);
         $lifetime->method('isExpired')->willReturnCallback(fn ($updated) => $updated === 'expired');
-        // the cart's reminder state (ck_abandoned_cart): owner browser and when it was reminded
+        // the cart's send history (ck_abandoned_cart) and its subscription's owner browser (Notification)
         $carts = $this->createStub(\CommerceKings\AbandonedCart\Model\CartTable::class);
         $carts->method('load')->willReturnCallback(fn ($id) => $id === $cart['id']
-            ? ['quote_id' => $cart['id'], 'browser_hash' => $cart['browser'], 'reminded_at' => $cart['reminded']] : null);
-        $access = new RestoreAccess($signature, $browserId, $stores, $lifetime, $carts);
+            ? ['quote_id' => $cart['id'], 'reminded_at' => $cart['reminded']] : null);
+        $subscriptions = $this->createStub(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class);
+        $subscriptions->method('find')->willReturnCallback(fn ($type, $id) => $type === 'cart_reminder'
+            && $id === $cart['id'] && $cart['browser'] !== null ? [new \CommerceKings\Notification\Api\Data\Subscription(
+                7, $type, $id, 1, null, null, 'consent', (string)$cart['browser'], '2026-10-01 12:00:00')] : []);
+        $access = new RestoreAccess($signature, $browserId, $stores, $lifetime, $carts, $subscriptions);
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists, $quoteModel) {
             $this->lookups++;

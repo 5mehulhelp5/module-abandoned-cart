@@ -100,8 +100,7 @@ trait DbTestTrait
         return $resource;
     }
 
-    /** All WHERE conditions of an update as plain strings ("col = ?" keys and numeric-key conditions). */
-    /** The module's real CartTable on this fake; joined() is 'ck_abandoned_cart AS c INNER JOIN quote AS q ON q.entity_id = c.quote_id'. */
+    /** The module's real CartTable on this fake; joined() as self::joined() below. */
     private function carts(): \CommerceKings\AbandonedCart\Model\CartTable
     {
         return new \CommerceKings\AbandonedCart\Model\CartTable($this->resource());
@@ -110,9 +109,11 @@ trait DbTestTrait
     /** CartTable::joined() as the fake records it (traits hold no constants before PHP 8.2). */
     private static function joined(): string
     {
-        return 'ck_abandoned_cart AS c INNER JOIN quote AS q ON q.entity_id = c.quote_id';
+        return 'ck_abandoned_cart AS c INNER JOIN quote AS q ON q.entity_id = c.quote_id'
+            . " INNER JOIN ck_notification_subscription AS s ON s.type = 'cart_reminder' AND s.reference_id = c.quote_id";
     }
 
+    /** All WHERE conditions of an update as plain strings ("col = ?" keys and numeric-key conditions). */
     private static function conditions(array $where): array
     {
         $out = [];

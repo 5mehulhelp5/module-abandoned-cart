@@ -15,22 +15,22 @@ Use the shop's normal DI compilation and static-content deployment process for p
 For development/tests use source checkouts (`--prefer-source`); release archives omit `Test/`.
 See [compatibility and verification](COMPATIBILITY.md) and [changes](CHANGELOG.md).
 
-Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts, a Magento message queue consumer sends the emails through RabbitMQ or Magento's database transport.
+Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts; `CommerceKings_Notification`'s shared queue consumer sends the emails through RabbitMQ or Magento's database transport.
 
-Depends on **`CommerceKings_Consent`** for consent and **`CommerceKings_Core`** for shared admin branding; no dependency on a consent source or banner module.
+Depends on **`CommerceKings_Notification`** for subscriptions (who asked, with which consent) and sending, **`CommerceKings_Consent`** for consent and **`CommerceKings_Core`** for shared admin branding; no dependency on a consent source or banner module.
 
 Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (feature) and **→ Consent** (where consent comes from).
 
 ## Flow
 
 1. **Consent** – a recorded consent from `CommerceKings_Consent` (`ConsentInterface::getCurrent('cart_reminder')` on the server, `CommerceKings_Consent/js/consent/provider` in the browser). Recording, validity (withdrawn, expired, banner/terms revision), browser recognition and withdrawals are that module's job; this module keeps only the **consent id**.
-2. **Capture** – the consent (and for guests the email) is stored on the cart:
-   - guest: typing a valid email in checkout, or entering checkout with an email Magento prefilled → `POST /V1/guest-carts/:cartId/ck-abandoned-email` (`GuestEmailCapture`), 1 s after the last change. Requests are serialized and rapid edits coalesce to the latest email. A save is deduplicated only after the server acknowledges it, including an identical successful retry;
-   - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also clears a previously captured guest email;
-   - customer: opening checkout (or switching the consent on there) → `POST /cartreminder/consent/capture` (`CustomerConsentCapture`, `js/customer-consent.js`); the email comes from the account. Stored only when the consent changes, so re-opening checkout does not restart the delay.
-   - Stored: the guest reminder email, its change timestamp, the consent id and the browser id hash, in one UPDATE that also checks the consent is still valid (`ConsentGuardInterface`) – a capture request still on its way can't undo a withdrawal. Magento's checkout email is preserved.
-3. **Finder** (cron `commercekings_abandoned_cart_find`, every 15 min) selects active, nonempty carts with an email and valid consent, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_cart.queued_at`) and published to Notification's shared topic `commercekings.notification.send` as `cart_reminder|<quote id>`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
-4. **Consumer** `commerceKingsNotificationSend` (`commercekings/module-notification`, shared by all notifications) hands the cart to the `cart_reminder` type (`Model\Notification\CartReminder`), which re-checks the policy, store, consent, inactivity delay and quote expiry, then claims the cart atomically and sends in store emulation. Selection and claim share the policy's SQL condition. A failed send restores the prior reminder timestamp and clears the queue claim for retry. Duplicate messages cannot claim the same state twice.
+2. **Subscribe** – the cart is subscribed through `commercekings/module-notification`, type `cart_reminder`: this module's `Model\Notification\CartSubscription` decides who may subscribe which cart; Notification does the email rules, the consent check, the guest contact and the storage:
+   - guest: typing a valid email in checkout, or entering checkout with an email Magento prefilled → `POST /V1/ck-notification/subscriptions` `{"type":"cart_reminder","reference":"<masked cart id>","email":"…"}` (`js/email-capture-mixin.js`), 1 s after the last change. Requests are serialized and rapid edits coalesce to the latest email. A save is deduplicated only after the server acknowledges it, including an identical successful retry;
+   - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also removes the guest's subscription;
+   - customer: opening checkout (or switching the consent on there) → `POST /V1/ck-notification/subscriptions/mine` `{"type":"cart_reminder","reference":"<quote id>"}` (`js/customer-consent.js`, Magento's session REST for storefront AJAX); the email comes from the account. A change of consent or browser restarts the delay; re-opening checkout with the same consent does not.
+   - Stored by Notification: the cart's subscription (guest contact or customer, consent id, browser id hash, `captured_at`) in one INSERT that also checks the consent is still valid and the cart is still the authorized one (active, same store, same guest or customer) – a request still on its way can't undo a withdrawal. Magento's quote is not written.
+3. **Finder** (cron `commercekings_abandoned_cart_find`, every 15 min) selects active, nonempty carts with a subscription whose consent is valid, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_cart.queued_at`) and published to Notification's shared topic `commercekings.notification.send` as `cart_reminder|<subscription id>`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
+4. **Consumer** `commerceKingsNotificationSend` (`commercekings/module-notification`, shared by all notifications) hands the subscription to the `cart_reminder` type (`Model\Notification\CartReminder`) only while it still exists with a valid consent. The type re-checks the policy, store, consent, inactivity delay and quote expiry, then claims the cart atomically and sends in store emulation. Selection and claim share the policy's SQL condition. A failed send restores the prior reminder timestamp and clears the queue claim for retry. Duplicate messages cannot claim the same state twice.
 5. **Email** – the module ships a **neutral English default** (`view/frontend/email/reminder.html`, "Abandoned Cart Reminder"). Use your own: **Marketing > Email Templates > Add New Template**, load "Abandoned Cart Reminder", change text and design, select it in **Abandoned Cart > Email template**. Variables: `customer_name`, `items_html` (ready-made rows: picture, the store's predefined options only, qty × price), `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; the footer gets `cart_reminder_email="1"` for a label. Sender defaults to **General Contact** – use a no-reply address.
 
 ## Delivery policy and quote lifetime
@@ -83,40 +83,39 @@ recipient claim; successful or interrupted handoffs retain it conservatively.
 
 ## Data
 
-Magento's `quote` table is not changed or written. The reminder state lives in the module's own
-`ck_abandoned_cart` (one row per cart, deleted with the quote by Magento's cart cleanup):
+Magento's `quote` table is not changed or written. Who subscribed a cart, with which consent, is its
+`commercekings/module-notification` subscription (`ck_notification_subscription`, type `cart_reminder`,
+reference = quote id): the guest contact (`ck_notification_contact`) or the customer, the consent id, the browser id
+hash (the restore link works only in this browser) and `captured_at` (last change; identical retries preserve it).
+This module keeps only the send history in `ck_abandoned_cart` (one row per cart, created when it is first queued,
+deleted with the quote by Magento's cart cleanup):
 
 | Column | Meaning |
 |---|---|
 | `quote_id` | the cart (`quote.entity_id`, foreign key, `ON DELETE CASCADE`) |
-| `contact_id` | guests: the captured reminder email as a `commercekings/module-notification` contact (`ck_notification_contact`, one per website and address); customers use their account email |
-| `consent_id` | the consent (`CommerceKings_Consent`, `ck_consent`) – indexed; the evidence lives there |
-| `browser_hash` | the browser id hash – the restore link works only in this browser |
-| `captured_at` | reminder email or consent last changed; identical retries preserve it |
 | `queued_at` | queued by the finder (claim) |
 | `reminded_at` | email sent – one reminder per cart |
 
-Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. A guest's address is stored once as a Notification contact; the module keeps no email history, and contacts no cart uses any more are removed by Notification's daily cleanup (`Model\ContactReference`). Magento's `quote.customer_email` and `quote.updated_at` are never touched. The reminder delay uses the later of cart activity (`quote.updated_at`) and capture activity (`captured_at`, guests and customers); quote expiry still uses Magento's cart timestamp. Withdrawal unlinks contact, consent and browser but keeps `queued_at`/`reminded_at`, so opting in again never causes a second reminder. Every claim is one UPDATE over `ck_abandoned_cart` joined to `quote` (`Model\CartTable::joined()`), so cart, consent and reminder state are still checked in the same statement.
+Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. A guest's address is stored once as a Notification contact; the module keeps no email history, and Notification removes contacts nothing uses any more. Magento's `quote.customer_email` and `quote.updated_at` are never touched. The reminder delay uses the later of cart activity (`quote.updated_at`) and subscription activity (`captured_at`, guests and customers); quote expiry still uses Magento's cart timestamp. A withdrawal deletes the subscription but keeps `queued_at`/`reminded_at`, so opting in again never causes a second reminder. Every claim is one UPDATE over `ck_abandoned_cart` joined to `quote` and the subscription (`Model\CartTable::joined()`), so cart, consent and send history are still checked in the same statement.
 
 `ReminderEmailResolverInterface::resolve(int $quoteId): ?string` supplies the current recipient to
-both queue eligibility and delivery. The default uses the captured email for guest carts and
+both queue eligibility and delivery. The default uses the subscribed email for guest carts and
 Magento's `customer_email` for customer carts; absent recipients return `null`. Replace it through
 DI to choose another source. Finder scans candidate pages so unresolved recipients do not block
-later eligible carts. Delivery compares both native/captured email snapshots in its atomic claim
+later eligible carts. Delivery compares the subscription it checked in its atomic claim
 and resolves again afterward, releasing the claim if the recipient changed. Email updates never
 reset `reminded_at`: the default remains one reminder per cart.
 
-Development carts captured before these columns existed need checkout capture again; no legacy
-checkout emails are copied automatically into the new field.
+Carts subscribed before this version need checkout capture again; nothing is migrated before the first release.
 
 ## Consent rules
 
 - A **consent** = one choice in the consent source, recorded by `CommerceKings_Consent` with its own id.
-- **Switched off in the consent source** (incl. "reject all", on any page): `CommerceKings_Consent` commits withdrawal and pending cleanup together, then invokes this module's DI-registered `Model\WithdrawalHandler`. It clears **every active cart captured with those consent IDs**, including the abandoned cart of an expired session. Failed cleanup remains pending for Consent's cron retry; reminders are blocked as soon as consent is revoked. On guest checkout the email endpoint is also called with an empty email.
-  - captured reminder email, its timestamp, consent and browser binding are cleared;
+- **Switched off in the consent source** (incl. "reject all", on any page): `CommerceKings_Consent` commits withdrawal and pending cleanup together, then invokes `CommerceKings\Notification\Model\WithdrawalHandler`, registered for purpose `cart_reminder` in this module's `di.xml`. It deletes **every subscription with those consent IDs**, including the abandoned cart of an expired session. Failed cleanup remains pending for Consent's cron retry; reminders are blocked as soon as consent is revoked. On guest checkout the subscribe endpoint is also called with an empty email.
+  - the subscription (guest contact link, consent and browser binding) is removed; the send history stays;
   - Magento checkout email is preserved for guests and customers.
-  - retries use the original consent IDs, so a later grant/capture remains untouched;
-  - clearing a checkout email only clears that cart's capture; it does not withdraw browser consent.
+  - retries use the original consent IDs, so a later grant/subscription remains untouched;
+  - clearing a checkout email only removes that cart's subscription; it does not withdraw browser consent.
 - **Opt-out** ("Unsubscribe") withdraws the cart's consent (`ConsentInterface::withdraw($id, 'email')` – with every other active reminder consent of that browser). That browser's old choice is refused (e.g. opted out on the phone, the old "yes" is still on the laptop – also after re-saving the banner for another category); switching the choice mapped to `cart_reminder` on again is a new consent. The address is never blocked.
 - **Source revision raised** (Consent → Source revision) or **purpose terms revision raised** (`etc/di.xml`, `terms_revision`): every consent given before stops being valid – waiting reminders are not sent; the visitor is asked again.
 
@@ -126,7 +125,7 @@ Email content restricts visitor-controlled values and uses the shop's catalog da
 
 - **No visitor text in the email.** Custom options are shown only for the store's predefined choices (`drop_down`, `radio`, `checkbox`, `multiple`); free text (such as an engraved message), file names and other types are left out. Product and configurable option names come from the catalog.
 - **Greeting** uses only the first word of the name, letters/`-`/`'` only, max 20 characters. The default template uses "Hi %name," when a valid name is available and omits the greeting otherwise.
-- Not done (yet): a per-IP rate limit on the guest email endpoint.
+- Not done (yet): a per-IP rate limit on the guest subscribe endpoint (it belongs to `CommerceKings_Notification`).
 - The recorded consent shows what a browser sent; a scripted client can fake it, like with any cookie banner.
 
 ## Links in the email
@@ -142,7 +141,7 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 
 - invalid/forged signature or changed quote id → homepage before any quote lookup;
 - link generation requires a nonempty string deployment `crypt/key`; missing, blank or invalid keys stop generation and signature validation rejects safely;
-- the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's (`ck_abandoned_cart.browser_hash`), and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
+- the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's subscription (`ck_notification_subscription.browser_hash`), and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
 - cart ordered/closed, emptied or expired under Magento's quote lifetime, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `reminded_at`) → notice "This reminder link is no longer available. You can continue shopping with your current cart." (owner only);
 - customer cart → cart page if logged in as that customer, otherwise login page with "Sign in to continue shopping – your cart is waiting for you.";
 - guest cart → **GET shows a confirmation page without merging or replacing the session cart**. If it is already the session cart, the visitor goes straight to the cart page;
@@ -155,13 +154,13 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 
 **Opt-out** `/ckconsent/optout` – Consent owns the signed link and explicit confirmation:
 
-- valid GET → read-only confirmation form; consent, captured email and banner preferences stay unchanged until the visitor submits its form-key-protected POST. After confirmation, the handler clears captured reminder email and consent while preserving Magento checkout email, with durable retry if cleanup fails;
+- valid GET → read-only confirmation form; consent, captured email and banner preferences stay unchanged until the visitor submits its form-key-protected POST. After confirmation, Notification's handler removes the cart's subscription while preserving Magento checkout email, with durable retry if cleanup fails;
 - already withdrawn → confirmation again, without withdrawing a later explicit consent. Deleting the original cart does not break the link; deleting the consent record, an invalid signature or another website → homepage;
 - confirmed in the owning browser → Consent's `js/withdrawal-banner.js` switches the mapped choice off only if that browser's current choice was withdrawn. GET never synchronizes preferences; an already-withdrawn choice can be applied explicitly with the form. Another browser sees a generic question, then redirects home after submitting. Other categories and later explicit choices stay; another device's cookie is untouched. Purposes sharing the same category follow it together;
 
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 
-`cart gone`, `ordered / closed`, `empty`, `no email`, `no consent`, `already reminded`, `consent purpose / website mismatch`, `consent withdrawn / expired` (also: older banner/terms revision), `disabled`. A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
+`ordered / closed`, `empty`, `no email`, `reminder policy` (already reminded), `quote expired`, `cart recently updated`, `consent withdrawn / expired` (also: older banner/terms revision), `consent purpose / website mismatch`, `disabled`; after a send attempt also Notification's `recipient cooldown` and `recipient changed`. A subscription or cart that no longer exists logs `subscription N skipped (subscription or cart gone)`; Notification's consumer already skips withdrawn subscriptions (`CommerceKings_Notification: cart_reminder N skipped (no valid subscription)`). A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
 
 ## Known behaviour / limitations
 
@@ -171,47 +170,41 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 - Visitors who answered the banner **before** the category existed are not asked again unless **Source revision** (Consent section) is raised; until then the category stays off for them.
 - **Scanner-safe opt-out:** GET/HEAD do not withdraw or change banner preferences; the visitor must explicitly submit the confirmation form. Consent's optional RFC 8058 Yes/No setting adds mail-client unsubscribe headers alongside the regular confirmation link. The header and visible link use the same signed URL and withdrawal cleanup. The sending provider must DKIM-sign both headers. Header insertion uses Magento's native Symfony mail API (verified on 2.4.9); an unsupported custom or legacy mail backend fails before sending when this option is enabled.
 - **Delivery is not atomic with SMTP.** The reminder timestamp is claimed before handoff. A hard worker interruption after claiming can leave a cart marked reminded even if nothing was sent; it is not automatically retried. Caught send failures release the claim, but an SMTP exception may itself be ambiguous. Review transport/provider evidence before manually retrying an uncertain attempt. Once `sendMessage()` returns successfully, a later emulation cleanup error keeps the claim to prevent a duplicate. The timestamp is not proof of inbox delivery.
-- Guest carts are deleted by Magento's own `sales_clean_quotes` after "Quote Lifetime" (default 30 days) with their email; the consent record stays in `CommerceKings_Consent` until its own cleanup.
+- Guest carts are deleted by Magento's own `sales_clean_quotes` after "Quote Lifetime" (default 30 days). Their send history goes with them; Notification's daily cleanup then removes the cart's subscription (`CartSubscription::orphanCondition()`) and, after its grace period, the guest's address. The consent record stays in `CommerceKings_Consent` until its own cleanup.
 - An ordered cart keeps its email in `sales_order` (needed for the order, unrelated to this consent).
 - The email shows the cart at **send** time. Merging recalculates Magento totals; restoring a guest cart into a session with no existing cart adopts it, and Magento's normal cart/checkout flow handles later recalculation.
 - Merge rollback covers database changes. External side effects from third-party quote observers cannot be rolled back by this transaction. Concurrent restore requests are tested; custom cart writers and checkout integrations need their own concurrency checks.
 
 ## Endpoint safety
 
-Capture authorizes an active guest/customer quote on the current website before reading
-consent or changing data. It uses the quote's store configuration, requires the reminder
-purpose and the same consent website, and repeats the authorized store/customer/consent
-conditions in atomic updates and retry acknowledgements. Clearing a guest capture also
-keeps the authorized store predicate. The consumer rejects a wrong-purpose or wrong-website
-consent before claiming a quote.
+Subscribing authorizes an active guest/customer cart on the current website (`CartSubscription::authorize()`:
+masked cart id for guests, own quote id for customers) before Notification reads consent or writes anything. It
+uses the cart's store configuration; Notification requires the reminder purpose and the same consent website, and
+repeats the authorized cart condition (active, store, guest/customer) and the consent guard in its atomic INSERT,
+retry acknowledgement and guest unsubscribe. The consumer rejects a wrong-purpose or wrong-website consent before
+claiming a cart.
 
 Storefront POST actions require a valid form key even for AJAX. Malformed form keys are
 rejected before Magento's string comparison; malformed purpose/link parameters and source
-cookies are refused without server errors. Signed withdrawal HEAD requests have no effects.
+cookies are refused without server errors. Signed withdrawal HEAD requests have no effects. The customer
+subscribe endpoint uses Magento's `self` resource: the storefront session only for AJAX requests, or a customer
+token; the customer id is never taken from the request body.
 
 ## Endpoints
 
 | Endpoint | Who | Purpose |
 |---|---|---|
-| `POST /rest/V1/guest-carts/:cartId/ck-abandoned-email` (anonymous) | guest checkout | store email + consent, or clear with `""` |
-| `POST /cartreminder/consent/capture` (form key) | logged-in customer on checkout | store consent on the session cart |
+| `POST /rest/V1/ck-notification/subscriptions` (anonymous, Notification) | guest checkout | subscribe the cart with email + consent, or unsubscribe with `""` |
+| `POST /rest/V1/ck-notification/subscriptions/mine` (`self`, Notification) | logged-in customer on checkout | subscribe their own cart |
 | `GET /cartreminder/cart/restore?q=&t=` | email | validate ownership and show restore confirmation |
 | `POST /cartreminder/cart/restore` (form key, `q`, `t`) | confirmation page | adopt or merge the saved cart |
 | `GET /ckconsent/optout?c=&t=` (Consent module) | email | show read-only withdrawal confirmation |
 | `POST /ckconsent/optout` (form key, `c`, `t`) | confirmation form | withdraw consent and apply owned-browser preferences |
 
-Guest capture accepts the flat payload `{"email":"visitor@example.test"}`. An explicit
-`{"email":""}` clears capture. Missing email, non-string values, invalid format and values over
-255 characters receive Magento's standard 400 input error. `ValidateGuestEmailCapture` is a before
-plugin on `GuestEmailCaptureInterface`, registered in global `di.xml`. It uses Magento's `stringTrim`
-filter and `EmailAddress` / `StringLength` validators, with the length limit configured in DI.
-Failures are aggregated with `InputException::addError()` using messages that do not echo the email.
-The email parameter uses `mixed` to preserve raw REST input. The plugin permits an explicitly empty
-string; native validators reject other raw types, so JSON `false` cannot become a clearing request. Invalid input leaves
-existing capture intact, even without consent. Cart, website and consent checks still authorize
-all writes and clears in `GuestEmailCapture`. REST, SOAP and internal calls through Magento's
-intercepted service run the plugin. Direct `new` construction bypasses Magento interception;
-GraphQL is covered only if a resolver calls this service. This module declares no GraphQL resolver.
+Guest capture sends `{"type":"cart_reminder","reference":"<masked cart id>","email":"visitor@example.test"}`;
+an explicit `"email":""` unsubscribes. Notification validates the email (missing, non-string, invalid format
+or over 255 characters → Magento's standard 400 input error, without echoing the address) before the cart is
+authorized, so invalid input leaves an existing subscription intact. See module-notification's README.
 
 ## Settings (default scope unless noted)
 
@@ -277,7 +270,7 @@ vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
 They verify recipient cooldown, same-address concurrency, expiry, owned release, failed-send retry, duplicate claims, store-specific lifetime,
 late queue delivery, read-only admin scope and restore expiry before physical quote deletion.
 
-`Test/Unit` uses `DbTestTrait`, a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, guest + customer capture (incl. the guard condition), withdrawal (reminder data cleared while Magento checkout email is preserved), reminder policy, quote lifetime, finder, consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, email data (signed links, options, escaping), restore (every branch incl. other browser, merge, mini cart cookie), consent endpoints. Shared withdrawal links, confirmation and preference sync are tested in Consent.
+`Test/Unit` uses `DbTestTrait`, a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, cart subscription authorization (guest masked id, customer's own quote, the repeated cart condition), reminder policy, quote lifetime, finder (subscription ids, guarded queue claim), consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, email data (signed links, options, escaping), restore (every branch incl. other browser, merge, mini cart cookie). Email rules, consent, subscription storage and withdrawal are tested in Notification; shared withdrawal links, confirmation and preference sync in Consent.
 
 JavaScript tests exercise the guest capture coordinator and Magento email-field mixin: acknowledgements, retries, rapid edits, withdrawal during a pending request, consent changes, offline recovery and component cleanup. `customer-consent.js` does not have an isolated unit test. Consent tests its shared withdrawal banner sync separately.
 
@@ -287,15 +280,16 @@ The quote integration tests require a **development database with Magento demo d
 MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Integration/CartRestoreTest.php
 ```
 
-`CaptureScopeTest.php` adds eight real SQL regressions with empty quotes and a temporary
-second website: cross-website capture/clear, allowed capture/retry/clear, a store change
-after authorization, wrong consent scope, and refused-write acknowledgements. It removes
-its quotes, customer and website/store/group fixtures afterward and needs no demo products. It also
-checks guest/customer recipient selection, separate email activity, identical retries, preserved
-Magento checkout data and unchanged reminder history:
+`CartSubscriptionTest.php` adds ten real SQL regressions through Notification's subscribe service with this
+module's `CartSubscription`, empty quotes and a temporary second website: cross-website subscribe/unsubscribe,
+allowed subscribe/retry/unsubscribe, a disabled store, a store change after authorization, wrong consent scope,
+refused-write acknowledgements and a customer's own cart. It also checks guest/customer recipient selection,
+separate subscription activity, identical retries, preserved Magento checkout data, unchanged send history and the
+registered withdrawal handler. It removes its quotes, customers and website/store/group fixtures afterward and needs
+no demo products:
 
 ```sh
-MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Integration/CaptureScopeTest.php
+MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Integration/CartSubscriptionTest.php
 ```
 
 Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, stock limits and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
@@ -325,7 +319,7 @@ and remove their own queue, message and status rows during cleanup.
 - Direct API call without the cookie / without the category → nothing stored.
 
 **Withdrawing**
-- the choice mapped to `cart_reminder` off on checkout or another page → captured guest reminder email and consent are cleared; Magento checkout email is kept for every cart.
+- the choice mapped to `cart_reminder` off on checkout or another page → the cart's subscription (guest reminder email, consent) is removed; Magento checkout email is kept for every cart.
 - Only unrelated purpose choices off → nothing changes for the reminder (the cart keeps its consent).
 - "Reject all" on checkout and on a product page → cleared (withdraw request 200, not 499).
 - On again → a new consent id stored (guest: also when returning to checkout with the prefilled email).
@@ -347,7 +341,7 @@ and remove their own queue, message and status rows during cleanup.
 - Customer cart: logged in → cart page; logged out → login page with notice.
 
 **Opt-out**
-- Link → confirmation page; captured guest reminder email + consent cleared, Magento checkout email preserved; `ck_consent` row withdrawn via `email`, no email address stored anywhere in the consent tables.
+- Link → confirmation page; the cart's subscription (guest reminder email + consent) removed, Magento checkout email preserved; `ck_consent` row withdrawn via `email`, no email address stored anywhere in the consent tables.
 - Same link again → confirmation, with a later explicit consent preserved. Forged signature → homepage.
 - Original cart deleted → the Consent link still withdraws.
 - Opted out on phone → laptop's old consent refused, also after changing an unrelated purpose; the choice mapped to `cart_reminder` off+on → stored again; other browser with fresh consent and same email → stored.

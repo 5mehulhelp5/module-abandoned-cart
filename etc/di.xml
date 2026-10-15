@@ -1,35 +1,19 @@
 <?xml version="1.0"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
-    <preference for="CommerceKings\AbandonedCart\Api\GuestEmailCaptureInterface" type="CommerceKings\AbandonedCart\Model\GuestEmailCapture"/>
     <preference for="CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface" type="CommerceKings\AbandonedCart\Model\ReminderEmailResolver"/>
-    <type name="CommerceKings\AbandonedCart\Api\GuestEmailCaptureInterface">
-        <plugin name="ck_abandoned_cart_validate_guest_email"
-                type="CommerceKings\AbandonedCart\Plugin\ValidateGuestEmailCapture" sortOrder="10"/>
-    </type>
-    <virtualType name="CommerceKingsAbandonedCartEmailLength" type="Magento\Framework\Validator\StringLength">
-        <arguments>
-            <argument name="options" xsi:type="array">
-                <item name="max" xsi:type="number">255</item>
-            </argument>
-        </arguments>
-    </virtualType>
-    <type name="CommerceKings\AbandonedCart\Plugin\ValidateGuestEmailCapture">
-        <arguments>
-            <argument name="emailLengthValidator" xsi:type="object">CommerceKingsAbandonedCartEmailLength</argument>
-        </arguments>
-    </type>
     <preference for="CommerceKings\AbandonedCart\Api\ReminderPolicyInterface" type="CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart"/>
     <type name="CommerceKings\Consent\Model\WithdrawalPool">
         <arguments>
             <argument name="handlers" xsi:type="array">
+                <!-- CommerceKings_Notification removes the cart's subscription; the send history stays -->
                 <item name="cart_reminder" xsi:type="array">
-                    <item name="abandoned_cart" xsi:type="object">CommerceKings\AbandonedCart\Model\WithdrawalHandler</item>
+                    <item name="notification_subscriptions" xsi:type="object">CommerceKings\Notification\Model\WithdrawalHandler</item>
                 </item>
             </argument>
         </arguments>
     </type>
-    <!-- sending: CommerceKings_Notification's shared queue consumer hands cart ids to this type -->
+    <!-- sending: CommerceKings_Notification's shared queue consumer hands the cart's subscription id to this type -->
     <type name="CommerceKings\Notification\Model\TypePool">
         <arguments>
             <argument name="types" xsi:type="array">
@@ -37,11 +21,11 @@
             </argument>
         </arguments>
     </type>
-    <!-- guest emails are CommerceKings_Notification contacts: keep the ones a cart still uses -->
-    <type name="CommerceKings\Notification\Model\ContactReferencePool">
+    <!-- who may subscribe a cart (CommerceKings_Notification does email, consent and storage) -->
+    <type name="CommerceKings\Notification\Model\SubscriptionTypePool">
         <arguments>
-            <argument name="references" xsi:type="array">
-                <item name="abandoned_cart" xsi:type="object">CommerceKings\AbandonedCart\Model\ContactReference</item>
+            <argument name="types" xsi:type="array">
+                <item name="cart_reminder" xsi:type="object">CommerceKings\AbandonedCart\Model\Notification\CartSubscription</item>
             </argument>
         </arguments>
     </type>

@@ -8,6 +8,7 @@ use CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\ReminderPolicy as 
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
 use CommerceKings\AbandonedCart\Model\CartTable;
+use CommerceKings\Notification\Model\SubscriptionManagement;
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
@@ -80,11 +81,13 @@ class ReminderPolicyTest extends TestCase
     {
         $db = $this->resource->getConnection();
         if ($this->quoteIds) {
-            $emails = $db->fetchCol($db->select()->from(['c' => $this->table('ck_abandoned_cart')], [])
-                ->join(['n' => $this->table('ck_notification_contact')], 'n.contact_id = c.contact_id', 'email')
-                ->where('c.quote_id IN (?)', $this->quoteIds));
+            $emails = $db->fetchCol($db->select()->from(['s' => $this->table(SubscriptionManagement::TABLE)], [])
+                ->join(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', 'email')
+                ->where('s.type = ?', CartReminder::CODE)->where('s.reference_id IN (?)', $this->quoteIds));
             $hashes = array_map(fn ($email) => $this->cooldown()->hash($email), array_filter($emails));
             if ($hashes) { $db->delete($this->table('ck_notification_cooldown'), ['recipient_hash IN (?)' => $hashes]); }
+            $db->delete($this->table(SubscriptionManagement::TABLE),
+                ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quoteIds]);
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quoteIds]);
             if ($emails) { $db->delete($this->table('ck_notification_contact'), ['email IN (?)' => $emails]); }
         }
@@ -105,36 +108,67 @@ class ReminderPolicyTest extends TestCase
         $this->om->get(CartRepositoryInterface::class)->save($quote);
         $id = (int)$quote->getId();
         $this->quoteIds[] = $id;
+        $updatedAt = gmdate('Y-m-d H:i:s', time() - $ageSeconds);
         $this->resource->getConnection()->update($this->table('quote'), ['store_id' => $this->storeIds[$days],
-            'items_count' => 1, 'updated_at' => gmdate('Y-m-d H:i:s', time() - $ageSeconds)], ['entity_id = ?' => $id]);
-        $this->state($id, ['email' => $this->email, 'consent_id' => 'fixture-consent']);
+            'items_count' => 1, 'updated_at' => $updatedAt], ['entity_id = ?' => $id]);
+        $this->resource->getConnection()->insert($this->table(SubscriptionManagement::TABLE), [
+            'type' => CartReminder::CODE, 'reference_id' => $id, 'store_id' => $this->storeIds[$days], 'subject_key' => '',
+            'consent_id' => 'fixture-consent', 'browser_hash' => 'fixture-browser', 'captured_at' => $updatedAt]);
+        $this->state($id, ['email' => $this->email]);
         return $id;
     }
 
-    /** Write the cart's reminder state; "email" becomes the guest contact of the cart's website. */
+    /**
+     * Write the cart's subscription (email → the guest contact of the cart's website, consent_id, captured_at)
+     * and its send history (queued_at, reminded_at).
+     */
     private function state(int $id, array $values): void
     {
-        if (isset($values['email'])) {
-            $storeId = (int)$this->resource->getConnection()->fetchOne($this->resource->getConnection()->select()
-                ->from($this->table('quote'), 'store_id')->where('entity_id = ?', $id));
-            $values['contact_id'] = $this->om->get(\CommerceKings\Notification\Api\ContactRepositoryInterface::class)
-                ->save((int)$this->stores->getStore($storeId)->getWebsiteId(), $values['email']);
-            unset($values['email']);
+        $db = $this->resource->getConnection();
+        $subscription = array_intersect_key($values, array_flip(['email', 'consent_id', 'captured_at']));
+        if (isset($subscription['email'])) {
+            $storeId = (int)$db->fetchOne($db->select()->from($this->table('quote'), 'store_id')->where('entity_id = ?', $id));
+            $subscription['contact_id'] = $this->om->get(\CommerceKings\Notification\Api\ContactRepositoryInterface::class)
+                ->save((int)$this->stores->getStore($storeId)->getWebsiteId(), $subscription['email']);
+            unset($subscription['email']);
         }
-        $carts = $this->om->get(CartTable::class);
-        $carts->ensure($id);
-        $this->resource->getConnection()->update($carts->name(), $values, ['quote_id = ?' => $id]);
+        if ($subscription) {
+            $db->update($this->table(SubscriptionManagement::TABLE), $subscription,
+                ['type = ?' => CartReminder::CODE, 'reference_id = ?' => $id]);
+        }
+        $history = array_diff_key($values, array_flip(['email', 'consent_id', 'captured_at']));
+        if ($history) {
+            $carts = $this->om->get(CartTable::class);
+            $carts->ensure($id);
+            $db->update($carts->name(), $history, ['quote_id = ?' => $id]);
+        }
     }
 
-    /** The quote with its reminder state and guest email. */
+    /** The quote with its subscription, guest email and send history. */
     private function row(int $id): array
     {
-        return $this->resource->getConnection()->fetchRow($this->resource->getConnection()->select()
+        $db = $this->resource->getConnection();
+        return $db->fetchRow($db->select()
             ->from(['q' => $this->table('quote')])
-            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id',
-                ['contact_id', 'consent_id', 'browser_hash', 'captured_at', 'queued_at', 'reminded_at'])
-            ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = c.contact_id', ['email'])
+            ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
+                $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
+                ['subscription_id', 'contact_id', 'consent_id', 'browser_hash', 'captured_at'])
+            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id', ['queued_at', 'reminded_at'])
+            ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email'])
             ->where('q.entity_id = ?', $id));
+    }
+
+    /** The queue message reference of a cart: its subscription id. */
+    private function subscriptionOf(int $quoteId): string
+    {
+        return (string)$this->row($quoteId)['subscription_id'];
+    }
+
+    private function quoteOf(int $subscriptionId): int
+    {
+        $db = $this->resource->getConnection();
+        return (int)$db->fetchOne($db->select()->from($this->table(SubscriptionManagement::TABLE), 'reference_id')
+            ->where('subscription_id = ?', $subscriptionId));
     }
 
     private function config(): Config
@@ -180,7 +214,7 @@ class ReminderPolicyTest extends TestCase
         $stores = $this->createStub(StoreManagerInterface::class);
         $stores->method('getStores')->willReturn(array_map(fn ($id) => $this->stores->getStore($id), $this->storeIds));
         $queue = $this->createStub(QueueInterface::class);
-        $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = (int)$id; });
+        $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = $this->quoteOf((int)$id); });
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
             new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
             $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class));
@@ -240,7 +274,7 @@ class ReminderPolicyTest extends TestCase
         $second = $this->quote();
         $updated = $this->row($first)['updated_at'];
         $consumer = $this->consumer();
-        foreach ([$first, $second, $first, $second] as $id) { $consumer->process((string)$id); }
+        foreach ([$first, $second, $first, $second] as $id) { $consumer->process($this->subscriptionOf($id)); }
         $this->assertSame(1, $this->sent);
         $this->assertNotNull($this->row($first)['reminded_at']);
         $this->assertNull($this->row($second)['reminded_at']);
@@ -252,14 +286,14 @@ class ReminderPolicyTest extends TestCase
     {
         $first = $this->quote();
         $second = $this->quote();
-        $this->consumer()->process((string)$first);
+        $this->consumer()->process($this->subscriptionOf($first));
         $this->assertSame(0, $this->finder()->execute());
         $this->resource->getConnection()->update($this->table('ck_notification_cooldown'),
             ['sent_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)],
             ['recipient_hash = ?' => $this->cooldown()->hash($this->email)]);
         $this->assertSame(1, $this->finder()->execute());
         $this->assertSame([$second], $this->published);
-        $this->consumer()->process((string)$second);
+        $this->consumer()->process($this->subscriptionOf($second));
         $this->assertSame(2, $this->sent);
     }
 
@@ -267,12 +301,12 @@ class ReminderPolicyTest extends TestCase
     {
         $id = $this->quote();
         $this->sendFails = true;
-        try { $this->consumer()->process((string)$id); $this->fail('Expected fixture failure'); }
+        try { $this->consumer()->process($this->subscriptionOf($id)); $this->fail('Expected fixture failure'); }
         catch (\RuntimeException $e) { $this->assertSame('Fixture SMTP failure', $e->getMessage()); }
         $this->assertFalse($this->cooldown()->isRecent($this->email));
         $this->assertNull($this->row($id)['reminded_at']);
         $this->sendFails = false;
-        $this->consumer()->process((string)$id);
+        $this->consumer()->process($this->subscriptionOf($id));
         $this->assertSame(1, $this->sent);
     }
 
@@ -394,7 +428,7 @@ class ReminderPolicyTest extends TestCase
         $expired = $this->quote(2, 3 * 86400);
         $recent = $this->quote(30, 0);
         $consumer = $this->consumer();
-        foreach ([$expired, $recent] as $id) { $consumer->process((string)$id); }
+        foreach ([$expired, $recent] as $id) { $consumer->process($this->subscriptionOf($id)); }
         $this->assertSame(0, $this->sent);
         $this->assertNull($this->row($expired)['reminded_at']);
         $this->assertNull($this->row($recent)['reminded_at']);
@@ -406,7 +440,7 @@ class ReminderPolicyTest extends TestCase
         $this->state($id, ['reminded_at' => gmdate('Y-m-d H:i:s')]);
         $browser = $this->createStub(BrowserIdentityInterface::class);
         $access = new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores, $this->lifetime(),
-            $this->om->get(CartTable::class));
+            $this->om->get(CartTable::class), $this->om->get(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class));
         $quote = $this->om->get(CartRepositoryInterfaceFactory::class)->create()->get($id);
         $this->assertFalse($access->isAvailable($quote));
     }
@@ -437,13 +471,13 @@ class ReminderPolicyTest extends TestCase
         $this->assertStringNotContainsString('<input', $html);
     }
 
-    public function testGuestEmailActivityPostponesQueueingAndSendingWithoutExtendingQuoteLifetime(): void
+    public function testSubscriptionActivityPostponesQueueingAndSendingWithoutExtendingQuoteLifetime(): void
     {
         $id = $this->quote(30, 120);
         $this->state($id, ['captured_at' => gmdate('Y-m-d H:i:s')]);
         $updated = $this->row($id)['updated_at'];
         $this->assertSame(0, $this->finder()->execute());
-        $this->consumer()->process((string)$id);
+        $this->consumer()->process($this->subscriptionOf($id));
         $this->assertSame(0, $this->sent);
         $this->assertSame($updated, $this->row($id)['updated_at']);
     }

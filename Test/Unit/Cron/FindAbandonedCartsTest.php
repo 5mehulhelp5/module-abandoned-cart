@@ -59,12 +59,17 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertSame([], $this->updates);
     }
 
+    /** quote id => subscription id, as the finder's select returns them */
+    private static function due(array $ids): array
+    {
+        return array_combine($ids, array_map(fn ($id) => (string)($id + 1000), $ids));
+    }
+
     public function testSelectionUsesConsentPolicyAndEachStoresLifetimeAndDelay(): void
     {
         $this->finder()->execute();
         $conditions = array_column($this->selectWhere, 0);
-        foreach (['q.is_active = 1', 'q.items_count > 0',
-            'c.consent_id IS NOT NULL', 'VALID(c.consent_id)', 'c.queued_at IS NULL'] as $condition) {
+        foreach (['q.is_active = 1', 'q.items_count > 0', 'VALID(s.consent_id)', 'c.queued_at IS NULL'] as $condition) {
             $this->assertContains($condition, $conditions);
         }
         $branches = end($conditions);
@@ -74,15 +79,17 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertStringContainsString('q.updated_at > NOW() - INTERVAL 2 DAY', $branches);
         $this->assertStringNotContainsString('store_id = 3', $branches);
         $this->assertStringContainsString('c.reminded_at IS NULL', $branches);
-        $this->assertStringContainsString('(c.captured_at IS NULL OR c.captured_at <= NOW() - INTERVAL 180 MINUTE)', $branches);
+        $this->assertStringContainsString('s.captured_at <= NOW() - INTERVAL 180 MINUTE', $branches);
         $this->assertSame([[200, 0]], $this->limits);
     }
 
-    public function testEverySelectedCartIsQueuedWithoutAddressGrouping(): void
+    public function testEverySelectedCartIsQueuedWithItsSubscriptionWithoutAddressGrouping(): void
     {
-        $this->fetchColResult = ['10', '11', '12'];
+        $this->fetchPairsResults = [self::due([10, 11, 12])];
         $this->assertSame(3, $this->finder()->execute());
-        $this->assertSame(['10', '11', '12'], array_column($this->published, 1));
+        $this->assertSame(['1010', '1011', '1012'], array_column($this->published, 1));
+        $this->assertSame(3, count(array_filter($this->queries, fn ($query) => str_contains($query[0], 'INSERT IGNORE'))),
+            'the send history row exists before its claim');
     }
 
     public function testAlternativePolicyIsUsedInSelectionAndQueueClaims(): void
@@ -90,7 +97,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->policy = $this->createStub(ReminderPolicyInterface::class);
         $this->policy->method('dueCondition')->willReturnCallback(fn (ReminderQuery $query) =>
             'CUSTOM(' . $query->column('reminded_at') . ',' . $query->storeId . ')');
-        $this->fetchColResult = ['10'];
+        $this->fetchPairsResults = [self::due([10])];
         $this->assertSame(1, $this->finder()->execute());
         $this->assertStringContainsString('CUSTOM(c.reminded_at,1)', end($this->selectWhere)[0]);
         $this->assertStringContainsString('CUSTOM(c.reminded_at,1)', implode(' ', self::conditions($this->updates[1]['where'])));
@@ -109,25 +116,26 @@ class FindAbandonedCartsTest extends TestCase
 
     public function testOnlyWonAtomicClaimsArePublished(): void
     {
-        $this->fetchColResult = ['10', '11', '12'];
+        $this->fetchPairsResults = [self::due([10, 11, 12])];
         $this->updateResults = [0, 1, 0, 1];
         $this->assertSame(2, $this->finder()->execute());
-        $this->assertSame([[CartReminder::CODE, '10'], [CartReminder::CODE, '12']], $this->published);
+        $this->assertSame([[CartReminder::CODE, '1010'], [CartReminder::CODE, '1012']], $this->published);
         $claim = $this->updates[1];
         $this->assertSame(self::joined(), $claim['table']);
         $this->assertSame(['c.queued_at'], array_keys($claim['data']));
         $this->assertSame('NOW()', (string)$claim['data']['c.queued_at']);
         $this->assertSame(10, $claim['where']['c.quote_id = ?']);
+        $this->assertSame(1010, $claim['where']['s.subscription_id = ?'], 'the selected subscription, not a newer one');
         $conditions = self::conditions($claim['where']);
         $this->assertContains('c.queued_at IS NULL', $conditions);
-        $this->assertContains('VALID(c.consent_id)', $conditions);
+        $this->assertContains('VALID(s.consent_id)', $conditions);
         $this->assertStringContainsString('updated_at > NOW() - INTERVAL 30 DAY', implode(' ', $conditions));
     }
 
     public function testRecentRecipientsAreNotQueued(): void
     {
         $this->recent = true;
-        $this->fetchColResult = ['10', '11'];
+        $this->fetchPairsResults = [self::due([10, 11])];
         $this->assertSame(0, $this->finder()->execute());
         $this->assertSame([], $this->published);
     }
@@ -141,9 +149,9 @@ class FindAbandonedCartsTest extends TestCase
     public function testUnresolvedRecipientsDoNotBlockTheNextCandidatePage(): void
     {
         $this->unresolved = range(1, 200);
-        $this->fetchColResults = [range(1, 200), [201]];
+        $this->fetchPairsResults = [self::due(range(1, 200)), self::due([201])];
         $this->assertSame(1, $this->finder()->execute());
-        $this->assertSame([[CartReminder::CODE, '201']], $this->published);
+        $this->assertSame([[CartReminder::CODE, '1201']], $this->published);
         $this->assertSame([[200, 0], [200, 200]], $this->limits);
     }
 }

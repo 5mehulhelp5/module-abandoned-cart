@@ -5,7 +5,7 @@ namespace CommerceKings\AbandonedCart\Api\Data;
 
 /**
  * SQL context for the cart being selected or claimed: column() qualifies a column of the module's
- * reminder state (ck_abandoned_cart: quote_id, reminded_at, …). A future policy can reference quote_id
+ * send history (ck_abandoned_cart: quote_id, reminded_at, …). A future policy can reference quote_id
  * in a delivery-history subquery, without adding parameters or methods to ReminderPolicyInterface.
  * @api
  */

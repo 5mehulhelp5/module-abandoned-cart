@@ -133,11 +133,13 @@ test('checkout mixin captures prefilled input, debounces edits and removes its o
         'CommerceKings_Consent/js/consent/provider': {hasConsent: () => true, onChange: (purpose, fn) => { listener = fn; }},
         'mage/storage': {post: (url, body) => {
             const data = JSON.parse(body);
-            assert.deepEqual(Object.keys(data), ['email']);
-            return f.transport('cart-1', data.email);
+            assert.equal(url, '/ck-notification/subscriptions');
+            assert.deepEqual(Object.keys(data), ['type', 'reference', 'email']);
+            assert.equal(data.type, 'cart_reminder');
+            return f.transport(data.reference, data.email);
         }},
         'Magento_Checkout/js/model/quote': {getQuoteId: () => 'cart-1'},
-        'Magento_Checkout/js/model/url-builder': {createUrl: () => '/guest-carts/cart-1/ck-abandoned-email'},
+        'Magento_Checkout/js/model/url-builder': {createUrl: url => url},
         'Magento_Customer/js/model/customer': {isLoggedIn: () => false},
         'CommerceKings_AbandonedCart/js/guest-email-capture': f.capture
     });

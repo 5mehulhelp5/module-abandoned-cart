@@ -2,8 +2,9 @@
  * Guest checkout email field -> abandoned cart reminder.
  *
  * Only with consent for purpose cart_reminder (CommerceKings_Consent/js/consent/provider). On checkout
- * entry (prefilled email) and 1 s after the last
- * change of a valid email, POST /V1/guest-carts/:cartId/ck-abandoned-email. Saves and clears are
+ * entry (prefilled email) and 1 s after the last change of a valid email, subscribe the cart through
+ * CommerceKings_Notification: POST /V1/ck-notification/subscriptions {type, reference: masked cart id, email}.
+ * Saves and clears are
  * serialized, acknowledged by the server, and retried after transient failures.
  * If the consent is switched off while on checkout, the same endpoint is called with an empty email
  * and the server clears what it stored. The server re-reads the consent itself - this check only
@@ -23,8 +24,8 @@ define([
 
     function send(cartId, email) {
         return storage.post(
-            urlBuilder.createUrl('/guest-carts/:cartId/ck-abandoned-email', {cartId: cartId}),
-            JSON.stringify({email: email}),
+            urlBuilder.createUrl('/ck-notification/subscriptions', {}),
+            JSON.stringify({type: PURPOSE, reference: cartId, email: email}),
             false
         );
     }

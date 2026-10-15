@@ -53,9 +53,16 @@ $lifetime = new QuoteLifetime($om->get(ScopeConfigInterface::class));
 $recipients = $om->get(ReminderEmailResolverInterface::class);
 $published = [];
 $sent = 0;
-$queue = new class($published) implements QueueInterface {
-    public function __construct(private array &$published) {}
-    public function publish(string $type, string $reference): void { $this->published[] = (int)$reference; usleep(10000); }
+$queue = new class($published, $resource) implements QueueInterface {
+    public function __construct(private array &$published, private ResourceConnection $resource) {}
+    // report quote ids: the finder publishes subscription ids
+    public function publish(string $type, string $reference): void
+    {
+        $db = $this->resource->getConnection();
+        $this->published[] = (int)$db->fetchOne($db->select()->from($this->resource->getTableName('ck_notification_subscription'),
+            'reference_id')->where('subscription_id = ?', (int)$reference));
+        usleep(10000);
+    }
 };
 $consents = new class($websiteId) implements ConsentInterface {
     public function __construct(private int $websiteId) {}
@@ -113,6 +120,11 @@ if ($mode === 'finder') {
         $mailer, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
         $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class),
         $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class));
-    foreach ($ids as $id) { $consumer->process((string)$id); }
+    $db = $resource->getConnection();
+    foreach ($ids as $id) {
+        // the queue message carries the cart's subscription id
+        $consumer->process((string)$db->fetchOne($db->select()->from($resource->getTableName('ck_notification_subscription'),
+            'subscription_id')->where('type = ?', 'cart_reminder')->where('reference_id = ?', $id)));
+    }
 }
 echo json_encode(['published' => $published, 'sent' => $sent]), PHP_EOL;

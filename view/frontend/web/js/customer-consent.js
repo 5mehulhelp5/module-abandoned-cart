@@ -1,10 +1,11 @@
 /**
  * Every page - logged-in customer on checkout (no email field - the email comes from the account):
- * store the reminder consent on their cart when checkout opens or the consent is switched on there.
- * The customer's equivalent of a guest typing the email. Withdrawals are handled by
- * CommerceKings_Consent (beacon + the registered WithdrawalHandler).
+ * subscribe their cart through CommerceKings_Notification when checkout opens or the consent is switched
+ * on there: POST /V1/ck-notification/subscriptions/mine {type, reference: quote id} (session REST, AJAX).
+ * The customer's equivalent of a guest typing the email. Withdrawals are handled by CommerceKings_Consent
+ * (beacon + Notification's registered withdrawal handler).
  */
-define(['jquery', 'CommerceKings_Consent/js/consent/provider', 'mage/cookies'], function ($, consent) {
+define(['jquery', 'CommerceKings_Consent/js/consent/provider'], function ($, consent) {
     'use strict';
 
     var PURPOSE = 'cart_reminder';
@@ -14,11 +15,13 @@ define(['jquery', 'CommerceKings_Consent/js/consent/provider', 'mage/cookies'], 
     }
 
     function capture() {
-        $.ajax({
-            url: window.BASE_URL + 'cartreminder/consent/capture',
-            type: 'POST',
-            data: {form_key: $.mage.cookies.get('form_key')},
-            global: false
+        // loaded here: the url builder reads window.checkoutConfig, which only checkout has
+        require(['mage/storage', 'Magento_Checkout/js/model/url-builder'], function (storage, urlBuilder) {
+            storage.post(
+                urlBuilder.createUrl('/ck-notification/subscriptions/mine', {}),
+                JSON.stringify({type: PURPOSE, reference: String(window.checkoutConfig.quoteData.entity_id)}),
+                false
+            );
         });
     }
 

@@ -1,32 +1,19 @@
 <?xml version="1.0"?>
-<!-- Abandoned cart reminder state, in the module's own table next to Magento's cart (quote) -->
+<!-- Abandoned cart send history per cart, next to Magento's cart (quote). Who subscribed, with which consent,
+     is the cart's CommerceKings_Notification subscription. -->
 <schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:Setup/Declaration/Schema/etc/schema.xsd">
-    <table name="ck_abandoned_cart" resource="checkout" engine="innodb" comment="CK abandoned cart: reminder state per cart">
+    <table name="ck_abandoned_cart" resource="checkout" engine="innodb" comment="CK abandoned cart: send history per cart">
         <column xsi:type="int" name="quote_id" unsigned="true" nullable="false" comment="Cart (quote) ID"/>
-        <!-- guests: the captured email (CommerceKings_Notification); customers use their account email -->
-        <column xsi:type="int" name="contact_id" unsigned="true" nullable="true" comment="Guest contact"/>
-        <!-- the consent (CommerceKings_Consent, purpose cart_reminder) the reminder was captured with - the evidence lives there -->
-        <column xsi:type="varchar" name="consent_id" nullable="true" length="32" comment="Consent ID"/>
-        <!-- browser id hash (CommerceKings_Consent): the restore link only works in this browser -->
-        <column xsi:type="varchar" name="browser_hash" nullable="true" length="64" comment="sha256 of the browser id"/>
-        <column xsi:type="timestamp" name="captured_at" on_update="false" nullable="true" comment="Reminder email or consent last changed"/>
         <column xsi:type="timestamp" name="queued_at" on_update="false" nullable="true" comment="Reminder queued"/>
         <column xsi:type="timestamp" name="reminded_at" on_update="false" nullable="true" comment="Reminder sent"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="quote_id"/>
         </constraint>
-        <!-- Magento's quote cleanup removes the reminder state with the cart -->
+        <!-- Magento's quote cleanup removes the send history with the cart -->
         <constraint xsi:type="foreign" referenceId="CK_ABANDONED_CART_QUOTE_ID_QUOTE_ENTITY_ID"
                     table="ck_abandoned_cart" column="quote_id" referenceTable="quote"
                     referenceColumn="entity_id" onDelete="CASCADE"/>
-        <!-- an erased contact leaves the cart without a recipient; its sent state stays -->
-        <constraint xsi:type="foreign" referenceId="CK_ABANDONED_CART_CONTACT_ID_CK_NOTIFICATION_CONTACT_CONTACT_ID"
-                    table="ck_abandoned_cart" column="contact_id" referenceTable="ck_notification_contact"
-                    referenceColumn="contact_id" onDelete="SET NULL"/>
-        <index referenceId="CK_ABANDONED_CART_CONSENT_ID" indexType="btree">
-            <column name="consent_id"/>
-        </index>
         <index referenceId="CK_ABANDONED_CART_QUEUED_AT" indexType="btree">
             <column name="queued_at"/>
         </index>

@@ -34,10 +34,12 @@ class CartReminderTest extends TestCase
 {
     use DbTestTrait;
 
+    /** quote 42 joined with its subscription 9 (Notification) and its send history */
     private const ROW = [
-        'is_active' => '1', 'items_count' => '2', 'customer_email' => 'a@test.com', 'store_id' => '1',
-        'customer_id' => null, 'contact_id' => '7', 'captured_at' => null,
-        'reminded_at' => null, 'consent_id' => 'cid-1', 'updated_at' => '2026-10-01 12:00:00',
+        'entity_id' => '42', 'is_active' => '1', 'items_count' => '2', 'customer_email' => 'a@test.com', 'store_id' => '1',
+        'customer_id' => null, 'updated_at' => '2026-10-01 12:00:00',
+        'subscription_id' => '9', 'contact_id' => '7', 'captured_at' => '2026-10-01 12:00:00', 'consent_id' => 'cid-1',
+        'reminded_at' => null,
     ];
 
     private array $logs = [];
@@ -129,17 +131,17 @@ class CartReminderTest extends TestCase
         $this->consumer($row, $enabled, $withdrawn)->process('42');
         $this->assertSame([], $this->updates, 'no claim');
         $this->assertSame([], $this->mail, 'no email');
-        $this->assertSame(["CommerceKings_AbandonedCart: cart 42 skipped ($reason)"], $this->logs);
+        $this->assertSame([$row === false ? "CommerceKings_AbandonedCart: subscription 42 skipped ($reason)"
+            : "CommerceKings_AbandonedCart: cart 42 skipped ($reason)"], $this->logs);
     }
 
     public static function skipCases(): array
     {
         return [
-            'cart gone' => [false, true, false, 'cart gone'],
+            'subscription withdrawn or cart gone' => [false, true, false, 'subscription or cart gone'],
             'ordered' => [['is_active' => '0'] + self::ROW, true, false, 'ordered / closed'],
             'empty' => [['items_count' => '0'] + self::ROW, true, false, 'empty'],
             'no email' => [['contact_id' => null] + self::ROW, true, false, 'no email'],
-            'consent cleared after queuing' => [['consent_id' => null] + self::ROW, true, false, 'no consent'],
             'already reminded' => [['reminded_at' => '2026-10-10 09:00:00'] + self::ROW, true, false, 'reminder policy'],
             'consent withdrawn / expired / old revision' => [self::ROW, true, true, 'consent withdrawn / expired'],
             'module disabled' => [self::ROW, false, false, 'disabled'],
@@ -253,6 +255,7 @@ class CartReminderTest extends TestCase
         $this->emulation->expects($this->once())->method('stopEnvironmentEmulation');
         $consumer->process('42');
 
+        $this->assertContains(['s.subscription_id = ?', 42], $this->selectWhere, 'the reference is the subscription id');
         $claim = $this->updates[0];
         $this->assertSame(self::joined(), $claim['table']);
         $this->assertSame(['c.reminded_at'], array_keys($claim['data']), 'Magento\'s quote row is not written');
@@ -262,12 +265,16 @@ class CartReminderTest extends TestCase
         // Codex finding 1: the claim repeats the cart and consent checks in the same statement
         $this->assertSame(1, $claim['where']['q.is_active = ?']);
         $this->assertContains('q.items_count > 0', self::conditions($claim['where']));
-        $this->assertSame('7', $claim['where']['c.contact_id <=> ?']);
-        $this->assertSame('cid-1', $claim['where']['c.consent_id = ?']);
-        $this->assertContains('VALID(c.consent_id)', self::conditions($claim['where']));
+        $this->assertSame(9, $claim['where']['s.subscription_id = ?']);
+        $this->assertSame('7', $claim['where']['s.contact_id <=> ?']);
+        $this->assertSame('2026-10-01 12:00:00', $claim['where']['s.captured_at = ?']);
+        $this->assertSame('cid-1', $claim['where']['s.consent_id = ?']);
+        $this->assertContains('VALID(s.consent_id)', self::conditions($claim['where']));
         $this->assertContains('NOT_EXPIRED(updated_at,1)', self::conditions($claim['where']));
         $this->assertContains('q.updated_at <= NOW() - INTERVAL 180 MINUTE', self::conditions($claim['where']));
-        $this->assertContains('(c.captured_at IS NULL OR c.captured_at <= NOW() - INTERVAL 180 MINUTE)', self::conditions($claim['where']));
+        $this->assertContains('s.captured_at <= NOW() - INTERVAL 180 MINUTE', self::conditions($claim['where']));
+        $this->assertTrue((bool)array_filter($this->queries, fn ($query) => str_contains($query[0], 'INSERT IGNORE')),
+            'the send history row exists before its claim');
 
         $this->assertSame(['tpl'], $this->mail['setTemplateIdentifier']);
         $this->assertSame(['custom1', 1], $this->mail['setFromByScope']);
@@ -293,7 +300,7 @@ class CartReminderTest extends TestCase
         $this->assertSame([], $this->mail);
     }
 
-    public function testRecentGuestEmailChangePostponesDelivery(): void
+    public function testRecentSubscriptionChangePostponesDelivery(): void
     {
         $this->consumer(['captured_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
         $this->assertSame([], $this->updates);
@@ -319,7 +326,7 @@ class CartReminderTest extends TestCase
 
     public function testRecentCaptureChangePostponesCustomersToo(): void
     {
-        // a customer's consent change stamps captured_at, as a guest's email change does
+        // a customer's consent or browser change stamps the subscription's captured_at, as a guest's email change does
         $this->consumer(['customer_id' => 7, 'customer_email' => 'account@test.com',
             'captured_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
         $this->assertSame([], $this->updates);

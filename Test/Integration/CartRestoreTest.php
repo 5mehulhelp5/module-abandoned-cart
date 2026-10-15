@@ -48,6 +48,8 @@ class CartRestoreTest extends TestCase
     protected function tearDown(): void
     {
         if ($this->quoteIds) {
+            $this->resource->getConnection()->delete($this->resource->getTableName('ck_notification_subscription'),
+                ['type = ?' => 'cart_reminder', 'reference_id IN (?)' => $this->quoteIds]);
             $this->resource->getConnection()->delete($this->resource->getTableName('quote'), ['entity_id IN (?)' => $this->quoteIds]);
         }
     }
@@ -75,11 +77,14 @@ class CartRestoreTest extends TestCase
         $this->resource->getConnection()->update($this->resource->getTableName('quote'), [
             'coupon_code' => 'SOURCE-COUPON',
         ], ['entity_id = ?' => (int)$quote->getId()]);
-        // the cart's reminder state: owner browser, reminder sent
+        // the cart's subscription from the owner browser (Notification) and its send history: reminder sent
+        $this->resource->getConnection()->insert($this->resource->getTableName('ck_notification_subscription'), [
+            'type' => 'cart_reminder', 'reference_id' => (int)$quote->getId(), 'store_id' => (int)$quote->getStoreId(),
+            'subject_key' => '', 'consent_id' => 'fixture-consent', 'browser_hash' => self::HASH]);
         $carts = $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class);
         $carts->ensure((int)$quote->getId());
         $this->resource->getConnection()->update($carts->name(),
-            ['browser_hash' => self::HASH, 'reminded_at' => gmdate('Y-m-d H:i:s')], ['quote_id = ?' => (int)$quote->getId()]);
+            ['reminded_at' => gmdate('Y-m-d H:i:s')], ['quote_id = ?' => (int)$quote->getId()]);
         return $quote;
     }
 
@@ -88,7 +93,8 @@ class CartRestoreTest extends TestCase
         $browser = $this->createStub(BrowserIdentityInterface::class);
         $browser->method('hash')->willReturn($hash);
         return new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores,
-            $this->om->get(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class), $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class));
+            $this->om->get(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class), $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class),
+            $this->om->get(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class));
     }
 
     private function service(?CartRepositoryInterfaceFactory $factory = null, ?RestoreAccess $access = null): CartRestore

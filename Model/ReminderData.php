@@ -41,7 +41,7 @@ class ReminderData
     ) {
     }
 
-    /** @param string $consentId the consent the reminder was captured with (its withdrawal link) */
+    /** @param string $consentId the consent of the cart's subscription (its withdrawal link) */
     public function build(Quote $quote, string $consentId): array
     {
         $this->url->setScope($quote->getStoreId());
