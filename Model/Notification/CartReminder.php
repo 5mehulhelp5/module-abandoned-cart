@@ -22,6 +22,7 @@ use CommerceKings\Notification\Api\NotificationTypeInterface;
 use CommerceKings\Notification\Exception\MessageSentException;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
+use Magento\Framework\Lock\LockManagerInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Quote;
 use Psr\Log\LoggerInterface;
@@ -44,6 +45,7 @@ use Psr\Log\LoggerInterface;
 class CartReminder implements NotificationTypeInterface
 {
     public const CODE = 'cart_reminder';
+    private const HOURLY_LOCK = 'commercekings_abandoned_cart_hourly';
 
     public function __construct(
         private readonly ResourceConnection $resource,
@@ -59,14 +61,15 @@ class CartReminder implements NotificationTypeInterface
         private readonly QuoteLifetime $lifetime,
         private readonly ReminderEmailResolverInterface $recipients,
         private readonly ConsentConfig $consentConfig,
-        private readonly CartTable $carts
+        private readonly CartTable $carts,
+        private readonly LockManagerInterface $locks
     ) {
     }
 
     public function process(string $reference): void
     {
         $db = $this->resource->getConnection();
-        $row = $db->fetchRow($this->carts->select(['reminded_at'],
+        $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at'],
             ['entity_id', 'is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'],
             ['subscription_id', 'contact_id', 'captured_at', 'consent_id'])
             ->where('s.subscription_id = ?', (int)$reference));
@@ -87,8 +90,9 @@ class CartReminder implements NotificationTypeInterface
             !$this->config->isEnabled((int)$row['store_id']) => 'disabled',
             default => null,
         };
+        $queuedAt = $row ? $row['queued_at'] : null;
         if ($skip !== null) {
-            $this->release($id);
+            $this->release($id, $queuedAt);
             $this->logger->info($id ? sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $skip)
                 : sprintf('CommerceKings_AbandonedCart: subscription %d skipped (%s)', (int)$reference, $skip));
             return;
@@ -99,7 +103,7 @@ class CartReminder implements NotificationTypeInterface
         // withdrawal stored before this point stops the send, one after it finds the reminder already out
         $delay = $this->config->getDelayMinutes((int)$row['store_id']);
         $this->carts->ensure($id);
-        $claimed = $db->update(
+        $claim = fn (): int => $db->update(
             $this->carts->joined(),
             ['c.reminded_at' => new Expression('NOW()')],
             [
@@ -123,9 +127,31 @@ class CartReminder implements NotificationTypeInterface
                 $this->guard->validCondition('s.consent_id'),
             ]
         );
+        $perHour = $this->config->getMaxPerHour();
+        if ($perHour > 0) {
+            // the provider's hourly limit holds when a delayed backlog drains: count and claim one at a time
+            if (!$this->locks->lock(self::HOURLY_LOCK, 10)) {
+                $this->release($id, $queuedAt);
+                $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (hourly limit busy)', $id));
+                return;
+            }
+            try {
+                $full = $this->sentLastHour() >= $perHour;
+                $claimed = $full ? 0 : $claim();
+            } finally {
+                $this->locks->unlock(self::HOURLY_LOCK);
+            }
+            if ($full) {
+                $this->release($id, $queuedAt);
+                $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (hourly limit)', $id));
+                return;
+            }
+        } else {
+            $claimed = $claim();
+        }
         if (!$claimed) {
-            // another delivery won, or the cart changed meanwhile; free the pending place unless it was just sent
-            $this->release($id);
+            // another delivery won, or the cart changed meanwhile; free this message's reservation
+            $this->release($id, $queuedAt);
             return;
         }
         $storeId = (int)$row['store_id'];
@@ -171,17 +197,26 @@ class CartReminder implements NotificationTypeInterface
 
     /**
      * The cart no longer waits for this message: free its place under "Maximum pending reminders" so the finder can
-     * refill it. A cart reminded since it was queued is left alone - that delivery won.
+     * refill it. Only the reservation this worker read is released - a newer one belongs to a newer message - and a
+     * cart reminded since it was queued is left alone: that delivery won.
      */
-    private function release(int $id): void
+    private function release(int $id, ?string $queuedAt): void
     {
-        if ($id) {
+        if ($id && $queuedAt !== null) {
             $this->resource->getConnection()->update($this->carts->name(), ['queued_at' => null], [
                 'quote_id = ?' => $id,
-                'queued_at IS NOT NULL',
+                'queued_at = ?' => $queuedAt,
                 'reminded_at IS NULL OR reminded_at < queued_at',
             ]);
         }
+    }
+
+    /** Reminders sent (claimed) in the last hour, all stores; failed sends give theirs back. */
+    private function sentLastHour(): int
+    {
+        $db = $this->resource->getConnection();
+        return (int)$db->fetchOne($db->select()->from($this->carts->name(), new Expression('COUNT(*)'))
+            ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'));
     }
 
     private function matchesConsent(array $row): bool

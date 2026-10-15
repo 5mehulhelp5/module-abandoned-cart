@@ -52,6 +52,7 @@ class ReminderPolicyTest extends TestCase
     private array $quoteIds = [];
     private array $published = [];
     private int $maxPending = 2000;
+    private int $perHour = 0;
     /** a replaced reminder policy; null = the default OncePerCart */
     private ?ReminderPolicyInterface $policy = null;
     private int $sent = 0;
@@ -182,7 +183,7 @@ class ReminderPolicyTest extends TestCase
         $config->method('isEnabled')->willReturnCallback(fn ($id) => in_array($id, $this->storeIds, true));
         $config->method('getDelayMinutes')->willReturn(1);
         $config->method('getMaxPending')->willReturnCallback(fn () => $this->maxPending);
-        $config->method('getMaxPerHour')->willReturn(0);
+        $config->method('getMaxPerHour')->willReturnCallback(fn () => $this->perHour);
         $config->method('getTemplate')->willReturn('fixture');
         $config->method('getIdentity')->willReturn('general');
         return $config;
@@ -259,7 +260,8 @@ class ReminderPolicyTest extends TestCase
             $data, $mailer, $this->config(), $consent, $this->guard(),
             $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
             $this->om->get(ReminderEmailResolverInterface::class),
-            $this->createStub(\CommerceKings\Consent\Model\Config::class), $this->om->get(CartTable::class));
+            $this->createStub(\CommerceKings\Consent\Model\Config::class), $this->om->get(CartTable::class),
+            $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class));
     }
 
     public function testFinderUsesEachQuotesStoreLifetimeRatherThanTheOldSevenDaySetting(): void
@@ -573,6 +575,58 @@ class ReminderPolicyTest extends TestCase
         $published = $this->published;
         sort($published);
         $this->assertSame([$first, $second, $third, $fourth], $published, 'every cart was queued exactly once');
+    }
+
+    public function testHourlyLimitHoldsWhenADelayedBacklogDrains(): void
+    {
+        // review c77e0cb: the limit only braked publishing; after a consumer outage old and new messages both sent
+        $this->perHour = 1;
+        [$first, $second] = [$this->quote(), $this->quote()];
+        foreach ([$first, $second] as $id) { $this->state($id, ['email' => $id . '-' . $this->email]); }
+        $this->assertSame(1, $this->finder()->execute());
+        $db = $this->resource->getConnection();
+        // consumers are down: the first message waits in the broker; its claim ages out of the pending window
+        $db->update($this->table('ck_abandoned_cart'), ['queued_at' => gmdate('Y-m-d H:i:s', time() - 3660)],
+            ['quote_id = ?' => $first]);
+        $db->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s')], ['entity_id = ?' => $first]);
+        $this->assertSame(1, $this->finder()->execute(), 'the second cart is published meanwhile');
+        $db->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s', time() - 120)], ['entity_id = ?' => $first]);
+        // restarted consumers get both messages in the same hour
+        $consumer = $this->consumer();
+        foreach ([$first, $second] as $id) { $consumer->process($this->subscriptionOf($id)); }
+        $this->assertSame(1, $this->sent, 'the provider limit holds at send time');
+        $held = $this->row($first)['reminded_at'] === null ? $first : $second;
+        $this->assertNull($this->row($held)['reminded_at']);
+        $this->assertNull($this->row($held)['queued_at'], 'the held-back cart is released for a later hour');
+    }
+
+    public function testAnOldSkippedDeliveryCannotReleaseANewerReservation(): void
+    {
+        // review c77e0cb: release() did not check which reservation the worker owned
+        $id = $this->quote();
+        $this->assertSame(1, $this->finder()->execute());
+        $db = $this->resource->getConnection();
+        $db->update($this->table('ck_abandoned_cart'), ['queued_at' => gmdate('Y-m-d H:i:s', time() - 300)], ['quote_id = ?' => $id]);
+        $db->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s')], ['entity_id = ?' => $id]);
+        $consumer = $this->consumer();
+        $original = (new \ReflectionProperty($consumer, 'recipients'))->getValue($consumer);
+        $recipients = $this->createMock(ReminderEmailResolverInterface::class);
+        $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original, $db) {
+            // meanwhile: the old reservation is released, the cart ages, and a new finder run queues it again
+            $db->update($this->table('ck_abandoned_cart'), ['queued_at' => null], ['quote_id = ?' => $quoteId]);
+            $db->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s', time() - 120)], ['entity_id = ?' => $quoteId]);
+            $this->assertSame(1, $this->finder()->execute());
+            return $original->resolve($quoteId);
+        });
+        $class = new \ReflectionClass($consumer);
+        $arguments = [];
+        foreach ($class->getConstructor()->getParameters() as $parameter) {
+            $arguments[] = $parameter->getName() === 'recipients' ? $recipients
+                : $class->getProperty($parameter->getName())->getValue($consumer);
+        }
+        // this worker still holds its older 'recently updated' snapshot and skips
+        $class->newInstanceArgs($arguments)->process($this->subscriptionOf($id));
+        $this->assertNotNull($this->row($id)['queued_at'], 'the newer reservation stays pending');
     }
 
     public function testASecondFinderExitsWhileOneHoldsTheLock(): void

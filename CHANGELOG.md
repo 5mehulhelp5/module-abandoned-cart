@@ -23,8 +23,9 @@ First release. Features:
   (default seven days), store-emulated rendering and optional RFC 8058 one-click unsubscribe headers. A
   failure after the mail server accepted the email never causes a second reminder.
 - **Flash sales:** the finder runs every minute and tops the queue up to *Maximum pending reminders* (default 2,000,
-  one finder at a time), so throughput follows the number of consumers; *Maximum reminders per hour* brakes it for
-  the mail provider. Skipped reminders release their place at once.
+  one finder at a time), so throughput follows the number of consumers; *Maximum reminders per hour* is enforced
+  when sending, so it also holds when a backlog drains after an outage. Skipped reminders release only their own
+  reservation at once.
 - **Delivery policy:** replaceable `ReminderPolicyInterface` (default one reminder per cart) with typed state
   and SQL contexts (`ReminderQuery::quoteId()` and the send-history columns `queued_at`/`reminded_at`); Magento's quote lifetime per store; finder and delivery recheck delay, expiry, cart
   state and consent. Stale queue claims are released and queued again.

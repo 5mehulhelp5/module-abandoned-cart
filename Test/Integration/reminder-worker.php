@@ -122,7 +122,7 @@ if ($mode === 'finder') {
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
         $mailer, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
         $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class),
-        $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class));
+        $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class), $om->get(\Magento\Framework\Lock\LockManagerInterface::class));
     $db = $resource->getConnection();
     foreach ($ids as $id) {
         // the queue message carries the cart's subscription id

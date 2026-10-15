@@ -103,8 +103,11 @@ class FindAbandonedCarts
         $deadline = microtime(true) + self::MAX_RUN_SECONDS;
         while ($room - $published > 0 && microtime(true) < $deadline) {
             $wanted = min(self::BATCH, $room - $published);
-            $due = $this->dueCarts($wanted);
+            $due = $this->dueCarts($wanted, $deadline);
             foreach ($due as $id => $subscriptionId) {
+                if (microtime(true) >= $deadline) {
+                    break 2; // the next run continues; nothing was claimed for the rest
+                }
                 // claim it first: only the run that flips queued_at from NULL publishes
                 $this->carts->ensure($id);
                 $claimed = $db->update(
@@ -118,8 +121,8 @@ class FindAbandonedCarts
                     $published++;
                 }
             }
-            if (count($due) < $wanted) {
-                break; // no more eligible carts
+            if (count($due) < $wanted || microtime(true) >= $deadline) {
+                break; // no more eligible carts, or out of time
             }
         }
         if ($published) {
@@ -151,11 +154,11 @@ class FindAbandonedCarts
     }
 
     /**
-     * Up to $limit eligible carts, oldest first, excluding recipients still in cooldown.
+     * Up to $limit eligible carts, oldest first, excluding recipients still in cooldown; stops at the deadline.
      *
      * @return array<int, int> quote id => subscription id
      */
-    private function dueCarts(int $limit): array
+    private function dueCarts(int $limit, float $deadline): array
     {
         $db = $this->resource->getConnection();
         $select = $this->carts->select([], ['entity_id'], ['subscription_id']);
@@ -169,6 +172,9 @@ class FindAbandonedCarts
         do {
             $rows = $db->fetchPairs((clone $select)->limit(self::BATCH, $offset));
             foreach ($rows as $id => $subscriptionId) {
+                if (microtime(true) >= $deadline) {
+                    return [];
+                }
                 $email = $this->recipients->resolve((int)$id);
                 if ($email !== null && !$this->cooldown->isRecent($email)) {
                     $due[(int)$id] = (int)$subscriptionId;

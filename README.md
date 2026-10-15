@@ -242,14 +242,17 @@ bin/magento setup:upgrade   # feature tables and consent schema
 The finder runs every minute and tops the queue up to **Maximum pending reminders** (default 2,000), reading carts
 in pages of 200 for at most 30 seconds. A cart is pending while it is queued, not sent since, queued within the last
 60 minutes and its subscription still has a valid consent; sent, failed, skipped and withdrawn carts free their
-place. Only one finder fills at a time (Magento's lock `commercekings_abandoned_cart_finder`), across cron overlaps,
-manual runs and servers.
+place – a worker releases only the reservation it read, never a newer one. Only one finder fills at a time
+(Magento's lock `commercekings_abandoned_cart_finder`), across cron overlaps, manual runs and servers. The 30-second
+budget is checked for every candidate and before every claim.
 
 - **More consumers send faster with no other change**: they drain the queue sooner, so the next run refills more.
   Measured in the sandbox (developer mode): ~190 emails a minute per consumer, ~1,230 with eight; production renders
   faster. Add consumers before a sale.
-- **Maximum reminders per hour** is the brake for your email provider's rate limit and sender reputation; carts
-  over it wait for the next hour, none are lost.
+- **Maximum reminders per hour** is the brake for your email provider's rate limit and sender reputation. It is
+  enforced when sending: each reminder counts the last hour's reminders and claims under a lock
+  (`commercekings_abandoned_cart_hourly`, held only for that), so it holds even when a delayed backlog drains after a
+  consumer outage. Carts over it are released and queued again in a later hour; none are lost.
 - Run the consumer with `--max-messages` (e.g. 1,000): Magento's email template rendering grows a worker by about
   0.17 MB per email.
 - The pending limit counts carts, not broker messages. A cart still unsent after 60 minutes is released and queued

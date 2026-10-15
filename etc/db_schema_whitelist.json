@@ -42,7 +42,8 @@
         },
         "index": {
             "CK_ABANDONED_CART_CONSENT_ID": true,
-            "CK_ABANDONED_CART_QUEUED_AT": true
+            "CK_ABANDONED_CART_QUEUED_AT": true,
+            "CK_ABANDONED_CART_REMINDED_AT": true
         }
     }
 }

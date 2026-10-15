@@ -17,5 +17,9 @@
         <index referenceId="CK_ABANDONED_CART_QUEUED_AT" indexType="btree">
             <column name="queued_at"/>
         </index>
+        <!-- reminders sent in the last hour (Maximum reminders per hour) -->
+        <index referenceId="CK_ABANDONED_CART_REMINDED_AT" indexType="btree">
+            <column name="reminded_at"/>
+        </index>
     </table>
 </schema>

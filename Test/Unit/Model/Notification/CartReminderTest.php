@@ -39,8 +39,11 @@ class CartReminderTest extends TestCase
         'entity_id' => '42', 'is_active' => '1', 'items_count' => '2', 'customer_email' => 'a@test.com', 'store_id' => '1',
         'customer_id' => null, 'updated_at' => '2026-10-01 12:00:00',
         'subscription_id' => '9', 'contact_id' => '7', 'captured_at' => '2026-10-01 12:00:00', 'consent_id' => 'cid-1',
-        'reminded_at' => null,
+        'reminded_at' => null, 'queued_at' => '2026-10-01 12:30:00',
     ];
+    private int $perHour = 0;
+    private bool $hourlyLockFree = true;
+    private array $lockEvents = [];
 
     private array $logs = [];
     private array $mail = [];
@@ -67,6 +70,7 @@ class CartReminderTest extends TestCase
         $config->method('getTemplate')->willReturn('tpl');
         $config->method('getIdentity')->willReturn('custom1');
         $config->method('getDelayMinutes')->willReturn(180);
+        $config->method('getMaxPerHour')->willReturnCallback(fn () => $this->perHour);
         $consent = $this->createStub(ConsentInterface::class);
         $consent->method('isValid')->willReturnCallback(fn ($id) => $id === 'cid-1' && !$withdrawn);
         $consent->method('get')->willReturn(self::consent('cid-1'));
@@ -121,7 +125,16 @@ class CartReminderTest extends TestCase
         $notificationConfig = $this->createStub(NotificationConfig::class);
         $notificationConfig->method('getCooldownDays')->willReturn(7);
         $mailer = new Mailer($builder, $this->emulation, $cooldown, $notificationConfig);
-        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig, $this->carts());
+        $locks = $this->createStub(\Magento\Framework\Lock\LockManagerInterface::class);
+        $locks->method('lock')->willReturnCallback(function ($name, $timeout) {
+            $this->lockEvents[] = ['lock', $name, $timeout];
+            return $this->hourlyLockFree;
+        });
+        $locks->method('unlock')->willReturnCallback(function ($name) {
+            $this->lockEvents[] = ['unlock', $name];
+            return true;
+        });
+        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig, $this->carts(), $locks);
     }
 
     /** No claim, no email: only the cart's place under "Maximum pending reminders" is released for the finder. */
@@ -130,9 +143,10 @@ class CartReminderTest extends TestCase
         $this->assertCount(1, $this->updates, 'no claim');
         $this->assertSame('ck_abandoned_cart', $this->updates[0]['table']);
         $this->assertSame(['queued_at' => null], $this->updates[0]['data']);
-        $this->assertSame(['quote_id = ?', 'queued_at IS NOT NULL', 'reminded_at IS NULL OR reminded_at < queued_at'],
+        $this->assertSame(['quote_id = ?', 'queued_at = ?', 'reminded_at IS NULL OR reminded_at < queued_at'],
             self::conditions($this->updates[0]['where']));
         $this->assertSame(42, $this->updates[0]['where']['quote_id = ?']);
+        $this->assertSame('2026-10-01 12:30:00', $this->updates[0]['where']['queued_at = ?'], 'only the reservation it read');
     }
 
     /** @dataProvider skipCases */
@@ -424,5 +438,50 @@ class CartReminderTest extends TestCase
         $this->assertSame(1, $this->sentMessages);
         $this->assertCount(1, $this->updates, 'Keep the existing reminder claim after successful SMTP handoff');
         $this->assertSame([], $this->releasedRecipients, 'Preserve recipient suppression after SMTP handoff');
+    }
+
+    public function testASkipWithoutAReservationReleasesNothing(): void
+    {
+        $this->consumer(['queued_at' => null, 'is_active' => '0'] + self::ROW)->process('42');
+        $this->assertSame([], $this->updates, 'nothing it owns to release');
+    }
+
+    public function testHourlyLimitIsCheckedAtSendTimeUnderALock(): void
+    {
+        $this->perHour = 5;
+        $this->fetchOneResult = '5'; // five reminders sent in the last hour
+        $this->consumer()->process('42');
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertReleasedOnly();
+        $this->assertSame([['lock', 'commercekings_abandoned_cart_hourly', 10], ['unlock', 'commercekings_abandoned_cart_hourly']],
+            $this->lockEvents);
+        $this->assertContains('CommerceKings_AbandonedCart: cart 42 skipped (hourly limit)', $this->logs);
+    }
+
+    public function testUnderTheHourlyLimitTheClaimRunsInsideTheLock(): void
+    {
+        $this->perHour = 5;
+        $this->fetchOneResult = '4';
+        $this->consumer()->process('42');
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertSame(['c.reminded_at'], array_keys($this->updates[0]['data']), 'claimed');
+        $this->assertSame('unlock', end($this->lockEvents)[0], 'unlocked before sending finished');
+    }
+
+    public function testBusyHourlyLockSkipsAndReleasesInsteadOfWaitingForever(): void
+    {
+        $this->perHour = 5;
+        $this->hourlyLockFree = false;
+        $this->consumer()->process('42');
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertReleasedOnly();
+        $this->assertContains('CommerceKings_AbandonedCart: cart 42 skipped (hourly limit busy)', $this->logs);
+    }
+
+    public function testWithoutAnHourlyLimitNoLockIsTaken(): void
+    {
+        $this->consumer()->process('42');
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertSame([], $this->lockEvents);
     }
 }
