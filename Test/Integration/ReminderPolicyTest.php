@@ -6,6 +6,8 @@ namespace CommerceKings\AbandonedCart\Test\Integration;
 use CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\QuoteLifetime as LifetimeField;
 use CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\ReminderPolicy as PolicyField;
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
+use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
+use CommerceKings\AbandonedCart\Api\Data\ReminderState;
 use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
 use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\Notification\Model\SubscriptionManagement;
@@ -154,7 +156,8 @@ class ReminderPolicyTest extends TestCase
             ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
                 ['subscription_id', 'contact_id', 'permission_ref', 'captured_at'])
-            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id', ['queued_at', 'reminded_at'])
+            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id',
+                ['queued_at', 'reminded_at', 'delivery_version'])
             ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email'])
             ->where('q.entity_id = ?', $id));
     }
@@ -190,10 +193,10 @@ class ReminderPolicyTest extends TestCase
         return new QuoteLifetime($config);
     }
 
-    private function notificationConfig(): NotificationConfig
+    private function notificationConfig(int $cooldownDays = 7): NotificationConfig
     {
         $config = $this->createStub(NotificationConfig::class);
-        $config->method('getCooldownDays')->willReturn(7);
+        $config->method('getCooldownDays')->willReturn($cooldownDays);
         return $config;
     }
 
@@ -231,11 +234,12 @@ class ReminderPolicyTest extends TestCase
             $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class));
     }
 
-    private function consumer(): CartReminder
+    private function consumer(?callable $send = null, int $cooldownDays = 7): CartReminder
     {
         $transport = $this->createStub(TransportInterface::class);
-        $transport->method('sendMessage')->willReturnCallback(function () {
+        $transport->method('sendMessage')->willReturnCallback(function () use ($send) {
             if ($this->sendFails) { throw new \RuntimeException('Fixture SMTP failure'); }
+            if ($send !== null) { $send(); }
             $this->sent++;
         });
         $builder = $this->createStub(TransportBuilder::class);
@@ -245,7 +249,7 @@ class ReminderPolicyTest extends TestCase
         $builder->method('getTransport')->willReturn($transport);
         $data = $this->createStub(ReminderData::class);
         $data->method('build')->willReturn(['customer_name' => '']);
-        $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->cooldown(), $this->notificationConfig());
+        $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->cooldown(), $this->notificationConfig($cooldownDays));
         return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
             $data, $mailer, $this->config(), $this->guard(),
             $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->lifetime(),
@@ -359,9 +363,114 @@ class ReminderPolicyTest extends TestCase
         catch (\RuntimeException $e) { $this->assertSame('Fixture SMTP failure', $e->getMessage()); }
         $this->assertFalse($this->cooldown()->isRecent($this->email));
         $this->assertNull($this->row($id)['reminded_at']);
+        $this->assertSame(1, (int)$this->row($id)['delivery_version'], 'a failed claim keeps its version');
         $this->sendFails = false;
         $this->consumer()->process($this->subscriptionOf($id));
         $this->assertSame(1, $this->sent);
+        $this->assertSame(2, (int)$this->row($id)['delivery_version'], 'retry owns a new version');
+    }
+
+    /** @return array<string, array{bool}> */
+    public static function newerDeliveryStates(): array
+    {
+        return ['newer reminder sent' => [true], 'replacement still queued' => [false]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('newerDeliveryStates')]
+    public function testOlderFailedDeliveryPreservesNewerWork(bool $sendReplacement): void
+    {
+        $clock = (object)['now' => time()];
+        $this->policy = new class($clock) implements ReminderPolicyInterface {
+            public function __construct(private readonly object $clock) {}
+            public function getDescription(): string { return 'Every two minutes'; }
+            public function canSend(ReminderState $state): bool
+            {
+                return $state->lastRemindedAt === null
+                    || $state->lastRemindedAt < gmdate('Y-m-d H:i:s', $this->clock->now - 120);
+            }
+            public function dueCondition(ReminderQuery $query): string
+            {
+                $column = $query->column('reminded_at');
+                return "({$column} IS NULL OR {$column} < NOW() - INTERVAL 2 MINUTE)";
+            }
+        };
+        $db = $this->resource->getConnection();
+        $db->query('SET timestamp = ' . $clock->now);
+        try {
+            $id = $this->quote();
+            $reference = $this->subscriptionOf($id);
+            $this->assertSame(1, $this->finder()->execute());
+            $this->assertSame(0, (int)$this->row($id)['delivery_version'], 'queueing is not a delivery claim');
+            // A supported merchant setting: recipient cooldown disabled.
+            $newer = $this->consumer(cooldownDays: 0);
+            $replacement = null;
+            $older = $this->consumer(function () use ($clock, $db, $reference, $newer, $id, $sendReplacement, &$replacement) {
+                // A waits on SMTP beyond the policy interval. B is queued, and may complete before A fails.
+                $this->assertSame(1, (int)$this->row($id)['delivery_version']);
+                $clock->now += 180;
+                $db->query('SET timestamp = ' . $clock->now);
+                $this->assertSame(1, $this->finder()->execute());
+                if ($sendReplacement) { $newer->process($reference); }
+                $replacement = $this->row($id);
+                throw new \RuntimeException('Fixture older SMTP attempt failed');
+            }, cooldownDays: 0);
+            try {
+                $older->process($reference);
+                $this->fail('The older transport must fail.');
+            } catch (\RuntimeException $error) {
+                $this->assertSame('Fixture older SMTP attempt failed', $error->getMessage());
+            }
+            $after = $this->row($id);
+            $this->assertSame($replacement['queued_at'], $after['queued_at'], 'keep a newer queued message');
+            $this->assertSame((int)$replacement['delivery_version'], (int)$after['delivery_version'], 'versions never decrease');
+            $this->assertSame($sendReplacement ? $replacement['reminded_at'] : null, $after['reminded_at'],
+                'restore only A\'s claim, never B\'s successful timestamp');
+            $this->assertSame(0, $this->finder()->execute(), 'the replacement is already queued or was just sent');
+            if (!$sendReplacement) { $newer->process($reference); }
+            $this->assertSame(1, $this->sent, 'no immediate extra email after the newer delivery');
+            $this->assertSame(2, (int)$this->row($id)['delivery_version']);
+            $this->assertSame(0, $this->finder()->execute());
+        } finally {
+            $db->query('SET timestamp = 0');
+        }
+    }
+
+    public function testAnObsoleteDeliverySnapshotCannotClaimASameSecondRetry(): void
+    {
+        $id = $this->quote();
+        $db = $this->resource->getConnection();
+        $db->query('SET timestamp = ' . time());
+        try {
+            $this->assertSame(1, $this->finder()->execute());
+            $queuedAt = $this->row($id)['queued_at'];
+            $older = $this->consumer();
+            $original = (new \ReflectionProperty($older, 'recipients'))->getValue($older);
+            $recipients = $this->createMock(ReminderEmailResolverInterface::class);
+            $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original, $queuedAt) {
+                // Another delivery claims and fails after this worker read the earlier snapshot.
+                $this->sendFails = true;
+                try {
+                    $this->consumer()->process($this->subscriptionOf($quoteId));
+                    $this->fail('The other delivery must fail.');
+                } catch (\RuntimeException $error) {
+                    $this->assertSame('Fixture SMTP failure', $error->getMessage());
+                } finally {
+                    $this->sendFails = false;
+                }
+                $this->assertSame(1, $this->finder()->execute());
+                $this->assertSame($queuedAt, $this->row($quoteId)['queued_at'], 'timestamps alone cannot distinguish the retry');
+                return $original->resolve($quoteId);
+            });
+            $this->withRecipients($older, $recipients)->process($this->subscriptionOf($id));
+            $this->assertSame(0, $this->sent, 'the earlier delivery version loses the claim');
+            $this->assertSame(1, (int)$this->row($id)['delivery_version']);
+            $this->finder()->execute();
+            $this->consumer()->process($this->subscriptionOf($id));
+            $this->assertSame(1, $this->sent, 'the retry remains deliverable');
+            $this->assertSame(2, (int)$this->row($id)['delivery_version']);
+        } finally {
+            $db->query('SET timestamp = 0');
+        }
     }
 
     public function testNormalizedRecipientsAndOwnedRelease(): void

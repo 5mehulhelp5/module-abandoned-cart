@@ -38,8 +38,8 @@ use Psr\Log\LoggerInterface;
  * delivery can win, and none after a withdrawal is stored. Mail already handed to the mail server can't
  * be recalled.
  * Sending (recipient cooldown, store emulation, one-click headers) is CommerceKings_Notification's Mailer.
- * If sending fails the claim is released (queued_at too), so the next cron run queues it again;
- * the exception makes Magento log the failure.
+ * A delivery version owns each claim. Failed sends restore the prior reminder timestamp only while that version
+ * still matches, leaving a newer delivery or queue mark alone; the exception makes Magento log the failure.
  */
 class CartReminder implements NotificationTypeInterface
 {
@@ -66,7 +66,7 @@ class CartReminder implements NotificationTypeInterface
     public function process(string $reference): void
     {
         $db = $this->resource->getConnection();
-        $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at'],
+        $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at', 'delivery_version'],
             ['entity_id', 'is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'],
             ['subscription_id', 'contact_id', 'captured_at', 'permission_ref'])
             ->where('s.subscription_id = ?', (int)$reference));
@@ -99,14 +99,17 @@ class CartReminder implements NotificationTypeInterface
         // is still what was checked above and its permission is still valid, in the same statement: a
         // withdrawal stored before this point stops the send, one after it finds the reminder already out
         $delay = $this->config->getDelayMinutes((int)$row['store_id']);
+        $previousVersion = (int)$row['delivery_version'];
+        $deliveryVersion = $previousVersion + 1;
         $this->carts->ensure($id);
         $claim = fn (): int => $db->update(
             $this->carts->joined(),
             // sent: the cart no longer waits in the queue, so a recurring policy can schedule the next reminder
-            ['c.reminded_at' => new Expression('NOW()'), 'c.queued_at' => null],
+            ['c.reminded_at' => new Expression('NOW()'), 'c.queued_at' => null, 'c.delivery_version' => $deliveryVersion],
             [
                 'c.quote_id = ?' => $id,
                 's.subscription_id = ?' => (int)$row['subscription_id'],
+                'c.delivery_version = ?' => $previousVersion,
                 'c.queued_at <=> ?' => $queuedAt ?? new Expression('NULL'),
                 'q.store_id = ?' => (int)$row['store_id'],
                 $this->policy->dueCondition(new ReminderQuery((int)$row['store_id'], 'c', 'q')),
@@ -155,9 +158,9 @@ class CartReminder implements NotificationTypeInterface
         }
         $storeId = (int)$row['store_id'];
         $restore = fn () => $db->update($this->carts->name(),
-            ['reminded_at' => $row['reminded_at'], 'queued_at' => null],
-            // this claim cleared the mark; a newer mark means the cart is queued again - leave that alone
-            ['quote_id = ?' => $id, 'queued_at IS NULL']);
+            ['reminded_at' => $row['reminded_at']],
+            // Never undo a newer delivery or decrease the version; a newer queued mark must stay too.
+            ['quote_id = ?' => $id, 'delivery_version = ?' => $deliveryVersion]);
         $message = new Message(
             $storeId,
             $this->config->getTemplate($storeId),
@@ -187,7 +190,7 @@ class CartReminder implements NotificationTypeInterface
                 ['exception_class' => get_class($e->getPrevious() ?? $e)]);
             throw $e->getPrevious() ?? $e;
         } catch (\Throwable $e) {
-            // Restore the previous policy state and release queuing so the next cron run can retry.
+            // Restore our own policy state; claiming already cleared queuing, and newer work must stay intact.
             $restore();
             throw $e;
         }

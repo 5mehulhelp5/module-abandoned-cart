@@ -7,6 +7,7 @@
         <column xsi:type="int" name="quote_id" unsigned="true" nullable="false" comment="Cart (quote) ID"/>
         <column xsi:type="timestamp" name="queued_at" on_update="false" nullable="true" comment="Reminder queued"/>
         <column xsi:type="timestamp" name="reminded_at" on_update="false" nullable="true" comment="Reminder sent"/>
+        <column xsi:type="int" name="delivery_version" unsigned="true" nullable="false" default="0" comment="Delivery claim version"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="quote_id"/>
         </constraint>

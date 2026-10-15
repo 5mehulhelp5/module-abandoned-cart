@@ -17,13 +17,14 @@ First release. Features:
   subscribe from checkout with the masked cart id and their email, customers their own cart through the session;
   `CartSubscription` authorizes the cart against the website and store, Notification handles email rules,
   consent and storage. Magento's quote and its checkout email are never written.
-- **Data:** send history and the `queued_at` mark in `ck_abandoned_cart` (deleted with the quote).
+- **Data:** send history, the `queued_at` mark and a delivery version in `ck_abandoned_cart` (deleted with the quote).
   Who subscribed, with which consent and browser, is the cart's Notification subscription; guest
   addresses are shared Notification contacts, customers use their account email.
 - **Sending** through `commercekings/module-notification`: shared queue consumer
   `commerceKingsNotificationSend` (RabbitMQ or Magento's database queue), optional recipient cooldown
   (default seven days), store-emulated rendering and optional RFC 8058 one-click unsubscribe headers. A
-  failure after the mail server accepted the email never causes a second reminder.
+  failure after the mail server accepted the email never causes a second reminder. A version guards failed-send
+  rollback so an older worker cannot erase a newer successful delivery or clear its queued message.
 - **Flash sales:** the finder runs every minute and publishes every due cart; the message broker holds the backlog,
   so throughput follows the number of consumers. One `queued_at` mark per cart (no reservation layer on top of the
   queue): cleared on send, skip or failed publish (so custom policies can recur), found again after 24 hours stuck. *Maximum reminders per hour* is

@@ -34,7 +34,8 @@
             "captured_at": true,
             "queued_at": true,
             "queue_token": true,
-            "reminded_at": true
+            "reminded_at": true,
+            "delivery_version": true
         },
         "constraint": {
             "PRIMARY": true,
