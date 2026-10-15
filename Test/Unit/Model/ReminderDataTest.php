@@ -6,9 +6,10 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Model;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
-use CommerceKings\AbandonedCart\Model\ConsentUnsubscribeLink;
-use CommerceKings\Consent\Api\WithdrawalLinkInterface;
+use CommerceKings\AbandonedCart\Model\PermissionUnsubscribeLink;
+use CommerceKings\Notification\Api\Data\Subscription;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
+use CommerceKings\Notification\Api\SubscriptionRepositoryInterface;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use Magento\Catalog\Helper\Image as ImageHelper;
@@ -28,6 +29,8 @@ class ReminderDataTest extends TestCase
 {
     /** whether the subscription's permission can tell who subscribed (Consent: yes) */
     private bool $identifiesVisitor = true;
+    /** whether the permission has an unsubscribe link (consent bridge: yes; Notification alone: no) */
+    private bool $hasLink = true;
     private ?UnsubscribeLinkInterface $unsubscribe = null;
 
     use DbTestTrait;
@@ -54,14 +57,18 @@ class ReminderDataTest extends TestCase
         $escaper = $this->createStub(Escaper::class);
         $escaper->method('escapeHtml')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
         $escaper->method('escapeUrl')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
-        $withdrawal = $this->createStub(WithdrawalLinkInterface::class);
-        $withdrawal->method('getUrl')->willReturnCallback(fn ($id) => "https://shop/ckconsent/optout?c=$id&t=o");
         $signature = $this->createStub(LinkSignature::class);
         $signature->method('sign')->willReturnCallback(fn ($purpose, $id) => "$purpose-$id");
         $permission = $this->createStub(SubscriptionPermissionInterface::class);
         $permission->method('identifiesVisitor')->willReturnCallback(fn () => $this->identifiesVisitor);
+        // the default link asks the permission; the subscription's reference is the consent id cid-1
+        $permission->method('getUnsubscribeUrl')->willReturnCallback(fn (Subscription $subscription) => $this->hasLink
+            ? 'https://shop/ckconsent/optout?c=' . $subscription->permissionRef . '&t=o' : null);
+        $subscriptions = $this->createStub(SubscriptionRepositoryInterface::class);
+        $subscriptions->method('get')->willReturnCallback(fn ($id) => new Subscription((int)$id, 'cart_reminder', 42, 1, 5, null,
+            'cid-1', '2026-01-01 00:00:00'));
         return new ReminderData($image, $configuration, $price, $url, $escaper,
-            $this->unsubscribe ?? new ConsentUnsubscribeLink($withdrawal), $signature, $permission);
+            $this->unsubscribe ?? new PermissionUnsubscribeLink($subscriptions, $permission), $signature, $permission);
     }
 
     private function quote(array $items = [], ?string $firstname = 'Jane', ?string $billingName = null): Quote
@@ -100,6 +107,13 @@ class ReminderDataTest extends TestCase
         $this->assertSame('https://shop/checkout/cart', $vars['restore_url']);
         $this->assertTrue($this->urls['checkout/cart']['_nosid']);
         $this->assertArrayNotHasKey('cartreminder/cart/restore', $this->urls, 'no signed link is made');
+    }
+
+    /** Notification alone has no unsubscribe link: the template leaves the line out and no one-click header is sent. */
+    public function testWithoutAPermissionLinkThereIsNoUnsubscribeLink(): void
+    {
+        $this->hasLink = false;
+        $this->assertSame('', $this->data()->build($this->quote(), '', ['subscription_id' => 9])['optout_url']);
     }
 
     public function testTotalAndGreeting(): void

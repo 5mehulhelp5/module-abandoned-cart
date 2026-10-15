@@ -10,7 +10,7 @@ class Config
 {
     private const PREFIX = 'commercekings_abandoned_cart/general/';
 
-    /** The consent purpose of the reminder (CommerceKings_Consent) - declared in etc/di.xml. */
+    /** What reminders are for (SubscriptionTypeInterface::getPurpose()); with the consent bridge the Consent purpose declared in etc/di.xml. */
     public const PURPOSE = 'cart_reminder';
 
     /** The restore link in a reminder works this many days after it was sent. */

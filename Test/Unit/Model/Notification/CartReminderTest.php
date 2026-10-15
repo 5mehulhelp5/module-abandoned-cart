@@ -5,8 +5,6 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Model\Notification;
 
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
-use CommerceKings\AbandonedCart\Model\QuoteScope;
-use CommerceKings\Consent\Api\ConsentInterface;
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
@@ -53,7 +51,10 @@ class CartReminderTest extends TestCase
     private bool $expired = false;
     private int $sentMessages = 0;
     private bool $quoteModel = true;
+    /** the permission is for this purpose and the cart's website (consent bridge: Consent's website check) */
     private bool $scopeMatches = true;
+    /** isValidFor() calls: [reference, purpose, store] */
+    private array $validityChecks = [];
     private ?array $recipientSequence = null;
     private bool $oneClick = false;
     /** Notification's "One-click unsubscribe" per store; null = $oneClick everywhere */
@@ -77,11 +78,12 @@ class CartReminderTest extends TestCase
         $config->method('getIdentity')->willReturn('custom1');
         $config->method('getDelayMinutes')->willReturn(180);
         $config->method('getMaxPerHour')->willReturnCallback(fn () => $this->perHour);
-        $consent = $this->createStub(ConsentInterface::class);
-        $consent->method('isValid')->willReturnCallback(fn ($id) => $id === 'cid-1' && !$withdrawn);
-        $consent->method('get')->willReturn(self::consent('cid-1'));
-        $scope = $this->createStub(QuoteScope::class);
-        $scope->method('matches')->willReturnCallback(fn () => $this->scopeMatches);
+        $permission = $this->createStub(\CommerceKings\Notification\Api\SubscriptionPermissionInterface::class);
+        $permission->method('validCondition')->willReturnCallback(fn ($column) => 'VALID(' . $column . ')');
+        $permission->method('isValidFor')->willReturnCallback(function ($reference, $purpose, $storeId) use ($withdrawn) {
+            $this->validityChecks[] = [$reference, $purpose, $storeId];
+            return $reference === 'cid-1' && !$withdrawn && $this->scopeMatches;
+        });
         $logger = $this->createStub(LoggerInterface::class);
         $logger->method('info')->willReturnCallback(function ($msg) { $this->logs[] = $msg; });
         $repo = $this->createStub(CartRepositoryInterface::class);
@@ -111,7 +113,7 @@ class CartReminderTest extends TestCase
             if ($this->sendFails) {
                 throw new \RuntimeException('SMTP down');
             }
-            if ($this->oneClick) { $this->assertNotNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'Apply headers before sending'); }
+            if ($this->oneClick && $this->optoutUrl !== '') { $this->assertNotNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'Apply headers before sending'); }
             $this->sentMessages++;
         });
         $builder = $this->createStub(TransportBuilder::class);
@@ -145,7 +147,7 @@ class CartReminderTest extends TestCase
             $this->lockEvents[] = ['unlock', $name];
             return true;
         });
-        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks);
+        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks);
     }
 
     /** No claim, no email: only the cart's `queued_at` mark is cleared, so the finder can queue it again. */
@@ -179,7 +181,8 @@ class CartReminderTest extends TestCase
             'empty' => [['items_count' => '0'] + self::ROW, true, false, 'empty'],
             'no email' => [['contact_id' => null] + self::ROW, true, false, 'no email'],
             'already reminded' => [['reminded_at' => '2026-10-10 09:00:00'] + self::ROW, true, false, 'reminder policy'],
-            'consent withdrawn / expired / old revision' => [self::ROW, true, true, 'consent withdrawn / expired'],
+            'permission withdrawn / expired / old revision' => [self::ROW, true, true,
+                'permission withdrawn, expired or for another purpose / website'],
             'module disabled' => [self::ROW, false, false, 'disabled'],
         ];
     }
@@ -190,7 +193,9 @@ class CartReminderTest extends TestCase
         $this->consumer()->process('42');
         $this->assertReleasedOnly();
         $this->assertSame([], $this->mail);
-        $this->assertSame(['CommerceKings_AbandonedCart: cart 42 skipped (consent purpose / website mismatch)'], $this->logs);
+        $this->assertSame(['CommerceKings_AbandonedCart: cart 42 skipped (permission withdrawn, expired or for another purpose / website)'],
+            $this->logs);
+        $this->assertSame([['cid-1', 'cart_reminder', 1]], $this->validityChecks, 'checked for this purpose and the cart\'s store');
     }
 
     public function testTwoCartsUsingTheSameAddressSendOnlyOnceDuringCooldown(): void
@@ -431,6 +436,16 @@ class CartReminderTest extends TestCase
         $this->assertSame([1], $this->oneClickAsked);
         $this->assertSame('<' . $this->optoutUrl . '>', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe'),
             'on in store 1: the header carries the same unsubscribe link as the email');
+    }
+
+    /** Notification alone has no unsubscribe link: no one-click header is advertised, the email is still sent. */
+    public function testWithoutAnUnsubscribeLinkNoOneClickHeaderIsSent(): void
+    {
+        $this->oneClick = true;
+        $this->optoutUrl = '';
+        $this->consumer()->process('42');
+        $this->assertNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'));
+        $this->assertSame(1, $this->sentMessages);
     }
 
     public function testInsecureOptoutCannotBeAdvertisedAsOneClick(): void

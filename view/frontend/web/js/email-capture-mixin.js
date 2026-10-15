@@ -1,23 +1,24 @@
 /**
  * Guest checkout email field -> abandoned cart reminder.
  *
- * Only with consent for purpose cart_reminder (CommerceKings_Consent/js/consent/provider). On checkout
- * entry (prefilled email) and 1 s after the last change of a valid email, subscribe the cart through
+ * Only with permission for purpose cart_reminder (CommerceKings_Notification/js/permission; with the consent
+ * bridge: the consent choice). On checkout entry (prefilled email) and 1 s after the last change of a valid
+ * email, subscribe the cart through
  * CommerceKings_Notification: POST /V1/ck-notification/subscriptions {type, reference: masked cart id, email}.
  * Saves and clears are
  * serialized, acknowledged by the server, and retried after transient failures.
- * If the consent is switched off while on checkout, the same endpoint is called with an empty email
- * and the server clears what it stored. The server re-reads the consent itself - this check only
- * avoids sending the email without consent. Logged-in customers are skipped (js/customer-consent.js).
+ * If the permission is switched off while on checkout, the same endpoint is called with an empty email
+ * and the server clears what it stored. The server checks the permission itself - this check only
+ * avoids sending the email without it. Logged-in customers are skipped (js/customer-consent.js).
  */
 define([
-    'CommerceKings_Consent/js/consent/provider',
+    'CommerceKings_Notification/js/permission',
     'mage/storage',
     'Magento_Checkout/js/model/quote',
     'Magento_Checkout/js/model/url-builder',
     'Magento_Customer/js/model/customer',
     'CommerceKings_AbandonedCart/js/guest-email-capture'
-], function (consent, storage, quote, urlBuilder, customer, capture) {
+], function (permission, storage, quote, urlBuilder, customer, capture) {
     'use strict';
 
     var PURPOSE = 'cart_reminder';
@@ -40,8 +41,8 @@ define([
                 this.ckCapture = capture(send);
                 this.ckOnline = function () { self.ckCapture.online(); };
                 window.addEventListener('online', this.ckOnline);
-                // consent given / switched on or off while on checkout
-                consent.onChange(PURPOSE, function () {
+                // permission given / switched on or off while on checkout
+                permission.onChange(PURPOSE, function () {
                     self.ckSync(true);
                 });
                 // an email Magento prefilled (typed earlier, maybe before consent was given) - no
@@ -66,7 +67,7 @@ define([
                 this.ckCapture.update({
                     cartId: quote.getQuoteId(),
                     email: this.email(),
-                    allowed: consent.hasConsent(PURPOSE),
+                    allowed: permission.hasPermission(PURPOSE),
                     loggedIn: customer.isLoggedIn()
                 }, consentChanged);
             },

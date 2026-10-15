@@ -7,17 +7,15 @@ use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
-use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Api\Data\ReminderState;
-use CommerceKings\Consent\Api\ConsentGuardInterface;
-use CommerceKings\Consent\Api\ConsentInterface;
 use CommerceKings\Notification\Api\Data\Message;
 use CommerceKings\Notification\Api\Data\MessageContent;
 use CommerceKings\Notification\Api\MailerInterface;
 use CommerceKings\Notification\Api\NotificationTypeInterface;
+use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Exception\MessageSentException;
 use CommerceKings\Notification\Model\Config as NotificationConfig;
 use Magento\Framework\App\ResourceConnection;
@@ -29,13 +27,14 @@ use Psr\Log\LoggerInterface;
 
 /**
  * Notification type "cart_reminder" (CommerceKings_Notification's shared consumer). Reference = the cart's
- * subscription id (CartSubscription: who subscribed, with which consent); the send history is per cart.
+ * subscription id (CartSubscription: who subscribed, under which permission); the send history is per cart.
  *
  * Messages can arrive twice or late, so everything is re-checked against the current cart:
- * still active (not ordered), has items, an email and a valid consent (CommerceKings_Consent: not
- * withdrawn, expired or from an older revision), idle long enough, not expired under Magento's quote
+ * still active (not ordered), has items, an email and a valid permission (Notification's
+ * SubscriptionPermissionInterface; with the consent bridge: a consent that is not withdrawn, expired or from an
+ * older revision, for this purpose and website), idle long enough, not expired under Magento's quote
  * lifetime and eligible under ReminderPolicyInterface (one reminder per cart by default).
- * The cart is then claimed with one atomic UPDATE that repeats the cart and consent checks - only one
+ * The cart is then claimed with one atomic UPDATE that repeats the cart and permission checks - only one
  * delivery can win, and none after a withdrawal is stored. Mail already handed to the mail server can't
  * be recalled.
  * Sending (recipient cooldown, store emulation, one-click headers) is CommerceKings_Notification's Mailer.
@@ -53,11 +52,9 @@ class CartReminder implements NotificationTypeInterface
         private readonly ReminderData $reminderData,
         private readonly MailerInterface $mailer,
         private readonly Config $config,
-        private readonly ConsentInterface $consent,
-        private readonly ConsentGuardInterface $guard,
+        private readonly SubscriptionPermissionInterface $permission,
         private readonly ReminderPolicyInterface $policy,
         private readonly LoggerInterface $logger,
-        private readonly QuoteScope $scope,
         private readonly QuoteLifetime $lifetime,
         private readonly ReminderEmailResolverInterface $recipients,
         private readonly NotificationConfig $notificationConfig,
@@ -85,8 +82,8 @@ class CartReminder implements NotificationTypeInterface
                 ['updated_at' => $row['updated_at']])) => 'reminder policy',
             $this->lifetime->isExpired((string)$row['updated_at'], (int)$row['store_id']) => 'quote expired',
             $activity > gmdate('Y-m-d H:i:s', time() - $this->config->getDelayMinutes((int)$row['store_id']) * 60) => 'cart recently updated',
-            !$this->consent->isValid((string)$row['permission_ref']) => 'consent withdrawn / expired',
-            !$this->matchesConsent($row) => 'consent purpose / website mismatch',
+            !$this->permission->isValidFor((string)$row['permission_ref'], Config::PURPOSE, (int)$row['store_id'])
+                => 'permission withdrawn, expired or for another purpose / website',
             !$this->config->isEnabled((int)$row['store_id']) => 'disabled',
             default => null,
         };
@@ -99,7 +96,7 @@ class CartReminder implements NotificationTypeInterface
         }
 
         // claim: only one delivery of this message can flip reminded_at from NULL - and only while the cart
-        // is still what was checked above and its consent is still valid, in the same statement: a
+        // is still what was checked above and its permission is still valid, in the same statement: a
         // withdrawal stored before this point stops the send, one after it finds the reminder already out
         $delay = $this->config->getDelayMinutes((int)$row['store_id']);
         $this->carts->ensure($id);
@@ -126,7 +123,7 @@ class CartReminder implements NotificationTypeInterface
                 $this->lifetime->validCondition('q.updated_at', (int)$row['store_id']),
                 'q.updated_at <= NOW() - INTERVAL ' . $delay . ' MINUTE',
                 's.captured_at <= NOW() - INTERVAL ' . $delay . ' MINUTE',
-                $this->guard->validCondition('s.permission_ref'),
+                $this->permission->validCondition('s.permission_ref'),
             ]
         );
         $perHour = $this->config->getMaxPerHour();
@@ -174,7 +171,9 @@ class CartReminder implements NotificationTypeInterface
                 $vars = $this->reminderData->build($quote, (string)$row['permission_ref'],
                     ['subscription_id' => (int)$row['subscription_id'], 'email' => $email]);
                 return new MessageContent($vars, $vars['customer_name'] ?? null,
-                    $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId) ? $vars['optout_url'] : null);
+                    // one-click only with a link to put in the header
+                    ($vars['optout_url'] ?? '') !== '' && $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId)
+                        ? $vars['optout_url'] : null);
             },
             true,
             // A replaced resolver may read an external recipient source. Recheck it after claiming too.
@@ -220,11 +219,5 @@ class CartReminder implements NotificationTypeInterface
         $db = $this->resource->getConnection();
         return (int)$db->fetchOne($db->select()->from($this->carts->name(), new Expression('COUNT(*)'))
             ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'));
-    }
-
-    private function matchesConsent(array $row): bool
-    {
-        $consent = $this->consent->get((string)$row['permission_ref']);
-        return $consent !== null && $this->scope->matches($consent, (int)$row['store_id']);
     }
 }

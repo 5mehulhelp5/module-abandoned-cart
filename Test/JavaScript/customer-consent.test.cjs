@@ -8,7 +8,7 @@ function fixture({config = {isCustomerLoggedIn: true, quoteData: {entity_id: 42}
     const requests = [], loads = [];
     let ready, changed;
     const consent = {
-        hasConsent: purpose => purpose === 'cart_reminder' && allowed,
+        hasPermission: purpose => purpose === 'cart_reminder' && allowed,
         onChange: (purpose, callback) => { assert.equal(purpose, 'cart_reminder'); changed = callback; }
     };
     const storage = {

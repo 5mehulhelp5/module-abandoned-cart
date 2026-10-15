@@ -186,7 +186,8 @@ class CartSubscriptionTest extends TestCase
             $scope ?? $this->om->get(QuoteScope::class), $config, $this->resource);
         return new SubscriptionManagement($this->resource, new SubscriptionTypePool([CartReminder::CODE => $type]),
             new ConsentPermission($consent ?? $this->consent(), $guard, $this->stores,
-                $this->createStub(BrowserIdentityInterface::class), $this->createStub(ConsentStore::class)),
+                $this->createStub(BrowserIdentityInterface::class), $this->createStub(ConsentStore::class),
+                $this->createStub(\CommerceKings\Consent\Api\WithdrawalLinkInterface::class)),
             $this->om->get(ContactRepositoryInterface::class), $this->stores,
             new EmailAddress(), new StringLength(['max' => 255]), $this->om->create(FilterManager::class));
     }

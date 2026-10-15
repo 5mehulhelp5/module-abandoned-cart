@@ -126,17 +126,16 @@ trait DbTestTrait
         return $out;
     }
 
-    /** A valid consent as CommerceKings_Consent returns it. */
-    private static function consent(string $id = 'cid'): \CommerceKings\Consent\Api\Data\Consent
+    /**
+     * Notification's permission whose SQL condition is a readable marker, VALID(<column>); the PHP recheck accepts
+     * $validReferences for Config::PURPOSE (null: any reference).
+     */
+    private function guard(?array $validReferences = null): \CommerceKings\Notification\Api\SubscriptionPermissionInterface
     {
-        return new \CommerceKings\Consent\Api\Data\Consent($id, 'cart_reminder', 1, 'test-source', 'ref', '2026-10-10 08:00:00', '1', '1', '2026-10-10 08:00:01', '2027-04-10 08:00:00');
-    }
-
-    /** ConsentGuardInterface whose SQL condition is a readable marker: VALID(<column>). */
-    private function guard(): \CommerceKings\Consent\Api\ConsentGuardInterface
-    {
-        $guard = $this->createStub(\CommerceKings\Consent\Api\ConsentGuardInterface::class);
+        $guard = $this->createStub(\CommerceKings\Notification\Api\SubscriptionPermissionInterface::class);
         $guard->method('validCondition')->willReturnCallback(fn ($column) => 'VALID(' . $column . ')');
+        $guard->method('isValidFor')->willReturnCallback(fn ($reference, $purpose) => $purpose === 'cart_reminder'
+            && ($validReferences === null || in_array($reference, $validReferences, true)));
         return $guard;
     }
 

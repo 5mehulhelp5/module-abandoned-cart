@@ -1,11 +1,11 @@
 /**
  * Every page - logged-in customer on checkout (no email field - the email comes from the account):
- * subscribe their cart through CommerceKings_Notification when checkout opens or the consent is switched
+ * subscribe their cart through CommerceKings_Notification when checkout opens or the permission is switched
  * on there: POST /V1/ck-notification/subscriptions/mine {type, reference: quote id} (session REST, AJAX).
- * The customer's equivalent of a guest typing the email. Withdrawals are handled by CommerceKings_Consent
- * (beacon + Notification's registered withdrawal handler).
+ * The customer's equivalent of a guest typing the email. Permission: CommerceKings_Notification/js/permission
+ * (with the consent bridge: the consent choice; its withdrawals remove the subscription).
  */
-define(['jquery', 'CommerceKings_Consent/js/consent/provider'], function ($, consent) {
+define(['jquery', 'CommerceKings_Notification/js/permission'], function ($, permission) {
     'use strict';
 
     var PURPOSE = 'cart_reminder';
@@ -18,8 +18,8 @@ define(['jquery', 'CommerceKings_Consent/js/consent/provider'], function ($, con
     function capture() {
         // loaded here: the url builder reads window.checkoutConfig, which only checkout has
         require(['mage/storage', 'Magento_Checkout/js/model/url-builder'], function (storage, urlBuilder) {
-            // Loading dependencies is asynchronous: checkout, login or consent may have changed.
-            if (!customerOnCheckout() || !consent.hasConsent(PURPOSE)) {
+            // Loading dependencies is asynchronous: checkout, login or permission may have changed.
+            if (!customerOnCheckout() || !permission.hasPermission(PURPOSE)) {
                 return;
             }
             storage.post(
@@ -32,14 +32,14 @@ define(['jquery', 'CommerceKings_Consent/js/consent/provider'], function ($, con
         });
     }
 
-    consent.onChange(PURPOSE, function (isOn) {
+    permission.onChange(PURPOSE, function (isOn) {
         if (isOn && customerOnCheckout()) {
             capture();
         }
     });
 
     $(function () {
-        if (customerOnCheckout() && consent.hasConsent(PURPOSE)) {
+        if (customerOnCheckout() && permission.hasPermission(PURPOSE)) {
             capture();
         }
     });

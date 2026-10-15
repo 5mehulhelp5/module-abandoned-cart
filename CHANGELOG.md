@@ -34,6 +34,9 @@ First release. Features:
   while the send history stays, so opting in again cannot cause a second reminder.
 - **Unsubscribe link:** replaceable `UnsubscribeLinkInterface` with an `UnsubscribeContext` (permission reference, store
   and named attributes: cart, customer, subscription, recipient); the default is Consent's signed withdrawal link.
+- **Only Notification:** consent checks (SQL guard, send-time recheck for purpose and website), the default
+  unsubscribe link and the storefront check (`CommerceKings_Notification/js/permission`) go through Notification's
+  permission; the consent bridge answers them with Consent. The form-key check is the module's own `Controller\RejectsMalformedFormKeys`.
 - **Restore without a browser in Notification:** the restore link asks Notification's permission whether the
   current visitor gave the subscription's permission (Consent: the consent's browser); a permission that cannot tell
   makes `restore_url` the cart page.

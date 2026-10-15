@@ -17,13 +17,13 @@ See [compatibility and verification](COMPATIBILITY.md) and [changes](CHANGELOG.m
 
 Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts; `CommerceKings_Notification`'s shared queue consumer sends the emails through RabbitMQ or Magento's database transport.
 
-Depends on **`CommerceKings_Notification`** for subscriptions (who asked, with which consent) and sending, **`CommerceKings_Consent`** for consent and **`CommerceKings_Core`** for shared admin branding; no dependency on a consent source or banner module.
+Talks only to **`CommerceKings_Notification`** for subscriptions (who asked, under which permission), the permission check and sending, and uses **`CommerceKings_Core`** for shared admin branding. Consent comes in through the consent bridge (`commercekings/module-consent-notification`): with it, a subscription needs a consent for `cart_reminder`; the purpose itself is declared in this module's `etc/di.xml`.
 
 Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (feature) and **→ Consent** (where consent comes from).
 
 ## Flow
 
-1. **Consent** – a recorded consent from `CommerceKings_Consent` (`ConsentInterface::getCurrent('cart_reminder')` on the server, `CommerceKings_Consent/js/consent/provider` in the browser). Recording, validity (withdrawn, expired, banner/terms revision), browser recognition and withdrawals are that module's job; this module keeps only the **consent id**.
+1. **Consent** – with the consent bridge, a recorded consent from `CommerceKings_Consent` (Notification's `SubscriptionPermissionInterface` on the server, `CommerceKings_Notification/js/permission` in the browser – both answered by Consent through the bridge). Recording, validity (withdrawn, expired, banner/terms revision), browser recognition and withdrawals are that module's job; this module keeps only the **consent id**.
 2. **Subscribe** – the cart is subscribed through `commercekings/module-notification`, type `cart_reminder`: this module's `Model\Notification\CartSubscription` decides who may subscribe which cart; Notification does the email rules, the consent check, the guest contact and the storage:
    - guest: typing a valid email in checkout, or entering checkout with an email Magento prefilled → `POST /V1/ck-notification/subscriptions` `{"type":"cart_reminder","reference":"<masked cart id>","email":"…"}` (`js/email-capture-mixin.js`), 1 s after the last change. Requests are serialized and rapid edits coalesce to the latest email. A save is deduplicated only after the server acknowledges it, including an identical successful retry;
    - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also removes the guest's subscription;
@@ -167,7 +167,7 @@ Restore steps:
 
 **Custom unsubscribe link** – `optout_url` (and the one-click header) comes from
 `CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface::getUrl(UnsubscribeContext $context)`. The default,
-`Model\ConsentUnsubscribeLink`, returns Consent's signed link above. Replace it with a DI preference to use your
+`Model\PermissionUnsubscribeLink`, returns the subscription's permission link (`SubscriptionPermissionInterface::getUnsubscribeUrl()`): Consent's signed link above with the consent bridge, none without it – the email then leaves the unsubscribe line out and sends no one-click header. Replace it with a DI preference to use your
 own page or an external preference center:
 
 ```xml

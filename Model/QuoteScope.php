@@ -3,11 +3,10 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Model;
 
-use CommerceKings\Consent\Api\Data\Consent;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Store\Model\StoreManagerInterface;
 
-/** The cart a visitor may subscribe: active, in the current website, theirs (guest or customer); consent website check. */
+/** The cart a visitor may subscribe: active, in the current website, theirs (guest or customer). */
 class QuoteScope
 {
     public function __construct(
@@ -25,11 +24,5 @@ class QuoteScope
             ->where('s.website_id = ?', (int)$this->stores->getStore()->getWebsiteId());
         $customerId ? $select->where('q.customer_id = ?', $customerId) : $select->where('q.customer_id IS NULL');
         return $db->fetchRow($select) ?: null;
-    }
-
-    public function matches(Consent $consent, int $storeId): bool
-    {
-        return $consent->purpose === Config::PURPOSE
-            && $consent->websiteId === (int)$this->stores->getStore($storeId)->getWebsiteId();
     }
 }

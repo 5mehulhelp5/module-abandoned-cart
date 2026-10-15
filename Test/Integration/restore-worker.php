@@ -5,6 +5,7 @@ use CommerceKings\AbandonedCart\Model\CartRestore;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Model\RestoreAccess;
 use CommerceKings\Notification\Api\Data\Permission;
+use CommerceKings\Notification\Api\Data\Subscription;
 use CommerceKings\Notification\Api\Data\Target;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Api\SubscriptionTypeInterface;
@@ -26,6 +27,8 @@ $permission = new class implements SubscriptionPermissionInterface {
     public function validCondition(string $referenceColumn): string { return '1 = 1'; }
     public function identifiesVisitor(): bool { return true; }
     public function isCurrentVisitor(string $reference): bool { return true; }
+    public function isValidFor(string $reference, string $purpose, int $storeId): bool { return true; }
+    public function getUnsubscribeUrl(Subscription $subscription): ?string { return null; }
 };
 $factory = $om->get(CartRepositoryInterfaceFactory::class);
 // Preload before either operation starts: the production service must discard this stale view.

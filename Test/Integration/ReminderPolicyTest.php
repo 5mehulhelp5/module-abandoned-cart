@@ -14,13 +14,9 @@ use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
-use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart;
 use CommerceKings\AbandonedCart\Model\RestoreAccess;
-use CommerceKings\Consent\Api\ConsentGuardInterface;
-use CommerceKings\Consent\Api\ConsentInterface;
-use CommerceKings\Consent\Api\Data\Consent;
 use Magento\Framework\App\Bootstrap;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ResourceConnection;
@@ -29,6 +25,7 @@ use Magento\Framework\Data\FormFactory;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Framework\Mail\TransportInterface;
 use CommerceKings\Notification\Api\QueueInterface;
+use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Model\Config as NotificationConfig;
 use CommerceKings\Notification\Model\Cooldown;
 use CommerceKings\Notification\Model\Mailer;
@@ -207,10 +204,12 @@ class ReminderPolicyTest extends TestCase
             $this->om->get(\Magento\Framework\Math\Random::class), $this->notificationConfig());
     }
 
-    private function guard(): ConsentGuardInterface
+    /** Notification's permission: the fixture subscriptions are always allowed (the claim SQL stays real). */
+    private function guard(): SubscriptionPermissionInterface
     {
-        $guard = $this->createStub(ConsentGuardInterface::class);
+        $guard = $this->createStub(SubscriptionPermissionInterface::class);
         $guard->method('validCondition')->willReturn('1 = 1');
+        $guard->method('isValidFor')->willReturn(true);
         return $guard;
     }
 
@@ -234,11 +233,6 @@ class ReminderPolicyTest extends TestCase
 
     private function consumer(): CartReminder
     {
-        $consent = $this->createStub(ConsentInterface::class);
-        $consent->method('isValid')->willReturn(true);
-        $consent->method('get')->willReturn(new Consent('fixture-consent', 'cart_reminder',
-            (int)$this->stores->getStore()->getWebsiteId(), 'source', 'ref', '2026-01-01 00:00:00',
-            '1', '1', '2026-01-01 00:00:00', '2027-01-01 00:00:00'));
         $transport = $this->createStub(TransportInterface::class);
         $transport->method('sendMessage')->willReturnCallback(function () {
             if ($this->sendFails) { throw new \RuntimeException('Fixture SMTP failure'); }
@@ -253,8 +247,8 @@ class ReminderPolicyTest extends TestCase
         $data->method('build')->willReturn(['customer_name' => '']);
         $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->cooldown(), $this->notificationConfig());
         return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
-            $data, $mailer, $this->config(), $consent, $this->guard(),
-            $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
+            $data, $mailer, $this->config(), $this->guard(),
+            $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->lifetime(),
             $this->om->get(ReminderEmailResolverInterface::class),
             $this->notificationConfig(), $this->om->get(CartTable::class),
             $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class));

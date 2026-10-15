@@ -130,7 +130,7 @@ test('destroy cancels retries and ignores late completions', () => {
 test('checkout mixin captures prefilled input, debounces edits and removes its online handler', () => {
     const f = fixture(); let email = 'prefilled@example.test', listener;
     const mixin = f.load('email-capture-mixin.js', {
-        'CommerceKings_Consent/js/consent/provider': {hasConsent: () => true, onChange: (purpose, fn) => { listener = fn; }},
+        'CommerceKings_Notification/js/permission': {hasPermission: () => true, onChange: (purpose, fn) => { listener = fn; }},
         'mage/storage': {post: (url, body) => {
             const data = JSON.parse(body);
             assert.equal(url, '/ck-notification/subscriptions');

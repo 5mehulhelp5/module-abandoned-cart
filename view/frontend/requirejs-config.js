@@ -1,5 +1,5 @@
 var config = {
-    // every page: subscribes a logged-in customer's cart on checkout (withdrawal: CommerceKings_Consent)
+    // every page: subscribes a logged-in customer's cart on checkout (permission: CommerceKings_Notification/js/permission)
     deps: ['CommerceKings_AbandonedCart/js/customer-consent'],
     config: {
         mixins: {

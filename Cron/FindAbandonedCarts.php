@@ -10,16 +10,16 @@ use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
-use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Notification\Api\CooldownInterface;
 use CommerceKings\Notification\Api\QueueInterface;
+use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * Every minute: carts that have items and a subscription with a valid consent, were not ordered, have been untouched
+ * Every minute: carts that have items and a subscription with a valid permission, were not ordered, have been untouched
  * for the configured delay, are unexpired under Magento's quote lifetime and are eligible under the reminder policy
  * -> one message per cart (its CommerceKings_Notification subscription id) to Notification's queue. The queue holds
  * the backlog and the consumers set the pace; a run publishes for at most MAX_RUN_SECONDS and the next one continues.
@@ -45,7 +45,7 @@ class FindAbandonedCarts
     public function __construct(
         private readonly Config $config,
         private readonly ResourceConnection $resource,
-        private readonly ConsentGuardInterface $guard,
+        private readonly SubscriptionPermissionInterface $permission,
         private readonly QueueInterface $queue,
         private readonly ReminderPolicyInterface $policy,
         private readonly QuoteLifetime $lifetime,
@@ -111,7 +111,7 @@ class FindAbandonedCarts
     }
 
     /**
-     * Reminders sent in the last hour plus carts waiting in the queue whose subscription still has a valid consent:
+     * Reminders sent in the last hour plus carts waiting in the queue whose subscription still has a valid permission:
      * a withdrawn cart's message is dropped unsent, so it does not take a place in the hour.
      */
     private function sentOrQueuedLastHour(): int
@@ -121,7 +121,7 @@ class FindAbandonedCarts
             ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'));
         $queued = (int)$db->fetchOne($this->carts->select([new Expression('COUNT(*)')])
             ->where('c.queued_at IS NOT NULL')
-            ->where($this->guard->validCondition('s.permission_ref')));
+            ->where($this->permission->validCondition('s.permission_ref')));
         return $sent + $queued;
     }
 
@@ -171,7 +171,7 @@ class FindAbandonedCarts
         return [
             'q.is_active = 1',
             'q.items_count > 0',
-            $this->guard->validCondition('s.permission_ref'),
+            $this->permission->validCondition('s.permission_ref'),
             'c.queued_at IS NULL',
             $this->storeCondition(),
         ];

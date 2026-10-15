@@ -10,7 +10,7 @@ use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Framework\App\Action\HttpGetActionInterface;
 use Magento\Framework\App\Action\HttpPostActionInterface;
 use Magento\Framework\App\CsrfAwareActionInterface;
-use CommerceKings\Consent\Controller\RejectsMalformedFormKeys;
+use CommerceKings\AbandonedCart\Controller\RejectsMalformedFormKeys;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Controller\Result\RedirectFactory;

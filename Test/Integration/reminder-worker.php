@@ -5,15 +5,16 @@ use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
-use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
-use CommerceKings\Consent\Api\ConsentGuardInterface;
-use CommerceKings\Consent\Api\ConsentInterface;
-use CommerceKings\Consent\Api\Data\Consent;
 use CommerceKings\Notification\Api\CooldownInterface;
+use CommerceKings\Notification\Api\Data\Permission;
+use CommerceKings\Notification\Api\Data\Subscription;
+use CommerceKings\Notification\Api\Data\Target;
 use CommerceKings\Notification\Api\QueueInterface;
+use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
+use CommerceKings\Notification\Api\SubscriptionTypeInterface;
 use CommerceKings\Notification\Model\Config as NotificationConfig;
 use CommerceKings\Notification\Model\Mailer;
 use Magento\Framework\App\Bootstrap;
@@ -35,7 +36,6 @@ $stores = $om->get(StoreManagerInterface::class);
 $stores->reinitStores();
 $stores->setCurrentStore('default');
 $storeId = (int)$argv[2];
-$websiteId = (int)$stores->getStore($storeId)->getWebsiteId();
 $ids = array_map('intval', explode(',', $argv[3]));
 $mode = $argv[1];
 $config = new class($storeId) extends Config {
@@ -46,8 +46,14 @@ $config = new class($storeId) extends Config {
     public function getTemplate(int $storeId): string { return 'fixture'; }
     public function getIdentity(int $storeId): string { return 'general'; }
 };
-$guard = new class implements ConsentGuardInterface {
-    public function validCondition(string $consentIdColumn): string { return '1 = 1'; }
+// Notification's permission: the fixture subscriptions (permission_ref 'fixture-consent') stay allowed
+$guard = new class implements SubscriptionPermissionInterface {
+    public function check(SubscriptionTypeInterface $type, Target $target): Permission { return Permission::refused(); }
+    public function validCondition(string $referenceColumn): string { return '1 = 1'; }
+    public function identifiesVisitor(): bool { return false; }
+    public function isCurrentVisitor(string $reference): bool { return false; }
+    public function isValidFor(string $reference, string $purpose, int $storeId): bool { return $reference === 'fixture-consent'; }
+    public function getUnsubscribeUrl(Subscription $subscription): ?string { return null; }
 };
 $resource = $om->get(ResourceConnection::class);
 $lifetime = new QuoteLifetime($om->get(ScopeConfigInterface::class));
@@ -63,16 +69,6 @@ $queue = new class($published, $resource) implements QueueInterface {
         $this->published[] = (int)$db->fetchOne($db->select()->from($this->resource->getTableName('ck_notification_subscription'),
             'reference_id')->where('subscription_id = ?', (int)$reference));
         usleep(10000);
-    }
-};
-$consents = new class($websiteId) implements ConsentInterface {
-    public function __construct(private int $websiteId) {}
-    public function getCurrent(string $purpose): ?Consent { return $this->get('fixture-consent'); }
-    public function isValid(string $consentId): bool { return $consentId === 'fixture-consent'; }
-    public function withdraw(string $consentId, string $via): array { return []; }
-    public function get(string $consentId): ?Consent {
-        return new Consent('fixture-consent', 'cart_reminder', $this->websiteId, 'fixture', 'choice',
-            '2026-01-01 00:00:00', '1', '1', '2026-01-01 00:00:00', '2027-01-01 00:00:00');
     }
 };
 $onSend = static function () use (&$sent): void { $sent++; usleep(20000); };
@@ -118,8 +114,8 @@ if ($mode === 'finder') {
 } else {
     $mailer = new Mailer($builder, $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
-        $mailer, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
-        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(NotificationConfig::class),
+        $mailer, $config, $guard, new OncePerCart(), new NullLogger(),
+        $lifetime, $recipients, $om->get(NotificationConfig::class),
         $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class), $om->get(\Magento\Framework\Lock\LockManagerInterface::class));
     $db = $resource->getConnection();
     foreach ($ids as $id) {

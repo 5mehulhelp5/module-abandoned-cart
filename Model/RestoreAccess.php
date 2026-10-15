@@ -12,7 +12,7 @@ use Magento\Store\Model\StoreManagerInterface;
 /**
  * Restore authorization is checked again against locked, freshly loaded carts on POST. The link works only for
  * the visitor who gave the subscription's permission (Notification's permission must be able to tell - with
- * CommerceKings_Consent: the browser the consent was given in); a withdrawal deletes the subscription, and with it
+ * the consent bridge: the browser the consent was given in); a withdrawal deletes the subscription, and with it
  * the restore. When the permission cannot identify visitors, reminders link to the cart page instead.
  */
 class RestoreAccess
