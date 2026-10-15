@@ -114,7 +114,7 @@ Carts subscribed before this version need checkout capture again; nothing is mig
 ## Consent rules
 
 - A **consent** = one choice in the consent source, recorded by `CommerceKings_Consent` with its own id.
-- **Switched off in the consent source** (incl. "reject all", on any page): `CommerceKings_Consent` commits withdrawal and pending cleanup together, then invokes `CommerceKings\Notification\Model\WithdrawalHandler`, registered for purpose `cart_reminder` in this module's `di.xml`. It deletes **every subscription with those consent IDs**, including the abandoned cart of an expired session. Failed cleanup remains pending for Consent's cron retry; reminders are blocked as soon as consent is revoked. On guest checkout the subscribe endpoint is also called with an empty email.
+- **Switched off in the consent source** (incl. "reject all", on any page): `CommerceKings_Consent` commits withdrawal and pending cleanup together, then invokes the consent bridge's withdrawal handler (`commercekings/module-consent-notification`, registered for the purpose of every Notification subscription type, `cart_reminder` included). It deletes **every subscription with those consent IDs**, including the abandoned cart of an expired session. Failed cleanup remains pending for Consent's cron retry; reminders are blocked as soon as consent is revoked. On guest checkout the subscribe endpoint is also called with an empty email.
   - the subscription (guest contact link and consent) is removed; the send history stays;
   - Magento checkout email is preserved for guests and customers.
   - retries use the original consent IDs, so a later grant/subscription remains untouched;
