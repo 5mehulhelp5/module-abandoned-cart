@@ -56,6 +56,8 @@ class ReminderPolicyTest extends TestCase
     private int $sent = 0;
     private string $email;
     private bool $sendFails = false;
+    private bool $publishFails = false;
+    private bool $acceptedBeforePublishFailure = false;
 
     protected function setUp(): void
     {
@@ -216,7 +218,14 @@ class ReminderPolicyTest extends TestCase
         $stores = $this->createStub(StoreManagerInterface::class);
         $stores->method('getStores')->willReturn(array_map(fn ($id) => $this->stores->getStore($id), $this->storeIds));
         $queue = $this->createStub(QueueInterface::class);
-        $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = $this->quoteOf((int)$id); });
+        $queue->method('publish')->willReturnCallback(function ($type, $id) {
+            if (!$this->publishFails || $this->acceptedBeforePublishFailure) {
+                $this->published[] = $this->quoteOf((int)$id);
+            }
+            if ($this->publishFails) {
+                throw new \RuntimeException('Fixture queue failure');
+            }
+        });
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
             $this->policy ?? new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
             $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class));
@@ -268,6 +277,49 @@ class ReminderPolicyTest extends TestCase
         $this->assertSame(0, $finder->execute());
         $this->assertEqualsCanonicalizing([$first, $second], $this->published);
         $this->assertSame($updated, [$this->row($first)['updated_at'], $this->row($second)['updated_at']]);
+    }
+
+    /** @dataProvider publishFailureOutcomes */
+    #[\PHPUnit\Framework\Attributes\DataProvider('publishFailureOutcomes')]
+    public function testFailedPublishIsRecoveredWithoutASecondReminder(bool $acceptedBeforeFailure): void
+    {
+        $id = $this->quote();
+        $before = $this->row($id);
+        $this->publishFails = true;
+        $this->acceptedBeforePublishFailure = $acceptedBeforeFailure;
+        $finder = $this->finder();
+        try {
+            $finder->execute();
+            $this->fail('A publish exception must reach Magento cron.');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('Fixture queue failure', $error->getMessage());
+        }
+        $this->assertNotNull($this->row($id)['queued_at']);
+        $this->assertNull($this->row($id)['reminded_at']);
+        $this->assertFalse($this->cooldown()->isRecent($this->email));
+        $this->assertSame($acceptedBeforeFailure ? [$id] : [], $this->published);
+
+        $this->publishFails = false;
+        $this->assertSame(0, $finder->execute(), 'An uncertain publish is not immediately published again.');
+        $this->state($id, ['queued_at' => gmdate('Y-m-d H:i:s', time() - 7200)]);
+        $this->assertSame(1, $finder->execute(), 'A stale claim becomes eligible again.');
+        $this->assertSame($acceptedBeforeFailure ? [$id, $id] : [$id], $this->published);
+        $this->assertSame($before['updated_at'], $this->row($id)['updated_at']);
+        $this->assertSame($before['captured_at'], $this->row($id)['captured_at']);
+
+        // If the broker accepted the first publish before reporting failure, both copies may arrive.
+        $consumer = $this->consumer();
+        foreach ($this->published as $quoteId) {
+            $consumer->process($this->subscriptionOf($quoteId));
+        }
+        $this->assertSame(1, $this->sent);
+        $this->assertNotNull($this->row($id)['reminded_at']);
+        $this->assertSame(0, $finder->execute());
+    }
+
+    public static function publishFailureOutcomes(): array
+    {
+        return ['not accepted' => [false], 'accepted but acknowledgement lost' => [true]];
     }
 
     public function testSameAddressCartsAreDeferredWithoutBeingMarkedSentAndDuplicatesDoNotSendAgain(): void

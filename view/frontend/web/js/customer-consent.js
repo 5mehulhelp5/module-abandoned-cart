@@ -11,17 +11,24 @@ define(['jquery', 'CommerceKings_Consent/js/consent/provider'], function ($, con
     var PURPOSE = 'cart_reminder';
 
     function customerOnCheckout() {
-        return !!(window.checkoutConfig && window.checkoutConfig.isCustomerLoggedIn);
+        return !!(window.checkoutConfig && window.checkoutConfig.isCustomerLoggedIn &&
+            window.checkoutConfig.quoteData && window.checkoutConfig.quoteData.entity_id);
     }
 
     function capture() {
         // loaded here: the url builder reads window.checkoutConfig, which only checkout has
         require(['mage/storage', 'Magento_Checkout/js/model/url-builder'], function (storage, urlBuilder) {
+            // Loading dependencies is asynchronous: checkout, login or consent may have changed.
+            if (!customerOnCheckout() || !consent.hasConsent(PURPOSE)) {
+                return;
+            }
             storage.post(
                 urlBuilder.createUrl('/ck-notification/subscriptions/mine', {}),
                 JSON.stringify({type: PURPOSE, reference: String(window.checkoutConfig.quoteData.entity_id)}),
                 false
             );
+        }, function () {
+            // Leave capture unstored if dependencies fail; do not interrupt checkout or retry in a loop.
         });
     }
 

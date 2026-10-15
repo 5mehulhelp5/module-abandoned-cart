@@ -4,6 +4,10 @@
 
 First release. Features:
 
+- Cover failed and uncertain queue publishes through stale-claim recovery, and customer checkout request
+  failures/refusals and dependency-loading errors. Recheck the cart, login and consent after asynchronous
+  checkout dependencies load; a failed load leaves capture unstored without interrupting checkout.
+
 - **Consent-based reminders:** one reminder email per abandoned cart, only with a valid `cart_reminder`
   consent from `commercekings/module-consent` (not withdrawn, expired or from an older revision). Consent is
   checked in PHP and repeated inside every atomic SQL claim, so a withdrawal at the same moment wins.

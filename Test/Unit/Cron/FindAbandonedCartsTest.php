@@ -27,6 +27,7 @@ class FindAbandonedCartsTest extends TestCase
     private ?ReminderPolicyInterface $policy = null;
     private array $unresolved = [];
     private bool $recent = false;
+    private bool $publishFails = false;
 
     private function finder(bool $enabled = true): FindAbandonedCarts
     {
@@ -44,7 +45,12 @@ class FindAbandonedCartsTest extends TestCase
         }
         $stores->method('getStores')->willReturn($values);
         $queue = $this->createStub(QueueInterface::class);
-        $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = [$type, $id]; });
+        $queue->method('publish')->willReturnCallback(function ($type, $id) {
+            if ($this->publishFails) {
+                throw new \RuntimeException('Fixture queue failure');
+            }
+            $this->published[] = [$type, $id];
+        });
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn ($id) => in_array($id, $this->unresolved, true) ? null : 'fixture@example.test');
         $cooldown = $this->createStub(CooldownInterface::class);
@@ -138,6 +144,23 @@ class FindAbandonedCartsTest extends TestCase
         $this->fetchPairsResults = [self::due([10, 11])];
         $this->assertSame(0, $this->finder()->execute());
         $this->assertSame([], $this->published);
+    }
+
+    public function testPublishFailurePropagatesAndKeepsTheQueueClaimForStaleRecovery(): void
+    {
+        $this->publishFails = true;
+        $this->fetchPairsResults = [self::due([10, 11])];
+        try {
+            $this->finder()->execute();
+            $this->fail('A failed publish must not be reported as queued successfully.');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('Fixture queue failure', $error->getMessage());
+        }
+        $this->assertSame([], $this->published);
+        $this->assertCount(2, $this->updates, 'Only stale recovery and the first queue claim ran.');
+        $this->assertSame(['c.queued_at'], array_keys($this->updates[1]['data']));
+        $this->assertSame(10, $this->updates[1]['where']['c.quote_id = ?']);
+        $this->assertSame('NOW()', (string)$this->updates[1]['data']['c.queued_at']);
     }
 
     public function testNothingDue(): void
