@@ -7,6 +7,7 @@ use CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\QuoteLifetime as L
 use CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\ReminderPolicy as PolicyField;
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
+use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
@@ -79,10 +80,13 @@ class ReminderPolicyTest extends TestCase
     {
         $db = $this->resource->getConnection();
         if ($this->quoteIds) {
-            $emails = $db->fetchCol($db->select()->from($this->table('quote'), 'ck_abandoned_email')->where('entity_id IN (?)', $this->quoteIds));
+            $emails = $db->fetchCol($db->select()->from(['c' => $this->table('ck_abandoned_cart')], [])
+                ->join(['n' => $this->table('ck_notification_contact')], 'n.contact_id = c.contact_id', 'email')
+                ->where('c.quote_id IN (?)', $this->quoteIds));
             $hashes = array_map(fn ($email) => $this->history()->hash($email), array_filter($emails));
             if ($hashes) { $db->delete($this->table('ck_notification_cooldown'), ['recipient_hash IN (?)' => $hashes]); }
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quoteIds]);
+            if ($emails) { $db->delete($this->table('ck_notification_contact'), ['email IN (?)' => $emails]); }
         }
         if ($this->storeIds) { $db->delete($this->table('store'), ['store_id IN (?)' => array_values($this->storeIds)]); }
         $this->stores->reinitStores();
@@ -102,15 +106,35 @@ class ReminderPolicyTest extends TestCase
         $id = (int)$quote->getId();
         $this->quoteIds[] = $id;
         $this->resource->getConnection()->update($this->table('quote'), ['store_id' => $this->storeIds[$days],
-            'items_count' => 1, 'ck_abandoned_email' => $this->email, 'ck_abandoned_consent_id' => 'fixture-consent',
-            'updated_at' => gmdate('Y-m-d H:i:s', time() - $ageSeconds)], ['entity_id = ?' => $id]);
+            'items_count' => 1, 'updated_at' => gmdate('Y-m-d H:i:s', time() - $ageSeconds)], ['entity_id = ?' => $id]);
+        $this->state($id, ['email' => $this->email, 'consent_id' => 'fixture-consent']);
         return $id;
     }
 
+    /** Write the cart's reminder state; "email" becomes the guest contact of the cart's website. */
+    private function state(int $id, array $values): void
+    {
+        if (isset($values['email'])) {
+            $storeId = (int)$this->resource->getConnection()->fetchOne($this->resource->getConnection()->select()
+                ->from($this->table('quote'), 'store_id')->where('entity_id = ?', $id));
+            $values['contact_id'] = $this->om->get(\CommerceKings\Notification\Api\ContactRepositoryInterface::class)
+                ->save((int)$this->stores->getStore($storeId)->getWebsiteId(), $values['email']);
+            unset($values['email']);
+        }
+        $carts = $this->om->get(CartTable::class);
+        $carts->ensure($id);
+        $this->resource->getConnection()->update($carts->name(), $values, ['quote_id = ?' => $id]);
+    }
+
+    /** The quote with its reminder state and guest email. */
     private function row(int $id): array
     {
         return $this->resource->getConnection()->fetchRow($this->resource->getConnection()->select()
-            ->from($this->table('quote'))->where('entity_id = ?', $id));
+            ->from(['q' => $this->table('quote')])
+            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id',
+                ['contact_id', 'consent_id', 'browser_hash', 'captured_at', 'queued_at', 'reminded_at'])
+            ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = c.contact_id', ['email'])
+            ->where('q.entity_id = ?', $id));
     }
 
     private function config(): Config
@@ -159,7 +183,7 @@ class ReminderPolicyTest extends TestCase
         $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = (int)$id; });
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
             new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
-            $this->om->get(ReminderEmailResolverInterface::class), $this->history());
+            $this->om->get(ReminderEmailResolverInterface::class), $this->history(), $this->om->get(CartTable::class));
     }
 
     private function consumer(): CartReminder
@@ -186,7 +210,7 @@ class ReminderPolicyTest extends TestCase
             $data, $mailer, $this->config(), $consent, $this->guard(),
             new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
             $this->om->get(ReminderEmailResolverInterface::class),
-            $this->createStub(\CommerceKings\Consent\Model\Config::class));
+            $this->createStub(\CommerceKings\Consent\Model\Config::class), $this->om->get(CartTable::class));
     }
 
     public function testFinderUsesEachQuotesStoreLifetimeRatherThanTheOldSevenDaySetting(): void
@@ -218,9 +242,9 @@ class ReminderPolicyTest extends TestCase
         $consumer = $this->consumer();
         foreach ([$first, $second, $first, $second] as $id) { $consumer->process((string)$id); }
         $this->assertSame(1, $this->sent);
-        $this->assertNotNull($this->row($first)['ck_abandoned_reminded_at']);
-        $this->assertNull($this->row($second)['ck_abandoned_reminded_at']);
-        $this->assertNull($this->row($second)['ck_abandoned_queued_at']);
+        $this->assertNotNull($this->row($first)['reminded_at']);
+        $this->assertNull($this->row($second)['reminded_at']);
+        $this->assertNull($this->row($second)['queued_at']);
         $this->assertSame($updated, $this->row($first)['updated_at']);
     }
 
@@ -246,7 +270,7 @@ class ReminderPolicyTest extends TestCase
         try { $this->consumer()->process((string)$id); $this->fail('Expected fixture failure'); }
         catch (\RuntimeException $e) { $this->assertSame('Fixture SMTP failure', $e->getMessage()); }
         $this->assertFalse($this->history()->isRecent($this->email));
-        $this->assertNull($this->row($id)['ck_abandoned_reminded_at']);
+        $this->assertNull($this->row($id)['reminded_at']);
         $this->sendFails = false;
         $this->consumer()->process((string)$id);
         $this->assertSame(1, $this->sent);
@@ -329,7 +353,7 @@ class ReminderPolicyTest extends TestCase
         $published = array_merge(...array_column($results, 'published'));
         $this->assertCount(12, $published);
         $this->assertEqualsCanonicalizing($ids, $published);
-        foreach ($ids as $id) { $this->assertNotNull($this->row($id)['ck_abandoned_queued_at']); }
+        foreach ($ids as $id) { $this->assertNotNull($this->row($id)['queued_at']); }
     }
 
     public function testConcurrentConsumersClaimEachCartOnlyOnce(): void
@@ -337,14 +361,12 @@ class ReminderPolicyTest extends TestCase
         $ids = [];
         for ($i = 0; $i < 12; $i++) {
             $id = $this->quote();
-            $this->resource->getConnection()->update($this->table('quote'),
-                ['ck_abandoned_email' => $id . '-' . $this->email, 'updated_at' => new \Magento\Framework\DB\Sql\Expression('updated_at')],
-                ['entity_id = ?' => $id]);
+            $this->state($id, ['email' => $id . '-' . $this->email]);
             $ids[] = $id;
         }
         $results = $this->workers('consumer', $ids);
         $this->assertSame(12, array_sum(array_column($results, 'sent')));
-        foreach ($ids as $id) { $this->assertNotNull($this->row($id)['ck_abandoned_reminded_at']); }
+        foreach ($ids as $id) { $this->assertNotNull($this->row($id)['reminded_at']); }
     }
 
     public function testConcurrentSameAddressConsumersSendOnlyOnce(): void
@@ -353,7 +375,7 @@ class ReminderPolicyTest extends TestCase
         for ($i = 0; $i < 12; $i++) { $ids[] = $this->quote(); }
         $results = $this->workers('consumer', $ids);
         $this->assertSame(1, array_sum(array_column($results, 'sent')));
-        $sent = array_filter($ids, fn ($id) => $this->row($id)['ck_abandoned_reminded_at'] !== null);
+        $sent = array_filter($ids, fn ($id) => $this->row($id)['reminded_at'] !== null);
         $this->assertCount(1, $sent);
     }
 
@@ -362,7 +384,7 @@ class ReminderPolicyTest extends TestCase
         $id = $this->quote();
         $result = $this->workers('interrupt', [$id], 1);
         $this->assertTrue($result[0]['interrupted']);
-        $this->assertNotNull($this->row($id)['ck_abandoned_reminded_at']);
+        $this->assertNotNull($this->row($id)['reminded_at']);
         $this->assertSame(0, $this->workers('consumer', [$id], 1)[0]['sent']);
         $this->assertSame(0, $this->finder()->execute());
     }
@@ -374,19 +396,17 @@ class ReminderPolicyTest extends TestCase
         $consumer = $this->consumer();
         foreach ([$expired, $recent] as $id) { $consumer->process((string)$id); }
         $this->assertSame(0, $this->sent);
-        $this->assertNull($this->row($expired)['ck_abandoned_reminded_at']);
-        $this->assertNull($this->row($recent)['ck_abandoned_reminded_at']);
+        $this->assertNull($this->row($expired)['reminded_at']);
+        $this->assertNull($this->row($recent)['reminded_at']);
     }
 
     public function testRestoreStopsAtQuoteExpiryEvenBeforeMagentoDeletesTheRow(): void
     {
         $id = $this->quote(2, 3 * 86400);
-        $this->resource->getConnection()->update($this->table('quote'), [
-            'ck_abandoned_reminded_at' => gmdate('Y-m-d H:i:s'),
-            'updated_at' => new \Zend_Db_Expr('updated_at'),
-        ], ['entity_id = ?' => $id]);
+        $this->state($id, ['reminded_at' => gmdate('Y-m-d H:i:s')]);
         $browser = $this->createStub(BrowserIdentityInterface::class);
-        $access = new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores, $this->lifetime());
+        $access = new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores, $this->lifetime(),
+            $this->om->get(CartTable::class));
         $quote = $this->om->get(CartRepositoryInterfaceFactory::class)->create()->get($id);
         $this->assertFalse($access->isAvailable($quote));
     }
@@ -420,10 +440,7 @@ class ReminderPolicyTest extends TestCase
     public function testGuestEmailActivityPostponesQueueingAndSendingWithoutExtendingQuoteLifetime(): void
     {
         $id = $this->quote(30, 120);
-        $this->resource->getConnection()->update($this->table('quote'), [
-            'ck_abandoned_email_updated_at' => gmdate('Y-m-d H:i:s'),
-            'updated_at' => new \Magento\Framework\DB\Sql\Expression('updated_at'),
-        ], ['entity_id = ?' => $id]);
+        $this->state($id, ['captured_at' => gmdate('Y-m-d H:i:s')]);
         $updated = $this->row($id)['updated_at'];
         $this->assertSame(0, $this->finder()->execute());
         $this->consumer()->process((string)$id);

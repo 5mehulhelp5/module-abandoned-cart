@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Reminder state moved off Magento's `quote` table into `ck_abandoned_cart` (one row per cart, deleted with
+  the quote); guest emails are `commercekings/module-notification` contacts (`ck_notification_contact`).
+  The six `quote.ck_abandoned_*` columns are dropped on upgrade (pending reminders on existing installs are
+  not migrated). Claims stay single atomic UPDATEs (joined to `quote`). `ReminderQuery::column()` now
+  qualifies `ck_abandoned_cart` columns (e.g. `reminded_at`); `ReminderData::build()` takes the consent id.
+
 - Sending moved to `commercekings/module-notification`: the shared queue consumer `commerceKingsNotificationSend`
   replaces `commerceKingsAbandonedCartRemind`, the cooldown table `ck_notification_cooldown` replaces
   `ck_abandoned_cart_recipient` (dropped on upgrade), and *Email cooldown (days)* moved to CommerceKings > Notifications

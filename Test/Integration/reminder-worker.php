@@ -90,7 +90,7 @@ $builder = new class($onSend, $mode) extends TransportBuilder {
 };
 $data = new class extends ReminderData {
     public function __construct() {}
-    public function build(Quote $quote): array { return ['customer_name' => '']; }
+    public function build(Quote $quote, string $consentId): array { return ['customer_name' => '']; }
 };
 $emulation = new class extends Emulation {
     public function __construct() {}
@@ -106,12 +106,13 @@ while (!is_file($barrier . '.go')) {
 }
 if ($mode === 'finder') {
     (new FindAbandonedCarts($config, $resource, $guard, $queue, new OncePerCart(), $lifetime,
-        $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class)))->execute();
+        $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class), $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class)))->execute();
 } else {
     $mailer = new Mailer($builder, $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
         $mailer, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
-        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class));
+        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class),
+        $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class));
     foreach ($ids as $id) { $consumer->process((string)$id); }
 }
 echo json_encode(['published' => $published, 'sent' => $sent]), PHP_EOL;

@@ -16,8 +16,8 @@ class ReminderEmailResolverTest extends TestCase
     public function testReturnsOnlyAnExistingRecipient(mixed $value, ?string $expected): void
     {
         $this->fetchOneResult = $value;
-        $this->assertSame($expected, (new ReminderEmailResolver($this->resource()))->resolve(42));
-        $this->assertContains(['entity_id = ?', 42], $this->selectWhere);
+        $this->assertSame($expected, (new ReminderEmailResolver($this->resource(), $this->carts()))->resolve(42));
+        $this->assertContains(['c.quote_id = ?', 42], $this->selectWhere);
         $this->assertSame([], $this->updates);
     }
 

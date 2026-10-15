@@ -7,13 +7,15 @@ use CommerceKings\Consent\Api\BrowserIdentityInterface;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Sql\Expression;
 
 /**
  * Logged-in customers: the same rule as guests, at the equivalent moment. A guest consents to the
  * reminder by typing the email in checkout; a customer's email comes from the account, so the
  * consent is stored when they open checkout (or switch the consent on while there) - if
  * CommerceKings_Consent has a valid one for purpose "cart_reminder". Consent id and browser id as for
- * guests, with the same validity check inside the UPDATE.
+ * guests, with the same validity check inside the UPDATE. A change stamps captured_at, which restarts the
+ * reminder delay (as a cart change does); re-opening checkout with the same consent changes nothing.
  */
 class CustomerConsentCapture
 {
@@ -23,7 +25,8 @@ class CustomerConsentCapture
         private readonly ConsentGuardInterface $guard,
         private readonly BrowserIdentityInterface $browser,
         private readonly Config $config,
-        private readonly QuoteScope $scope
+        private readonly QuoteScope $scope,
+        private readonly CartTable $carts
     ) {
     }
 
@@ -43,31 +46,32 @@ class CustomerConsentCapture
         $browserHash = $this->browser->hash();
         $db = $this->resource->getConnection();
         $where = [
-            'entity_id = ?' => $quoteId,
-            'store_id = ?' => (int)$quote['store_id'],
-            'customer_id = ?' => $customerId,
-            'is_active = ?' => 1,
+            'q.entity_id = ?' => $quoteId,
+            'q.store_id = ?' => (int)$quote['store_id'],
+            'q.customer_id = ?' => $customerId,
+            'q.is_active = ?' => 1,
             $this->guard->validCondition($db->quote($consent->consentId)),
         ];
+        $this->carts->ensure($quoteId);
         $updated = $db->update(
-            $this->resource->getTableName('quote'),
-            ['ck_abandoned_consent_id' => $consent->consentId, 'ck_abandoned_browser_hash' => $browserHash],
+            $this->carts->joined(),
+            ['c.consent_id' => $consent->consentId, 'c.browser_hash' => $browserHash, 'c.captured_at' => new Expression('NOW()')],
             array_merge($where, [
                 // only when it changes - re-opening checkout must not restart the reminder delay
-                '(ck_abandoned_consent_id IS NULL OR ck_abandoned_browser_hash IS NULL OR '
-                    . $db->quoteInto('ck_abandoned_consent_id <> ?', $consent->consentId) . ' OR '
-                    . $db->quoteInto('ck_abandoned_browser_hash <> ?', $browserHash) . ')',
+                '(c.consent_id IS NULL OR c.browser_hash IS NULL OR '
+                    . $db->quoteInto('c.consent_id <> ?', $consent->consentId) . ' OR '
+                    . $db->quoteInto('c.browser_hash <> ?', $browserHash) . ')',
             ])
         );
         if ($updated) {
             return true;
         }
         // An identical retry is stored; a refused write or a withdrawal race is not.
-        $select = $db->select()->from($this->resource->getTableName('quote'), 'entity_id');
+        $select = $this->carts->select(['c.quote_id']);
         foreach ($where as $condition => $value) {
             is_int($condition) ? $select->where($value) : $select->where($condition, $value);
         }
-        return (bool)$db->fetchOne($select->where('ck_abandoned_consent_id = ?', $consent->consentId)
-            ->where('ck_abandoned_browser_hash = ?', $browserHash));
+        return (bool)$db->fetchOne($select->where('c.consent_id = ?', $consent->consentId)
+            ->where('c.browser_hash = ?', $browserHash));
     }
 }

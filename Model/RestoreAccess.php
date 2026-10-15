@@ -14,7 +14,8 @@ class RestoreAccess
         private readonly LinkSignature $signature,
         private readonly BrowserIdentityInterface $browser,
         private readonly StoreManagerInterface $stores,
-        private readonly QuoteLifetime $lifetime
+        private readonly QuoteLifetime $lifetime,
+        private readonly CartTable $carts
     ) {
     }
 
@@ -26,7 +27,7 @@ class RestoreAccess
 
     public function isOwner(Quote $quote, string $token): bool
     {
-        $hash = (string)$quote->getData('ck_abandoned_browser_hash');
+        $hash = (string)($this->carts->load((int)$quote->getId())['browser_hash'] ?? '');
         return (int)$quote->getStoreId() === (int)$this->stores->getStore()->getId()
             && $this->isSigned((int)$quote->getId(), $token)
             && $hash !== '' && hash_equals($hash, $this->browser->hash());
@@ -34,7 +35,7 @@ class RestoreAccess
 
     public function isAvailable(Quote $quote): bool
     {
-        $value = (string)$quote->getData('ck_abandoned_reminded_at');
+        $value = (string)($this->carts->load((int)$quote->getId())['reminded_at'] ?? '');
         $sent = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, new \DateTimeZone('UTC'));
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         return $quote->getIsActive() && $quote->getItemsCount() && $sent

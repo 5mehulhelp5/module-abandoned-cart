@@ -73,10 +73,13 @@ class CartRestoreTest extends TestCase
     {
         $quote = $this->quote($products, 'source@example.test');
         $this->resource->getConnection()->update($this->resource->getTableName('quote'), [
-            'ck_abandoned_browser_hash' => self::HASH,
-            'ck_abandoned_reminded_at' => gmdate('Y-m-d H:i:s'),
             'coupon_code' => 'SOURCE-COUPON',
         ], ['entity_id = ?' => (int)$quote->getId()]);
+        // the cart's reminder state: owner browser, reminder sent
+        $carts = $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class);
+        $carts->ensure((int)$quote->getId());
+        $this->resource->getConnection()->update($carts->name(),
+            ['browser_hash' => self::HASH, 'reminded_at' => gmdate('Y-m-d H:i:s')], ['quote_id = ?' => (int)$quote->getId()]);
         return $quote;
     }
 
@@ -84,7 +87,8 @@ class CartRestoreTest extends TestCase
     {
         $browser = $this->createStub(BrowserIdentityInterface::class);
         $browser->method('hash')->willReturn($hash);
-        return new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores, $this->om->get(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class));
+        return new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores,
+            $this->om->get(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class), $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class));
     }
 
     private function service(?CartRepositoryInterfaceFactory $factory = null, ?RestoreAccess $access = null): CartRestore

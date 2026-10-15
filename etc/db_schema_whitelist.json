@@ -24,5 +24,25 @@
         "index": {
             "CK_ABANDONED_CART_RECIPIENT_REMINDED_AT": true
         }
+    },
+    "ck_abandoned_cart": {
+        "column": {
+            "quote_id": true,
+            "contact_id": true,
+            "consent_id": true,
+            "browser_hash": true,
+            "captured_at": true,
+            "queued_at": true,
+            "reminded_at": true
+        },
+        "constraint": {
+            "PRIMARY": true,
+            "CK_ABANDONED_CART_QUOTE_ID_QUOTE_ENTITY_ID": true,
+            "CK_ABANDONED_CART_CONTACT_ID_CK_NOTIFICATION_CONTACT_CONTACT_ID": true
+        },
+        "index": {
+            "CK_ABANDONED_CART_CONSENT_ID": true,
+            "CK_ABANDONED_CART_QUEUED_AT": true
+        }
     }
 }

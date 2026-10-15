@@ -8,6 +8,7 @@ use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
+use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Notification\Api\CooldownInterface;
@@ -45,25 +46,25 @@ class FindAbandonedCarts
         private readonly StoreManagerInterface $stores,
         private readonly LoggerInterface $logger,
         private readonly ReminderEmailResolverInterface $recipients,
-        private readonly CooldownInterface $cooldown
+        private readonly CooldownInterface $cooldown,
+        private readonly CartTable $carts
     ) {
     }
 
     public function execute(): int
     {
-        if ($this->storeCondition('') === '0 = 1') {
+        if ($this->storeCondition() === '0 = 1') {
             return 0;
         }
         $db = $this->resource->getConnection();
-        $quote = $this->resource->getTableName('quote');
 
         $released = $db->update(
-            $quote,
-            ['ck_abandoned_queued_at' => null, 'updated_at' => new Expression('updated_at')],
+            $this->carts->joined(),
+            ['c.queued_at' => null],
             [
-                'ck_abandoned_queued_at < NOW() - INTERVAL ' . self::STALE_MINUTES . ' MINUTE',
-                $this->storeCondition(''),
-                'is_active = ?' => 1,
+                'c.queued_at < NOW() - INTERVAL ' . self::STALE_MINUTES . ' MINUTE',
+                $this->storeCondition(),
+                'q.is_active = ?' => 1,
             ]
         );
         if ($released) {
@@ -75,9 +76,9 @@ class FindAbandonedCarts
         foreach ($due as $id) {
             // claim it first: only the run that flips queued_at from NULL publishes
             $claimed = $db->update(
-                $quote,
-                ['ck_abandoned_queued_at' => new Expression('NOW()'), 'updated_at' => new Expression('updated_at')],
-                array_merge(['entity_id = ?' => (int)$id], $this->eligibleConditions(''))
+                $this->carts->joined(),
+                ['c.queued_at' => new Expression('NOW()')],
+                array_merge(['c.quote_id = ?' => (int)$id], $this->eligibleConditions())
             );
             if ($claimed) {
                 $this->queue->publish(CartReminder::CODE, (string)$id);
@@ -98,11 +99,11 @@ class FindAbandonedCarts
     private function dueCarts(): array
     {
         $db = $this->resource->getConnection();
-        $select = $db->select()->from(['q' => $this->resource->getTableName('quote')], ['entity_id']);
-        foreach ($this->eligibleConditions('q.') as $condition) {
+        $select = $this->carts->select(['c.quote_id']);
+        foreach ($this->eligibleConditions() as $condition) {
             $select->where($condition);
         }
-        $select->order(['q.updated_at ASC', 'q.entity_id ASC']);
+        $select->order(['q.updated_at ASC', 'c.quote_id ASC']);
         $due = [];
         $offset = 0;
         // Read pages before claiming, so carts without a resolvable email cannot block later carts.
@@ -122,19 +123,19 @@ class FindAbandonedCarts
         return $due;
     }
 
-    private function eligibleConditions(string $prefix): array
+    private function eligibleConditions(): array
     {
         return [
-            $prefix . 'is_active = 1',
-            $prefix . 'items_count > 0',
-            $prefix . 'ck_abandoned_consent_id IS NOT NULL',
-            $this->guard->validCondition($prefix . 'ck_abandoned_consent_id'),
-            $prefix . 'ck_abandoned_queued_at IS NULL',
-            $this->storeCondition($prefix),
+            'q.is_active = 1',
+            'q.items_count > 0',
+            'c.consent_id IS NOT NULL',
+            $this->guard->validCondition('c.consent_id'),
+            'c.queued_at IS NULL',
+            $this->storeCondition(),
         ];
     }
 
-    private function storeCondition(string $prefix): string
+    private function storeCondition(): string
     {
         $branches = [];
         foreach ($this->stores->getStores() as $store) {
@@ -142,16 +143,14 @@ class FindAbandonedCarts
             if (!$this->config->isEnabled($id)) {
                 continue;
             }
-            $emailIdle = '(' . $prefix . 'customer_id IS NOT NULL OR ' . $prefix . 'ck_abandoned_email_updated_at IS NULL OR '
-                . $prefix . 'ck_abandoned_email_updated_at <= NOW() - INTERVAL ' . $this->config->getDelayMinutes($id) . ' MINUTE)';
-            $branches[] = sprintf('(%sstore_id = %d AND %supdated_at <= NOW() - INTERVAL %d MINUTE AND (%s) AND (%s) AND (%s))',
-                $prefix,
+            $delay = $this->config->getDelayMinutes($id);
+            $branches[] = sprintf('(q.store_id = %d AND q.updated_at <= NOW() - INTERVAL %d MINUTE'
+                . ' AND (c.captured_at IS NULL OR c.captured_at <= NOW() - INTERVAL %d MINUTE) AND (%s) AND (%s))',
                 $id,
-                $prefix,
-                $this->config->getDelayMinutes($id),
-                $emailIdle,
-                $this->lifetime->validCondition($prefix . 'updated_at', $id),
-                $this->policy->dueCondition(new ReminderQuery($id, rtrim($prefix, '.')))
+                $delay,
+                $delay,
+                $this->lifetime->validCondition('q.updated_at', $id),
+                $this->policy->dueCondition(new ReminderQuery($id, 'c'))
             );
         }
         return $branches ? '(' . implode(' OR ', $branches) . ')' : '0 = 1';

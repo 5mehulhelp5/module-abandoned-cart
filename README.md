@@ -29,7 +29,7 @@ Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (featur
    - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also clears a previously captured guest email;
    - customer: opening checkout (or switching the consent on there) → `POST /cartreminder/consent/capture` (`CustomerConsentCapture`, `js/customer-consent.js`); the email comes from the account. Stored only when the consent changes, so re-opening checkout does not restart the delay.
    - Stored: the guest reminder email, its change timestamp, the consent id and the browser id hash, in one UPDATE that also checks the consent is still valid (`ConsentGuardInterface`) – a capture request still on its way can't undo a withdrawal. Magento's checkout email is preserved.
-3. **Finder** (cron `commercekings_abandoned_cart_find`, every 15 min) selects active, nonempty carts with an email and valid consent, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_queued_at`) and its id published to `commercekings.abandoned_cart.remind`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
+3. **Finder** (cron `commercekings_abandoned_cart_find`, every 15 min) selects active, nonempty carts with an email and valid consent, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_cart.queued_at`) and published to Notification's shared topic `commercekings.notification.send` as `cart_reminder|<quote id>`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
 4. **Consumer** `commerceKingsNotificationSend` (`commercekings/module-notification`, shared by all notifications) hands the cart to the `cart_reminder` type (`Model\Notification\CartReminder`), which re-checks the policy, store, consent, inactivity delay and quote expiry, then claims the cart atomically and sends in store emulation. Selection and claim share the policy's SQL condition. A failed send restores the prior reminder timestamp and clears the queue claim for retry. Duplicate messages cannot claim the same state twice.
 5. **Email** – the module ships a **neutral English default** (`view/frontend/email/reminder.html`, "Abandoned Cart Reminder"). Use your own: **Marketing > Email Templates > Add New Template**, load "Abandoned Cart Reminder", change text and design, select it in **Abandoned Cart > Email template**. Variables: `customer_name`, `items_html` (ready-made rows: picture, the store's predefined options only, qty × price), `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; the footer gets `cart_reminder_email="1"` for a label. Sender defaults to **General Contact** – use a no-reply address.
 
@@ -83,16 +83,20 @@ recipient claim; successful or interrupted handoffs retain it conservatively.
 
 ## Data
 
-| Where | Column | Meaning |
-|---|---|---|
-| `quote` | `ck_abandoned_email` | latest guest email captured for reminders; separate from Magento checkout email |
-| `quote` | `ck_abandoned_email_updated_at` | guest reminder email last changed; identical retries preserve it |
-| `quote` | `ck_abandoned_queued_at` | queued by the finder (claim) |
-| `quote` | `ck_abandoned_reminded_at` | email sent – one reminder per cart |
-| `quote` | `ck_abandoned_consent_id` | the consent (`CommerceKings_Consent`, `ck_consent`) – indexed; the evidence lives there |
-| `quote` | `ck_abandoned_browser_hash` | the browser id hash – the restore link works only in this browser |
+Magento's `quote` table is not changed or written. The reminder state lives in the module's own
+`ck_abandoned_cart` (one row per cart, deleted with the quote by Magento's cart cleanup):
 
-Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. AbandonedCart stores the latest guest reminder email in `quote.ck_abandoned_email`; it does not retain an email history. Guest capture and withdrawal preserve Magento's `quote.customer_email` and `quote.updated_at`. The reminder delay uses the later of cart activity and guest email activity; quote expiry still uses Magento's cart timestamp. Customer consent capture changes the cart timestamp only when its consent binding changes.
+| Column | Meaning |
+|---|---|
+| `quote_id` | the cart (`quote.entity_id`, foreign key, `ON DELETE CASCADE`) |
+| `contact_id` | guests: the captured reminder email as a `commercekings/module-notification` contact (`ck_notification_contact`, one per website and address); customers use their account email |
+| `consent_id` | the consent (`CommerceKings_Consent`, `ck_consent`) – indexed; the evidence lives there |
+| `browser_hash` | the browser id hash – the restore link works only in this browser |
+| `captured_at` | reminder email or consent last changed; identical retries preserve it |
+| `queued_at` | queued by the finder (claim) |
+| `reminded_at` | email sent – one reminder per cart |
+
+Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. A guest's address is stored once as a Notification contact; the module keeps no email history, and contacts no cart uses any more are removed by Notification's daily cleanup (`Model\ContactReference`). Magento's `quote.customer_email` and `quote.updated_at` are never touched. The reminder delay uses the later of cart activity (`quote.updated_at`) and capture activity (`captured_at`, guests and customers); quote expiry still uses Magento's cart timestamp. Withdrawal unlinks contact, consent and browser but keeps `queued_at`/`reminded_at`, so opting in again never causes a second reminder. Every claim is one UPDATE over `ck_abandoned_cart` joined to `quote` (`Model\CartTable::joined()`), so cart, consent and reminder state are still checked in the same statement.
 
 `ReminderEmailResolverInterface::resolve(int $quoteId): ?string` supplies the current recipient to
 both queue eligibility and delivery. The default uses the captured email for guest carts and
@@ -100,7 +104,7 @@ Magento's `customer_email` for customer carts; absent recipients return `null`. 
 DI to choose another source. Finder scans candidate pages so unresolved recipients do not block
 later eligible carts. Delivery compares both native/captured email snapshots in its atomic claim
 and resolves again afterward, releasing the claim if the recipient changed. Email updates never
-reset `ck_abandoned_reminded_at`: the default remains one reminder per cart.
+reset `reminded_at`: the default remains one reminder per cart.
 
 Development carts captured before these columns existed need checkout capture again; no legacy
 checkout emails are copied automatically into the new field.
@@ -138,8 +142,8 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 
 - invalid/forged signature or changed quote id → homepage before any quote lookup;
 - link generation requires a nonempty string deployment `crypt/key`; missing, blank or invalid keys stop generation and signature validation rejects safely;
-- the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's (`ck_abandoned_browser_hash`), and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
-- cart ordered/closed, emptied or expired under Magento's quote lifetime, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `ck_abandoned_reminded_at`) → notice "This reminder link is no longer available. You can continue shopping with your current cart." (owner only);
+- the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's (`ck_abandoned_cart.browser_hash`), and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
+- cart ordered/closed, emptied or expired under Magento's quote lifetime, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `reminded_at`) → notice "This reminder link is no longer available. You can continue shopping with your current cart." (owner only);
 - customer cart → cart page if logged in as that customer, otherwise login page with "Sign in to continue shopping – your cart is waiting for you.";
 - guest cart → **GET shows a confirmation page without merging or replacing the session cart**. If it is already the session cart, the visitor goes straight to the cart page;
 - confirmation → **POST with a valid Magento form key**. Source and destination quote rows are locked in id order, then freshly loaded. Browser ownership, store, expiry and destination account/active status are checked again;

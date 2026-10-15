@@ -50,7 +50,7 @@ class FindAbandonedCartsTest extends TestCase
         $history = $this->createStub(CooldownInterface::class);
         $history->method('isRecent')->willReturnCallback(fn () => $this->recent);
         return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue,
-            $this->policy ?? new OncePerCart(), $lifetime, $stores, $this->createStub(LoggerInterface::class), $recipients, $history);
+            $this->policy ?? new OncePerCart(), $lifetime, $stores, $this->createStub(LoggerInterface::class), $recipients, $history, $this->carts());
     }
 
     public function testDisabledStoresDoNothing(): void
@@ -64,7 +64,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->finder()->execute();
         $conditions = array_column($this->selectWhere, 0);
         foreach (['q.is_active = 1', 'q.items_count > 0',
-            'q.ck_abandoned_consent_id IS NOT NULL', 'VALID(q.ck_abandoned_consent_id)', 'q.ck_abandoned_queued_at IS NULL'] as $condition) {
+            'c.consent_id IS NOT NULL', 'VALID(c.consent_id)', 'c.queued_at IS NULL'] as $condition) {
             $this->assertContains($condition, $conditions);
         }
         $branches = end($conditions);
@@ -73,7 +73,8 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertStringContainsString('q.store_id = 2 AND q.updated_at <= NOW() - INTERVAL 60 MINUTE', $branches);
         $this->assertStringContainsString('q.updated_at > NOW() - INTERVAL 2 DAY', $branches);
         $this->assertStringNotContainsString('store_id = 3', $branches);
-        $this->assertStringContainsString('q.ck_abandoned_reminded_at IS NULL', $branches);
+        $this->assertStringContainsString('c.reminded_at IS NULL', $branches);
+        $this->assertStringContainsString('(c.captured_at IS NULL OR c.captured_at <= NOW() - INTERVAL 180 MINUTE)', $branches);
         $this->assertSame([[200, 0]], $this->limits);
     }
 
@@ -88,22 +89,22 @@ class FindAbandonedCartsTest extends TestCase
     {
         $this->policy = $this->createStub(ReminderPolicyInterface::class);
         $this->policy->method('dueCondition')->willReturnCallback(fn (ReminderQuery $query) =>
-            'CUSTOM(' . $query->column('ck_abandoned_reminded_at') . ',' . $query->storeId . ')');
+            'CUSTOM(' . $query->column('reminded_at') . ',' . $query->storeId . ')');
         $this->fetchColResult = ['10'];
         $this->assertSame(1, $this->finder()->execute());
-        $this->assertStringContainsString('CUSTOM(q.ck_abandoned_reminded_at,1)', end($this->selectWhere)[0]);
-        $this->assertStringContainsString('CUSTOM(ck_abandoned_reminded_at,1)', implode(' ', self::conditions($this->updates[1]['where'])));
+        $this->assertStringContainsString('CUSTOM(c.reminded_at,1)', end($this->selectWhere)[0]);
+        $this->assertStringContainsString('CUSTOM(c.reminded_at,1)', implode(' ', self::conditions($this->updates[1]['where'])));
     }
 
-    public function testStaleClaimsKeepQuoteUpdatedAtAndRespectPolicy(): void
+    public function testStaleClaimsReleaseOnlyTheCartStateAndRespectPolicy(): void
     {
         $this->finder()->execute();
         $release = $this->updates[0];
-        $this->assertNull($release['data']['ck_abandoned_queued_at']);
-        $this->assertSame('updated_at', (string)$release['data']['updated_at']);
+        $this->assertSame(self::joined(), $release['table']);
+        $this->assertSame(['c.queued_at' => null], $release['data'], 'Magento\'s quote row is not written');
         $conditions = self::conditions($release['where']);
-        $this->assertContains('ck_abandoned_queued_at < NOW() - INTERVAL 60 MINUTE', $conditions);
-        $this->assertStringContainsString('ck_abandoned_reminded_at IS NULL', implode(' ', $conditions));
+        $this->assertContains('c.queued_at < NOW() - INTERVAL 60 MINUTE', $conditions);
+        $this->assertStringContainsString('c.reminded_at IS NULL', implode(' ', $conditions));
     }
 
     public function testOnlyWonAtomicClaimsArePublished(): void
@@ -113,12 +114,13 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertSame(2, $this->finder()->execute());
         $this->assertSame([[CartReminder::CODE, '10'], [CartReminder::CODE, '12']], $this->published);
         $claim = $this->updates[1];
-        $this->assertSame('NOW()', (string)$claim['data']['ck_abandoned_queued_at']);
-        $this->assertSame('updated_at', (string)$claim['data']['updated_at']);
-        $this->assertSame(10, $claim['where']['entity_id = ?']);
+        $this->assertSame(self::joined(), $claim['table']);
+        $this->assertSame(['c.queued_at'], array_keys($claim['data']));
+        $this->assertSame('NOW()', (string)$claim['data']['c.queued_at']);
+        $this->assertSame(10, $claim['where']['c.quote_id = ?']);
         $conditions = self::conditions($claim['where']);
-        $this->assertContains('ck_abandoned_queued_at IS NULL', $conditions);
-        $this->assertContains('VALID(ck_abandoned_consent_id)', $conditions);
+        $this->assertContains('c.queued_at IS NULL', $conditions);
+        $this->assertContains('VALID(c.consent_id)', $conditions);
         $this->assertStringContainsString('updated_at > NOW() - INTERVAL 30 DAY', implode(' ', $conditions));
     }
 

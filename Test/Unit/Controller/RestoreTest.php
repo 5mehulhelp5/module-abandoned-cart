@@ -74,7 +74,6 @@ class RestoreTest extends TestCase
         $quote = $this->mockWith(Quote::class, [
             'getId' => $cart['id'], 'getStoreId' => $cart['store'], 'getIsActive' => $cart['active'], 'getItemsCount' => $cart['items'],
             'getCustomerId' => $cart['customer'], 'getUpdatedAt' => $cart['updated'],
-            'getData' => fn ($key = '') => ['ck_abandoned_browser_hash' => $cart['browser'], 'ck_abandoned_reminded_at' => $cart['reminded']][$key] ?? null,
             'setIsActive' => self::$SELF,
         ]);
         $request = $this->createStub(Http::class);
@@ -95,7 +94,11 @@ class RestoreTest extends TestCase
         $stores->method('getStore')->willReturn($store);
         $lifetime = $this->createStub(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class);
         $lifetime->method('isExpired')->willReturnCallback(fn ($updated) => $updated === 'expired');
-        $access = new RestoreAccess($signature, $browserId, $stores, $lifetime);
+        // the cart's reminder state (ck_abandoned_cart): owner browser and when it was reminded
+        $carts = $this->createStub(\CommerceKings\AbandonedCart\Model\CartTable::class);
+        $carts->method('load')->willReturnCallback(fn ($id) => $id === $cart['id']
+            ? ['quote_id' => $cart['id'], 'browser_hash' => $cart['browser'], 'reminded_at' => $cart['reminded']] : null);
+        $access = new RestoreAccess($signature, $browserId, $stores, $lifetime, $carts);
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists, $quoteModel) {
             $this->lookups++;

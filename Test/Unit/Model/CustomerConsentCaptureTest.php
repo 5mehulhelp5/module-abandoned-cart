@@ -28,7 +28,7 @@ class CustomerConsentCaptureTest extends TestCase
         $scope = $this->createStub(QuoteScope::class);
         $scope->method('find')->willReturnCallback(fn () => $this->scopedQuote);
         $scope->method('matches')->willReturnCallback(fn () => $this->scopeMatches);
-        return new CustomerConsentCapture($this->resource(), $consentApi, $this->guard(), $browser, $config, $scope);
+        return new CustomerConsentCapture($this->resource(), $consentApi, $this->guard(), $browser, $config, $scope, $this->carts());
     }
 
     public function testStoresConsentOnTheCustomersCartOnly(): void
@@ -36,10 +36,14 @@ class CustomerConsentCaptureTest extends TestCase
         $this->assertTrue($this->capture()->execute(42, 15));
         $update = $this->updates[0];
         // never touches the email - it comes from the account
-        $this->assertSame(['ck_abandoned_consent_id' => 'cid-1', 'ck_abandoned_browser_hash' => 'browser-hash'], $update['data']);
-        $this->assertSame(42, $update['where']['entity_id = ?']);
-        $this->assertSame(15, $update['where']['customer_id = ?']);
-        $this->assertSame(1, $update['where']['is_active = ?']);
+        $this->assertSame(self::joined(), $update['table']);
+        $this->assertSame(['c.consent_id', 'c.browser_hash', 'c.captured_at'], array_keys($update['data']));
+        $this->assertSame(['cid-1', 'browser-hash'], [$update['data']['c.consent_id'], $update['data']['c.browser_hash']]);
+        // a changed consent restarts the reminder delay (as touching the cart did before)
+        $this->assertSame('NOW()', (string)$update['data']['c.captured_at']);
+        $this->assertSame(42, $update['where']['q.entity_id = ?']);
+        $this->assertSame(15, $update['where']['q.customer_id = ?']);
+        $this->assertSame(1, $update['where']['q.is_active = ?']);
         $this->assertContains("VALID('cid-1')", self::conditions($update['where']), 'consent re-checked inside the UPDATE');
     }
 
@@ -47,9 +51,9 @@ class CustomerConsentCaptureTest extends TestCase
     {
         $this->capture()->execute(42, 15);
         $changeOnly = implode(' ', self::conditions($this->updates[0]['where']));
-        $this->assertStringContainsString('ck_abandoned_consent_id IS NULL', $changeOnly);
-        $this->assertStringContainsString("ck_abandoned_consent_id <> 'cid-1'", $changeOnly);
-        $this->assertStringContainsString("ck_abandoned_browser_hash <> 'browser-hash'", $changeOnly);
+        $this->assertStringContainsString('c.consent_id IS NULL', $changeOnly);
+        $this->assertStringContainsString("c.consent_id <> 'cid-1'", $changeOnly);
+        $this->assertStringContainsString("c.browser_hash <> 'browser-hash'", $changeOnly);
     }
 
     /** @dataProvider refusedCases */
@@ -88,8 +92,8 @@ class CustomerConsentCaptureTest extends TestCase
     {
         $this->updateResults = [0];
         $this->assertFalse($this->capture()->execute(42, 15));
-        $this->assertContains(['customer_id = ?', 15], $this->selectWhere);
-        $this->assertContains(['store_id = ?', 3], $this->selectWhere);
+        $this->assertContains(['q.customer_id = ?', 15], $this->selectWhere);
+        $this->assertContains(['q.store_id = ?', 3], $this->selectWhere);
         $this->assertContains(["VALID('cid-1')", null], $this->selectWhere);
     }
 
@@ -98,7 +102,7 @@ class CustomerConsentCaptureTest extends TestCase
         $this->updateResults = [0];
         $this->fetchOneResult = 42;
         $this->assertTrue($this->capture()->execute(42, 15));
-        $this->assertContains(['ck_abandoned_consent_id = ?', 'cid-1'], $this->selectWhere);
-        $this->assertContains(['ck_abandoned_browser_hash = ?', 'browser-hash'], $this->selectWhere);
+        $this->assertContains(['c.consent_id = ?', 'cid-1'], $this->selectWhere);
+        $this->assertContains(['c.browser_hash = ?', 'browser-hash'], $this->selectWhere);
     }
 }

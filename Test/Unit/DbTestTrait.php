@@ -38,7 +38,7 @@ trait DbTestTrait
     private function resource(): ResourceConnection
     {
         $select = $this->createStub(Select::class);
-        foreach (['from', 'order', 'joinInner'] as $method) {
+        foreach (['from', 'order', 'joinInner', 'join', 'joinLeft'] as $method) {
             $select->method($method)->willReturnSelf();
         }
         $select->method('forUpdate')->willReturnCallback(function ($flag) use ($select) {
@@ -67,7 +67,8 @@ trait DbTestTrait
             return [];
         });
         $db->method('update')->willReturnCallback(function ($table, array $data, $where = '') {
-            $this->updates[] = ['table' => $table, 'data' => $data, 'where' => (array)$where];
+            // a joined table (CartTable::joined()) is an expression: record its SQL text
+            $this->updates[] = ['table' => (string)$table, 'data' => $data, 'where' => (array)$where];
             return $this->updateResults ? array_shift($this->updateResults) : 1;
         });
         $db->method('insertOnDuplicate')->willReturnCallback(function ($table, array $data, array $fields = []) {
@@ -91,6 +92,7 @@ trait DbTestTrait
         });
         $db->method('quoteInto')->willReturnCallback(fn ($text, $value) => str_replace('?', "'" . $value . "'", $text));
         $db->method('quote')->willReturnCallback(fn ($value) => "'" . $value . "'");
+        $db->method('quoteIdentifier')->willReturnArgument(0);
 
         $resource = $this->createStub(ResourceConnection::class);
         $resource->method('getConnection')->willReturn($db);
@@ -99,6 +101,18 @@ trait DbTestTrait
     }
 
     /** All WHERE conditions of an update as plain strings ("col = ?" keys and numeric-key conditions). */
+    /** The module's real CartTable on this fake; joined() is 'ck_abandoned_cart AS c INNER JOIN quote AS q ON q.entity_id = c.quote_id'. */
+    private function carts(): \CommerceKings\AbandonedCart\Model\CartTable
+    {
+        return new \CommerceKings\AbandonedCart\Model\CartTable($this->resource());
+    }
+
+    /** CartTable::joined() as the fake records it (traits hold no constants before PHP 8.2). */
+    private static function joined(): string
+    {
+        return 'ck_abandoned_cart AS c INNER JOIN quote AS q ON q.entity_id = c.quote_id';
+    }
+
     private static function conditions(array $where): array
     {
         $out = [];

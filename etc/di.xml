@@ -37,6 +37,14 @@
             </argument>
         </arguments>
     </type>
+    <!-- guest emails are CommerceKings_Notification contacts: keep the ones a cart still uses -->
+    <type name="CommerceKings\Notification\Model\ContactReferencePool">
+        <arguments>
+            <argument name="references" xsi:type="array">
+                <item name="abandoned_cart" xsi:type="object">CommerceKings\AbandonedCart\Model\ContactReference</item>
+            </argument>
+        </arguments>
+    </type>
     <!-- the consent purpose this feature uses (CommerceKings_Consent) - any consent source can grant it -->
     <type name="CommerceKings\Consent\Model\PurposePool">
         <arguments>

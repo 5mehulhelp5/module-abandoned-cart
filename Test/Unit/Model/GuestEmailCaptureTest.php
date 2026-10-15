@@ -26,6 +26,7 @@ class GuestEmailCaptureTest extends TestCase
     private array $maskLoads = [];
     private ?array $scopedQuote = ['store_id' => 3];
     private bool $scopeMatches = true;
+    private array $savedContacts = [];
 
     private function capture(int $quoteId = 42, bool $consent = true, bool $enabled = true): GuestEmailCapture
     {
@@ -52,7 +53,17 @@ class GuestEmailCaptureTest extends TestCase
         $scope->method('find')->willReturnCallback(fn () => $this->scopedQuote);
         $scope->method('matches')->willReturnCallback(fn () => $this->scopeMatches);
         $this->withdrawal = $this->createMock(ConsentWithdrawal::class);
-        return new GuestEmailCapture($maskFactory, $maskResource, $this->resource(), $consentApi, $this->guard(), $browser, $this->withdrawal, $config, $scope);
+        $contacts = $this->createStub(\CommerceKings\Notification\Api\ContactRepositoryInterface::class);
+        $contacts->method('save')->willReturnCallback(function ($websiteId, $email) {
+            $this->savedContacts[] = [$websiteId, $email];
+            return 7;
+        });
+        $store = $this->createStub(\Magento\Store\Api\Data\StoreInterface::class);
+        $store->method('getWebsiteId')->willReturn(1);
+        $stores = $this->createStub(\Magento\Store\Model\StoreManagerInterface::class);
+        $stores->method('getStore')->willReturn($store);
+        return new GuestEmailCapture($maskFactory, $maskResource, $this->resource(), $consentApi, $this->guard(), $browser,
+            $this->withdrawal, $config, $scope, $this->carts(), $contacts, $stores);
     }
 
     public function testUnknownCartKey(): void
@@ -67,17 +78,22 @@ class GuestEmailCaptureTest extends TestCase
         $this->assertTrue($this->capture()->capture('masked', 'a@test.com'));
         $this->assertSame([['masked', 'masked_id']], $this->maskLoads);
         $this->assertSame('cart_reminder', $this->askedPurpose);
+        // the email is a Notification contact of the cart's website; the cart's state points to it
+        $this->assertSame([[1, 'a@test.com']], $this->savedContacts);
+        $this->assertStringContainsString('INSERT IGNORE INTO ck_abandoned_cart (quote_id)', $this->queries[0][0]);
+        $this->assertSame([42], $this->queries[0][1]);
+        $this->assertSame(self::joined(), $this->updates[0]['table']);
         $data = $this->updates[0]['data'];
-        $this->assertSame('a@test.com', $data['ck_abandoned_email']);
-        $this->assertSame('cid-1', $data['ck_abandoned_consent_id']);
-        $this->assertSame('browser-hash', $data['ck_abandoned_browser_hash']);
-        $this->assertArrayNotHasKey('customer_email', $data);
-        $this->assertSame('updated_at', (string)$data['updated_at']);
-        $this->assertStringContainsString("ck_abandoned_email <=> 'a@test.com'", (string)$data['ck_abandoned_email_updated_at']);
+        $this->assertSame(7, $data['c.contact_id']);
+        $this->assertSame('cid-1', $data['c.consent_id']);
+        $this->assertSame('browser-hash', $data['c.browser_hash']);
+        $this->assertStringContainsString('c.contact_id <=> 7', (string)$data['c.captured_at']);
+        $this->assertSame(['c.captured_at', 'c.contact_id', 'c.consent_id', 'c.browser_hash'], array_keys($data),
+            'Magento\'s quote row is not written');
         $where = $this->updates[0]['where'];
-        $this->assertSame(42, $where['entity_id = ?']);
-        $this->assertSame(1, $where['is_active = ?']);
-        $this->assertContains('customer_id IS NULL', self::conditions($where)); // guests only
+        $this->assertSame(42, $where['q.entity_id = ?']);
+        $this->assertSame(1, $where['q.is_active = ?']);
+        $this->assertContains('q.customer_id IS NULL', self::conditions($where)); // guests only
     }
 
     public function testCodexFinding2TheConsentIsCheckedInsideTheSameUpdate(): void
@@ -115,8 +131,8 @@ class GuestEmailCaptureTest extends TestCase
         $capture = $this->capture();
         $this->updateResults = [0];
         $this->assertFalse($capture->capture('masked', 'a@test.com'));
-        $this->assertContains(['is_active = ?', 1], $this->selectWhere);
-        $this->assertContains(['customer_id IS NULL', null], $this->selectWhere);
+        $this->assertContains(['q.is_active = ?', 1], $this->selectWhere);
+        $this->assertContains(['q.customer_id IS NULL', null], $this->selectWhere);
         $this->assertContains(["VALID('cid-1')", null], $this->selectWhere);
     }
 
@@ -126,9 +142,9 @@ class GuestEmailCaptureTest extends TestCase
         $this->updateResults = [0];
         $this->fetchOneResult = 42;
         $this->assertTrue($capture->capture('masked', 'a@test.com'));
-        $this->assertContains(['ck_abandoned_email = ?', 'a@test.com'], $this->selectWhere);
-        $this->assertContains(['ck_abandoned_consent_id = ?', 'cid-1'], $this->selectWhere);
-        $this->assertContains(['ck_abandoned_browser_hash = ?', 'browser-hash'], $this->selectWhere);
+        $this->assertContains(['c.contact_id = ?', 7], $this->selectWhere);
+        $this->assertContains(['c.consent_id = ?', 'cid-1'], $this->selectWhere);
+        $this->assertContains(['c.browser_hash = ?', 'browser-hash'], $this->selectWhere);
     }
 
     public function testOutOfScopeCartCannotStoreOrClearAndDoesNotRecordConsent(): void
@@ -154,7 +170,7 @@ class GuestEmailCaptureTest extends TestCase
         $capture = $this->capture();
         $this->updateResults = [0];
         $this->assertFalse($capture->capture('masked', 'a@test.com'));
-        $this->assertSame(3, $this->updates[0]['where']['store_id = ?']);
-        $this->assertContains(['store_id = ?', 3], $this->selectWhere);
+        $this->assertSame(3, $this->updates[0]['where']['q.store_id = ?']);
+        $this->assertContains(['q.store_id = ?', 3], $this->selectWhere);
     }
 }

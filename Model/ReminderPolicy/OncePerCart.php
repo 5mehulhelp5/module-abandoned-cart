@@ -22,6 +22,6 @@ class OncePerCart implements ReminderPolicyInterface
 
     public function dueCondition(ReminderQuery $query): string
     {
-        return $query->column('ck_abandoned_reminded_at') . ' IS NULL';
+        return $query->column('reminded_at') . ' IS NULL';
     }
 }

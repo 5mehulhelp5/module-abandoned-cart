@@ -7,19 +7,19 @@ use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 
-/** Guests use their captured reminder email; customer carts use Magento's checkout email. */
+/** Guests use their captured reminder email (contact); customer carts use Magento's checkout email. */
 class ReminderEmailResolver implements ReminderEmailResolverInterface
 {
-    public function __construct(private readonly ResourceConnection $resource)
+    public function __construct(private readonly ResourceConnection $resource, private readonly CartTable $carts)
     {
     }
 
     public function resolve(int $quoteId): ?string
     {
         $db = $this->resource->getConnection();
-        $email = $db->fetchOne($db->select()->from($this->resource->getTableName('quote'), [
-            'email' => new Expression((string)$db->getCheckSql('customer_id IS NULL', 'ck_abandoned_email', 'customer_email')),
-        ])->where('entity_id = ?', $quoteId));
+        $email = $db->fetchOne($this->carts->select([], [
+            'email' => new Expression((string)$db->getCheckSql('q.customer_id IS NULL', 'n.email', 'q.customer_email')),
+        ])->where('c.quote_id = ?', $quoteId));
         return $email ? (string)$email : null;
     }
 }

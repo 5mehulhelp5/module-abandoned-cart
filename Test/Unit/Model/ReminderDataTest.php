@@ -58,7 +58,6 @@ class ReminderDataTest extends TestCase
         $billing = $this->mockWith(Address::class, ['getFirstname' => $billingName]);
         return $this->mockWith(Quote::class, [
             'getId' => 42, 'getStoreId' => 1, 'getCustomerFirstname' => $firstname, 'getCustomerEmail' => 'a@test.com',
-            'getData' => fn ($key) => $key === 'ck_abandoned_consent_id' ? 'cid-1' : null,
             'getBillingAddress' => $billing, 'getAllVisibleItems' => $items, 'getGrandTotal' => 2400.0,
         ]);
     }
@@ -74,7 +73,7 @@ class ReminderDataTest extends TestCase
 
     public function testLinksAreSignedAndCarryNoCartKeyOrEmail(): void
     {
-        $vars = $this->data()->build($this->quote());
+        $vars = $this->data()->build($this->quote(), 'cid-1');
         $this->assertSame('https://shop/cartreminder/cart/restore?q=42&t=restore-42', $vars['restore_url']);
         $this->assertSame('https://shop/ckconsent/optout?c=cid-1&t=o', $vars['optout_url']);
         $this->assertStringNotContainsString('a@test.com', $vars['restore_url'] . $vars['optout_url']);
@@ -84,15 +83,15 @@ class ReminderDataTest extends TestCase
 
     public function testTotalAndGreeting(): void
     {
-        $vars = $this->data()->build($this->quote());
+        $vars = $this->data()->build($this->quote(), 'cid-1');
         $this->assertSame('€2,400.00', $vars['grand_total']);
         $this->assertSame('Jane', $vars['customer_name']);
     }
 
     public function testGreetingFallsBackToBillingNameThenEmpty(): void
     {
-        $this->assertSame('Alice', $this->data()->build($this->quote([], null, 'Alice'))['customer_name']);
-        $this->assertSame('', $this->data()->build($this->quote([], null, null))['customer_name']);
+        $this->assertSame('Alice', $this->data()->build($this->quote([], null, 'Alice'), 'cid-1')['customer_name']);
+        $this->assertSame('', $this->data()->build($this->quote([], null, null), 'cid-1')['customer_name']);
     }
 
     public function testItemsWithOptionsQtyPriceAndEscaping(): void
@@ -101,7 +100,7 @@ class ReminderDataTest extends TestCase
             ['label' => 'Page count', 'value' => '150', 'option_type' => 'radio'],
             ['label' => 'Inserts', 'value' => ['Calendar', 'Notes'], 'option_type' => 'multiple'],
             ['label' => 'Empty', 'value' => '', 'option_type' => 'drop_down'],
-        ])->build($this->quote([$this->item('Recipe book <script>x</script>')]))['items_html'];
+        ])->build($this->quote([$this->item('Recipe book <script>x</script>')]), 'cid-1')['items_html'];
 
         $this->assertStringContainsString('Recipe book &lt;script&gt;x&lt;/script&gt;', $html);
         $this->assertStringNotContainsString('<script>', $html);
@@ -122,7 +121,7 @@ class ReminderDataTest extends TestCase
             ['label' => 'Unknown', 'value' => 'x', 'option_type' => null],
             ['label' => 'Page count', 'value' => '150', 'option_type' => 'radio'],
             ['label' => 'Cover', 'value' => 'Blue', 'option_type' => 'checkbox'],
-        ])->build($this->quote([$this->item('Notebook')]))['items_html'];
+        ])->build($this->quote([$this->item('Notebook')]), 'cid-1')['items_html'];
         foreach (['Engraved message', 'evil.example', 'Comment', 'phishing', 'Logo', 'Unknown'] as $text) {
             $this->assertStringNotContainsString($text, $html);
         }
@@ -147,7 +146,7 @@ class ReminderDataTest extends TestCase
             'getName' => 'Configurable product', 'getQty' => 1, 'getPrice' => 2400.0,
         ]);
 
-        $html = $this->data()->build($this->quote([$item]))['items_html'];
+        $html = $this->data()->build($this->quote([$item]), 'cid-1')['items_html'];
         $this->assertSame([$child], $this->imageProducts);
         $this->assertStringContainsString('Color: Blue &amp; white', $html);
         $this->assertStringNotContainsString('evil.example', $html);
@@ -158,7 +157,7 @@ class ReminderDataTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('greetings')]
     public function testGreetingIsOneShortWordOfLetters(string $typed, string $shown): void
     {
-        $this->assertSame($shown, $this->data()->build($this->quote([], $typed))['customer_name']);
+        $this->assertSame($shown, $this->data()->build($this->quote([], $typed), 'cid-1')['customer_name']);
     }
 
     public static function greetings(): array
@@ -180,7 +179,7 @@ class ReminderDataTest extends TestCase
 
     public function testEmptyCartGivesEmptyTable(): void
     {
-        $html = $this->data()->build($this->quote())['items_html'];
+        $html = $this->data()->build($this->quote(), 'cid-1')['items_html'];
         $this->assertStringStartsWith('<table', $html);
         $this->assertStringNotContainsString('<tr>', $html);
     }

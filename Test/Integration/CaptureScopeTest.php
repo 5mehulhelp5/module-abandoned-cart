@@ -3,11 +3,13 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Test\Integration;
 
+use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\ConsentWithdrawal;
 use CommerceKings\AbandonedCart\Model\CustomerConsentCapture;
 use CommerceKings\AbandonedCart\Model\GuestEmailCapture;
 use CommerceKings\AbandonedCart\Model\QuoteScope;
+use CommerceKings\Notification\Api\ContactRepositoryInterface;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\Consent\Api\BrowserIdentityInterface;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
@@ -73,7 +75,13 @@ class CaptureScopeTest extends TestCase
     protected function tearDown(): void
     {
         $db = $this->resource->getConnection();
-        if ($this->quotes) { $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quotes]); }
+        if ($this->quotes) {
+            // contacts this test's carts point to (fixture and captured addresses)
+            $contacts = $db->fetchCol($db->select()->from($this->table('ck_abandoned_cart'), 'contact_id')
+                ->where('quote_id IN (?)', $this->quotes)->where('contact_id IS NOT NULL'));
+            $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quotes]);
+            if ($contacts) { $db->delete($this->table('ck_notification_contact'), ['contact_id IN (?)' => $contacts]); }
+        }
         $registry = $this->om->get(Registry::class);
         $secureArea = $registry->registry('isSecureArea');
         $registry->unregister('isSecureArea');
@@ -105,19 +113,38 @@ class CaptureScopeTest extends TestCase
         $this->om->get(QuoteIdMask::class)->save($mask);
         $this->resource->getConnection()->update($this->table('quote'), [
             'store_id' => $foreign ? $this->foreignStore : (int)$this->stores->getStore()->getId(),
-            'customer_email' => 'fixture@example.test', 'ck_abandoned_consent_id' => 'original',
-            'ck_abandoned_email' => 'captured@example.test', 'ck_abandoned_email_updated_at' => '2026-01-01 00:00:00',
-            'ck_abandoned_browser_hash' => 'original-browser',
+            'customer_email' => 'fixture@example.test',
         ], ['entity_id = ?' => $id]);
+        $this->state($id, ['email' => 'captured@example.test', 'consent_id' => 'original',
+            'captured_at' => '2026-01-01 00:00:00', 'browser_hash' => 'original-browser']);
         return [$id, (string)$mask->getMaskedId()];
     }
 
+    /** Write the cart's reminder state; "email" becomes the guest contact of the cart's website. */
+    private function state(int $id, array $values): void
+    {
+        if (isset($values['email'])) {
+            $storeId = (int)$this->resource->getConnection()->fetchOne($this->resource->getConnection()->select()
+                ->from($this->table('quote'), 'store_id')->where('entity_id = ?', $id));
+            $this->stores->reinitStores();
+            $values['contact_id'] = $this->om->get(ContactRepositoryInterface::class)
+                ->save((int)$this->stores->getStore($storeId)->getWebsiteId(), $values['email']);
+            unset($values['email']);
+        }
+        $carts = $this->om->get(CartTable::class);
+        $carts->ensure($id);
+        $this->resource->getConnection()->update($carts->name(), $values, ['quote_id = ?' => $id]);
+    }
+
+    /** The quote with its reminder state and guest email. */
     private function row(int $id): array
     {
         return $this->resource->getConnection()->fetchRow($this->resource->getConnection()->select()
-            ->from($this->table('quote'), ['store_id', 'customer_email', 'ck_abandoned_email', 'ck_abandoned_email_updated_at',
-                'ck_abandoned_consent_id', 'ck_abandoned_browser_hash', 'updated_at', 'ck_abandoned_reminded_at'])
-            ->where('entity_id = ?', $id));
+            ->from(['q' => $this->table('quote')], ['store_id', 'customer_email', 'updated_at'])
+            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id',
+                ['captured_at', 'consent_id', 'browser_hash', 'reminded_at'])
+            ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = c.contact_id', ['email'])
+            ->where('q.entity_id = ?', $id));
     }
 
     private function consent(int $website = 0, string $purpose = Config::PURPOSE): ConsentInterface
@@ -146,7 +173,8 @@ class CaptureScopeTest extends TestCase
         [$guard, $browser, $config] = $this->dependencies($enabled, $guardValid);
         return new GuestEmailCapture($this->om->get(QuoteIdMaskFactory::class), $this->om->get(QuoteIdMask::class),
             $this->resource, $consent ?? $this->consent(), $guard, $browser,
-            $this->om->get(ConsentWithdrawal::class), $config, $scope ?? $this->om->get(QuoteScope::class));
+            $this->om->get(ConsentWithdrawal::class), $config, $scope ?? $this->om->get(QuoteScope::class),
+            $this->om->get(CartTable::class), $this->om->get(ContactRepositoryInterface::class), $this->stores);
     }
 
     public function testAnotherWebsiteCannotCaptureOrClearEvenWithItsMaskedKey(): void
@@ -168,15 +196,15 @@ class CaptureScopeTest extends TestCase
         $guest = $this->guest();
         $this->assertTrue($guest->capture($mask, 'new@example.test'));
         $this->assertTrue($guest->capture($mask, 'new@example.test'));
-        $this->assertSame('new-consent', $this->row($id)['ck_abandoned_consent_id']);
-        $this->assertSame('new@example.test', $this->row($id)['ck_abandoned_email']);
+        $this->assertSame('new-consent', $this->row($id)['consent_id']);
+        $this->assertSame('new@example.test', $this->row($id)['email']);
         $this->assertSame('fixture@example.test', $this->row($id)['customer_email']);
         $this->assertSame($nativeUpdatedAt, $this->row($id)['updated_at']);
         $this->assertFalse($guest->capture($mask, ''));
-        $this->assertNull($this->row($id)['ck_abandoned_email']);
-        $this->assertNull($this->row($id)['ck_abandoned_email_updated_at']);
+        $this->assertNull($this->row($id)['email']);
+        $this->assertNull($this->row($id)['captured_at']);
         $this->assertSame('fixture@example.test', $this->row($id)['customer_email']);
-        $this->assertNull($this->row($id)['ck_abandoned_consent_id']);
+        $this->assertNull($this->row($id)['consent_id']);
     }
 
     public function testStoreChangeAfterAuthorizationCannotWriteOrClear(): void
@@ -190,7 +218,7 @@ class CaptureScopeTest extends TestCase
         });
         $scope->method('matches')->willReturn(true);
         $this->assertFalse($this->guest(scope: $scope)->capture($mask, 'new@example.test'));
-        $this->assertSame('original', $this->row($id)['ck_abandoned_consent_id']);
+        $this->assertSame('original', $this->row($id)['consent_id']);
         $this->assertFalse($this->guest(scope: $scope, enabled: false)->capture($mask, ''));
         $this->assertSame('fixture@example.test', $this->row($id)['customer_email']);
     }
@@ -214,7 +242,8 @@ class CaptureScopeTest extends TestCase
         $scope->method('find')->willReturn(['store_id' => (int)$this->stores->getStore()->getId()]);
         $scope->method('matches')->willReturn(true);
         [$guard, $browser, $config] = $this->dependencies();
-        $customer = new CustomerConsentCapture($this->resource, $this->consent(), $guard, $browser, $config, $scope);
+        $customer = new CustomerConsentCapture($this->resource, $this->consent(), $guard, $browser, $config, $scope,
+            $this->om->get(CartTable::class));
         $this->assertFalse($customer->execute($id, 123));
         $this->assertSame($before, $this->row($id));
     }
@@ -223,20 +252,20 @@ class CaptureScopeTest extends TestCase
     {
         [$id, $mask] = $this->quote();
         $db = $this->resource->getConnection();
-        $db->update($this->table('quote'), ['ck_abandoned_reminded_at' => '2026-01-01 00:00:00',
-            'updated_at' => '2026-01-01 00:00:00'], ['entity_id = ?' => $id]);
+        $db->update($this->table('quote'), ['updated_at' => '2026-01-01 00:00:00'], ['entity_id = ?' => $id]);
+        $this->state($id, ['reminded_at' => '2026-01-01 00:00:00']);
         $before = $this->row($id);
         $guest = $this->guest();
         $this->assertTrue($guest->capture($mask, 'captured@example.test'));
-        $this->assertSame($before['ck_abandoned_email_updated_at'], $this->row($id)['ck_abandoned_email_updated_at']);
+        $this->assertSame($before['captured_at'], $this->row($id)['captured_at']);
         $this->assertTrue($guest->capture($mask, 'changed@example.test'));
         $changed = $this->row($id);
-        $this->assertGreaterThan($before['ck_abandoned_email_updated_at'], $changed['ck_abandoned_email_updated_at']);
+        $this->assertGreaterThan($before['captured_at'], $changed['captured_at']);
         $this->assertSame($before['updated_at'], $changed['updated_at']);
         $this->assertSame($before['customer_email'], $changed['customer_email']);
-        $this->assertSame($before['ck_abandoned_reminded_at'], $changed['ck_abandoned_reminded_at']);
+        $this->assertSame($before['reminded_at'], $changed['reminded_at']);
         $this->assertTrue($guest->capture($mask, 'changed@example.test'));
-        $this->assertSame($changed['ck_abandoned_email_updated_at'], $this->row($id)['ck_abandoned_email_updated_at']);
+        $this->assertSame($changed['captured_at'], $this->row($id)['captured_at']);
     }
 
     public function testGuestResolverUsesOnlyTheCapturedRecipient(): void
@@ -273,8 +302,9 @@ class CaptureScopeTest extends TestCase
         $this->customers[] = (int)$customer->getId();
         $db = $this->resource->getConnection();
         $oldConsent = bin2hex(random_bytes(16));
-        $db->update($this->table('quote'), ['ck_abandoned_consent_id' => $oldConsent,
-            'ck_abandoned_reminded_at' => '2026-01-01 00:00:00'], ['entity_id IN (?)' => [$guest, $registered]]);
+        foreach ([$guest, $registered] as $id) {
+            $this->state($id, ['consent_id' => $oldConsent, 'reminded_at' => '2026-01-01 00:00:00']);
+        }
         $db->update($this->table('quote'), ['customer_id' => (int)$customer->getId()], ['entity_id = ?' => $registered]);
         $before = [$guest => $this->row($guest), $registered => $this->row($registered)];
         $newBefore = $this->row($newGrant);
@@ -288,10 +318,10 @@ class CaptureScopeTest extends TestCase
         $handler->execute($context); // At-least-once retry is harmless.
         foreach ([$guest, $registered] as $id) {
             $after = $this->row($id);
-            foreach (['ck_abandoned_email', 'ck_abandoned_email_updated_at', 'ck_abandoned_consent_id', 'ck_abandoned_browser_hash'] as $field) {
+            foreach (['email', 'captured_at', 'consent_id', 'browser_hash'] as $field) {
                 $this->assertNull($after[$field]);
             }
-            foreach (['customer_email', 'updated_at', 'ck_abandoned_reminded_at'] as $field) {
+            foreach (['customer_email', 'updated_at', 'reminded_at'] as $field) {
                 $this->assertSame($before[$id][$field], $after[$field]);
             }
         }

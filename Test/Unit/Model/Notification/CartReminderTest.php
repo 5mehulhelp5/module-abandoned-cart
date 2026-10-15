@@ -36,8 +36,8 @@ class CartReminderTest extends TestCase
 
     private const ROW = [
         'is_active' => '1', 'items_count' => '2', 'customer_email' => 'a@test.com', 'store_id' => '1',
-        'customer_id' => null, 'ck_abandoned_email' => 'a@test.com', 'ck_abandoned_email_updated_at' => null,
-        'ck_abandoned_reminded_at' => null, 'ck_abandoned_consent_id' => 'cid-1', 'updated_at' => '2026-10-01 12:00:00',
+        'customer_id' => null, 'contact_id' => '7', 'captured_at' => null,
+        'reminded_at' => null, 'consent_id' => 'cid-1', 'updated_at' => '2026-10-01 12:00:00',
     ];
 
     private array $logs = [];
@@ -105,7 +105,7 @@ class CartReminderTest extends TestCase
         $builder->method('getTransport')->willReturn($transport);
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn () => $this->recipientSequence !== null
-            ? array_shift($this->recipientSequence) : ($row ? ($row['customer_id'] === null ? $row['ck_abandoned_email'] : $row['customer_email']) : null));
+            ? array_shift($this->recipientSequence) : ($row ? ($row['customer_id'] === null ? ($row['contact_id'] ? 'a@test.com' : null) : $row['customer_email']) : null));
         $history = $this->createStub(CooldownInterface::class);
         $history->method('claim')->willReturnCallback(function () {
             if ($this->recipientClaimed) { return null; }
@@ -119,7 +119,7 @@ class CartReminderTest extends TestCase
         $notificationConfig = $this->createStub(NotificationConfig::class);
         $notificationConfig->method('getCooldownDays')->willReturn(7);
         $mailer = new Mailer($builder, $this->emulation, $history, $notificationConfig);
-        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig);
+        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig, $this->carts());
     }
 
     /** @dataProvider skipCases */
@@ -138,9 +138,9 @@ class CartReminderTest extends TestCase
             'cart gone' => [false, true, false, 'cart gone'],
             'ordered' => [['is_active' => '0'] + self::ROW, true, false, 'ordered / closed'],
             'empty' => [['items_count' => '0'] + self::ROW, true, false, 'empty'],
-            'no email' => [['ck_abandoned_email' => null] + self::ROW, true, false, 'no email'],
-            'consent cleared after queuing' => [['ck_abandoned_consent_id' => null] + self::ROW, true, false, 'no consent'],
-            'already reminded' => [['ck_abandoned_reminded_at' => '2026-10-10 09:00:00'] + self::ROW, true, false, 'reminder policy'],
+            'no email' => [['contact_id' => null] + self::ROW, true, false, 'no email'],
+            'consent cleared after queuing' => [['consent_id' => null] + self::ROW, true, false, 'no consent'],
+            'already reminded' => [['reminded_at' => '2026-10-10 09:00:00'] + self::ROW, true, false, 'reminder policy'],
             'consent withdrawn / expired / old revision' => [self::ROW, true, true, 'consent withdrawn / expired'],
             'module disabled' => [self::ROW, false, false, 'disabled'],
         ];
@@ -161,8 +161,8 @@ class CartReminderTest extends TestCase
         $consumer->process('42');
         $consumer->process('43');
         $this->assertSame(1, $this->sentMessages);
-        $this->assertNull($this->updates[2]['data']['ck_abandoned_reminded_at']);
-        $this->assertNull($this->updates[2]['data']['ck_abandoned_queued_at']);
+        $this->assertNull($this->updates[2]['data']['reminded_at']);
+        $this->assertNull($this->updates[2]['data']['queued_at']);
         $this->assertSame([], $this->releasedRecipients);
     }
 
@@ -203,11 +203,11 @@ class CartReminderTest extends TestCase
             $state->quoteId === 42 && $state->storeId === 1 && $state->lastRemindedAt === $last
             && $state->getAttribute('updated_at') === self::ROW['updated_at']))->willReturn(true);
         $this->policy->expects($this->once())->method('dueCondition')->with($this->callback(fn (ReminderQuery $query) =>
-            $query->storeId === 1 && $query->column('entity_id') === 'entity_id'))->willReturn('CUSTOM_POLICY');
-        $this->consumer(['ck_abandoned_reminded_at' => $last] + self::ROW)->process('42');
+            $query->storeId === 1 && $query->column('quote_id') === 'c.quote_id'))->willReturn('CUSTOM_POLICY');
+        $this->consumer(['reminded_at' => $last] + self::ROW)->process('42');
         $this->assertSame(1, $this->sentMessages);
         $this->assertContains('CUSTOM_POLICY', self::conditions($this->updates[0]['where']));
-        $this->assertContains("ck_abandoned_reminded_at = '$last'", self::conditions($this->updates[0]['where']));
+        $this->assertContains("c.reminded_at = '$last'", self::conditions($this->updates[0]['where']));
     }
 
     public function testFailedDeliveryRestoresAlternativePolicyState(): void
@@ -218,13 +218,13 @@ class CartReminderTest extends TestCase
         $this->sendFails = true;
         $last = '2026-10-01 12:00:00';
         try {
-            $this->consumer(['ck_abandoned_reminded_at' => $last] + self::ROW)->process('42');
+            $this->consumer(['reminded_at' => $last] + self::ROW)->process('42');
             $this->fail('transport should fail');
         } catch (\RuntimeException $error) {
             $this->assertSame('SMTP down', $error->getMessage());
         }
-        $this->assertSame($last, $this->updates[1]['data']['ck_abandoned_reminded_at']);
-        $this->assertNull($this->updates[1]['data']['ck_abandoned_queued_at']);
+        $this->assertSame($last, $this->updates[1]['data']['reminded_at']);
+        $this->assertNull($this->updates[1]['data']['queued_at']);
     }
 
     public function testUnsupportedCartRepresentationReleasesCartClaimWithoutSending(): void
@@ -240,9 +240,10 @@ class CartReminderTest extends TestCase
         }
         $this->assertSame([], $this->mail);
         $this->assertCount(2, $this->updates);
-        $this->assertNull($this->updates[1]['data']['ck_abandoned_reminded_at']);
-        $this->assertNull($this->updates[1]['data']['ck_abandoned_queued_at']);
-        $this->assertSame(42, $this->updates[1]['where']['entity_id = ?']);
+        $this->assertNull($this->updates[1]['data']['reminded_at']);
+        $this->assertNull($this->updates[1]['data']['queued_at']);
+        $this->assertSame('ck_abandoned_cart', $this->updates[1]['table']);
+        $this->assertSame(42, $this->updates[1]['where']['quote_id = ?']);
     }
 
     public function testClaimsThenSends(): void
@@ -253,18 +254,20 @@ class CartReminderTest extends TestCase
         $consumer->process('42');
 
         $claim = $this->updates[0];
-        $this->assertSame('NOW()', (string)$claim['data']['ck_abandoned_reminded_at']);
-        $this->assertSame('updated_at', (string)$claim['data']['updated_at']);
-        $this->assertSame(42, $claim['where']['entity_id = ?']);
-        $this->assertContains('ck_abandoned_reminded_at IS NULL', self::conditions($claim['where']));
+        $this->assertSame(self::joined(), $claim['table']);
+        $this->assertSame(['c.reminded_at'], array_keys($claim['data']), 'Magento\'s quote row is not written');
+        $this->assertSame('NOW()', (string)$claim['data']['c.reminded_at']);
+        $this->assertSame(42, $claim['where']['c.quote_id = ?']);
+        $this->assertContains('c.reminded_at IS NULL', self::conditions($claim['where']));
         // Codex finding 1: the claim repeats the cart and consent checks in the same statement
-        $this->assertSame(1, $claim['where']['is_active = ?']);
-        $this->assertContains('items_count > 0', self::conditions($claim['where']));
-        $this->assertSame('a@test.com', $claim['where']['ck_abandoned_email <=> ?']);
-        $this->assertSame('cid-1', $claim['where']['ck_abandoned_consent_id = ?']);
-        $this->assertContains('VALID(ck_abandoned_consent_id)', self::conditions($claim['where']));
+        $this->assertSame(1, $claim['where']['q.is_active = ?']);
+        $this->assertContains('q.items_count > 0', self::conditions($claim['where']));
+        $this->assertSame('7', $claim['where']['c.contact_id <=> ?']);
+        $this->assertSame('cid-1', $claim['where']['c.consent_id = ?']);
+        $this->assertContains('VALID(c.consent_id)', self::conditions($claim['where']));
         $this->assertContains('NOT_EXPIRED(updated_at,1)', self::conditions($claim['where']));
-        $this->assertContains('updated_at <= NOW() - INTERVAL 180 MINUTE', self::conditions($claim['where']));
+        $this->assertContains('q.updated_at <= NOW() - INTERVAL 180 MINUTE', self::conditions($claim['where']));
+        $this->assertContains('(c.captured_at IS NULL OR c.captured_at <= NOW() - INTERVAL 180 MINUTE)', self::conditions($claim['where']));
 
         $this->assertSame(['tpl'], $this->mail['setTemplateIdentifier']);
         $this->assertSame(['custom1', 1], $this->mail['setFromByScope']);
@@ -292,7 +295,7 @@ class CartReminderTest extends TestCase
 
     public function testRecentGuestEmailChangePostponesDelivery(): void
     {
-        $this->consumer(['ck_abandoned_email_updated_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
+        $this->consumer(['captured_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
         $this->assertSame([], $this->updates);
         $this->assertSame([], $this->mail);
     }
@@ -303,15 +306,24 @@ class CartReminderTest extends TestCase
         $this->consumer()->process('42');
         $this->assertSame([], $this->mail);
         $this->assertCount(2, $this->updates);
-        $this->assertNull($this->updates[1]['data']['ck_abandoned_reminded_at']);
-        $this->assertNull($this->updates[1]['data']['ck_abandoned_queued_at']);
+        $this->assertNull($this->updates[1]['data']['reminded_at']);
+        $this->assertNull($this->updates[1]['data']['queued_at']);
     }
 
     public function testCustomerUsesMagentoEmailAndIgnoresOldGuestCapture(): void
     {
-        $this->consumer(['customer_id' => 7, 'customer_email' => 'account@test.com',
-            'ck_abandoned_email_updated_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
+        $this->consumer(['customer_id' => 7, 'customer_email' => 'account@test.com', 'contact_id' => '7',
+            'captured_at' => '2026-10-01 12:00:00'] + self::ROW)->process('42');
         $this->assertSame(['account@test.com', 'Jane'], $this->mail['addTo']);
+    }
+
+    public function testRecentCaptureChangePostponesCustomersToo(): void
+    {
+        // a customer's consent change stamps captured_at, as a guest's email change does
+        $this->consumer(['customer_id' => 7, 'customer_email' => 'account@test.com',
+            'captured_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
+        $this->assertSame([], $this->updates);
+        $this->assertSame([], $this->mail);
     }
 
     public function testSendErrorReleasesCartClaimAndRethrows(): void
@@ -326,9 +338,9 @@ class CartReminderTest extends TestCase
             $this->assertSame('SMTP down', $e->getMessage());
         }
         $release = $this->updates[1];
-        $this->assertNull($release['data']['ck_abandoned_reminded_at']);
-        $this->assertNull($release['data']['ck_abandoned_queued_at']);
-        $this->assertSame('updated_at', (string)$release['data']['updated_at']);
+        $this->assertNull($release['data']['reminded_at']);
+        $this->assertNull($release['data']['queued_at']);
+        $this->assertSame(['reminded_at', 'queued_at'], array_keys($release['data']), 'only the cart state is released');
     }
 
     public function testOneClickHeadersAreOptionalAndDoNotReplaceTemplateVariables(): void
@@ -359,7 +371,7 @@ class CartReminderTest extends TestCase
             $this->assertStringContainsString('HTTPS', $error->getMessage());
         }
         $this->assertSame(0, $this->sentMessages);
-        $this->assertNull($this->updates[1]['data']['ck_abandoned_reminded_at']);
+        $this->assertNull($this->updates[1]['data']['reminded_at']);
     }
 
     public function testUnsupportedOneClickMessageDoesNotSendAndReleasesTheClaim(): void
@@ -374,7 +386,7 @@ class CartReminderTest extends TestCase
         }
         $this->assertSame(0, $this->sentMessages);
         $this->assertCount(2, $this->updates);
-        $this->assertNull($this->updates[1]['data']['ck_abandoned_reminded_at']);
+        $this->assertNull($this->updates[1]['data']['reminded_at']);
     }
 
     public function testPostSendCleanupFailureCannotReleaseTheClaimForAnotherEmail(): void

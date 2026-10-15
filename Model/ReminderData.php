@@ -41,7 +41,8 @@ class ReminderData
     ) {
     }
 
-    public function build(Quote $quote): array
+    /** @param string $consentId the consent the reminder was captured with (its withdrawal link) */
+    public function build(Quote $quote, string $consentId): array
     {
         $this->url->setScope($quote->getStoreId());
         return [
@@ -57,7 +58,7 @@ class ReminderData
             ]),
             'store_url' => $this->url->getUrl('', ['_nosid' => true]),
             'contact_url' => $this->url->getUrl('contact', ['_nosid' => true]),
-            'optout_url' => $this->withdrawalLinks->getUrl((string)$quote->getData('ck_abandoned_consent_id')),
+            'optout_url' => $this->withdrawalLinks->getUrl($consentId),
         ];
     }
 
