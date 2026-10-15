@@ -7,13 +7,13 @@ Install in a Magento project after the first release is published, in one of two
 | Setup | Packages | Tables | Reminders |
 |---|---|---|---|
 | **Consent** (banner) | `commercekings/module-abandoned-cart` + `commercekings/module-consent-notification` + a consent banner (e.g. `commercekings/module-consent-vanilla`) | `ck_notification_*`, `ck_abandoned_cart`, `ck_consent*` | only with consent for `cart_reminder`; signed restore link (bound to the consenting browser); Consent's unsubscribe page |
-| **Opt-out** | `commercekings/module-abandoned-cart` alone (an opt-out module adds the checkout notice, neutral templates and an unsubscribe page) | `ck_notification_*`, `ck_abandoned_cart` | every subscribed cart; the button opens the cart page (no restore or merge); no unsubscribe line until a link is supplied |
+| **Opt-out** | `commercekings/module-abandoned-cart` + `commercekings/module-abandoned-cart-optout` (checkout notice, neutral template, signed unsubscribe page; without it: no notice and no unsubscribe line) | `ck_notification_*`, `ck_abandoned_cart` | every subscribed cart; the button opens the cart page (no restore or merge) |
 
 ```sh
 # consent setup
 composer require commercekings/module-abandoned-cart:^0.1 commercekings/module-consent-notification:^0.1 commercekings/module-consent-vanilla:^0.1
 # opt-out setup
-composer require commercekings/module-abandoned-cart:^0.1
+composer require commercekings/module-abandoned-cart:^0.1 commercekings/module-abandoned-cart-optout:^0.1
 
 bin/magento setup:upgrade
 bin/magento cache:clean
