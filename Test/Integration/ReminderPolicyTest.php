@@ -601,6 +601,48 @@ class ReminderPolicyTest extends TestCase
         $this->assertSame(1, $this->sent, 'the provider limit holds at send time');
     }
 
+    public function testAWithdrawnQueuedCartDoesNotTakeAPlaceInTheHour(): void
+    {
+        // review 2d88801: its message is dropped unsent by Notification's gate, so its mark must not block others
+        $this->perHour = 1;
+        [$first, $second] = [$this->quote(), $this->quote()];
+        foreach ([$first, $second] as $id) { $this->state($id, ['email' => $id . '-' . $this->email]); }
+        $this->assertSame(1, $this->finder()->execute());
+        $this->resource->getConnection()->delete($this->table(SubscriptionManagement::TABLE),
+            ['type = ?' => CartReminder::CODE, 'reference_id = ?' => $this->published[0]]);
+        $this->assertSame(1, $this->finder()->execute(), 'the other cart is queued; nothing was sent this hour');
+    }
+
+    public function testARecurringPolicyCanScheduleAnotherReminderAfterASuccessfulOne(): void
+    {
+        // review 2d88801: a sent cart kept its queued mark forever, so ReminderPolicyInterface could not recur
+        $this->policy = new class implements ReminderPolicyInterface {
+            public function getDescription(): string { return 'every two minutes'; }
+            public function canSend(\CommerceKings\AbandonedCart\Api\Data\ReminderState $state): bool
+            {
+                return $state->lastRemindedAt === null || $state->lastRemindedAt < gmdate('Y-m-d H:i:s', time() - 120);
+            }
+            public function dueCondition(\CommerceKings\AbandonedCart\Api\Data\ReminderQuery $query): string
+            {
+                $column = $query->column('reminded_at');
+                return "($column IS NULL OR $column < NOW() - INTERVAL 2 MINUTE)";
+            }
+        };
+        $id = $this->quote();
+        $this->assertSame(1, $this->finder()->execute());
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(1, $this->sent);
+        $this->assertNull($this->row($id)['queued_at'], 'sent: no longer waiting in the queue');
+        $this->assertSame(0, $this->finder()->execute(), 'not due again yet');
+        $this->state($id, ['reminded_at' => gmdate('Y-m-d H:i:s', time() - 180)]);
+        // the recipient cooldown is separate from the policy: let it expire too
+        $this->resource->getConnection()->delete($this->table('ck_notification_cooldown'),
+            ['recipient_hash = ?' => $this->cooldown()->hash($this->email)]);
+        $this->assertSame(1, $this->finder()->execute(), 'the policy schedules the next reminder');
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(2, $this->sent);
+    }
+
     public function testAnOldSkippedDeliveryCannotReleaseANewerReservation(): void
     {
         // review c77e0cb: release() did not check which reservation the worker owned

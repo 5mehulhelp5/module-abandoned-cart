@@ -24,7 +24,7 @@ First release. Features:
   failure after the mail server accepted the email never causes a second reminder.
 - **Flash sales:** the finder runs every minute and publishes every due cart; the message broker holds the backlog,
   so throughput follows the number of consumers. One `queued_at` mark per cart (no reservation layer on top of the
-  queue): cleared on skip or failed publish, found again after 24 hours stuck. *Maximum reminders per hour* is
+  queue): cleared on send, skip or failed publish (so custom policies can recur), found again after 24 hours stuck. *Maximum reminders per hour* is
   enforced when publishing and when sending, so it also holds when a backlog drains after an outage. Cursor
   pagination and a 30-second budget per run.
 - **Delivery policy:** replaceable `ReminderPolicyInterface` (default one reminder per cart) with typed state

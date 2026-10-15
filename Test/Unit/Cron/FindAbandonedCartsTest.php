@@ -121,8 +121,8 @@ class FindAbandonedCartsTest extends TestCase
         $stuck = $this->updates[0];
         $this->assertSame('ck_abandoned_cart', $stuck['table']);
         $this->assertSame(['queued_at' => null], $stuck['data'], 'Magento\'s quote row is not written');
-        $this->assertSame(['queued_at < NOW() - INTERVAL 24 HOUR', 'reminded_at IS NULL OR reminded_at < queued_at'],
-            self::conditions($stuck['where']), 'only a mark that never led to a reminder');
+        $this->assertSame(['queued_at < NOW() - INTERVAL 24 HOUR'], self::conditions($stuck['where']),
+            'sending clears the mark, so a day-old mark never led to a reminder');
     }
 
     public function testOnlyWonAtomicClaimsArePublished(): void
@@ -165,7 +165,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertCount(3, $this->updates, 'stuck carts, the first claim, then its mark cleared');
         $this->assertSame(10, $this->updates[1]['where']['c.quote_id = ?']);
         $this->assertSame(['queued_at' => null], $this->updates[2]['data']);
-        $this->assertSame(['quote_id = ?', 'reminded_at IS NULL OR reminded_at < queued_at'], self::conditions($this->updates[2]['where']));
+        $this->assertSame(['quote_id = ?'], self::conditions($this->updates[2]['where']));
         $this->assertSame(10, $this->updates[2]['where']['quote_id = ?'], 'the next run publishes it again');
     }
 

@@ -96,7 +96,7 @@ deleted with the quote by Magento's cart cleanup):
 | Column | Meaning |
 |---|---|
 | `quote_id` | the cart (`quote.entity_id`, foreign key, `ON DELETE CASCADE`) |
-| `queued_at` | handed to the queue by the finder; cleared when the reminder skips, so the cart can be found again |
+| `queued_at` | waiting in the queue; cleared when the reminder is sent or skipped, so the cart can be found again |
 | `reminded_at` | email sent – one reminder per cart |
 
 Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. A guest's address is stored once as a Notification contact; the module keeps no email history, and Notification removes contacts nothing uses any more. Magento's `quote.customer_email` and `quote.updated_at` are never touched. The reminder delay uses the later of cart activity (`quote.updated_at`) and subscription activity (`captured_at`, guests and customers); quote expiry still uses Magento's cart timestamp. A withdrawal deletes the subscription but keeps `queued_at`/`reminded_at`, so opting in again never causes a second reminder. Every claim is one UPDATE over `ck_abandoned_cart` joined to `quote` and the subscription (`Model\CartTable::joined()`), so cart, consent and send history are still checked in the same statement.
@@ -244,8 +244,9 @@ pages of 200 for at most 30 seconds (checked for every candidate and before ever
 the next run continues. Pages use the cart's activity time and id as a cursor, so claiming carts never skips one.
 
 `queued_at` is the only bookkeeping: set in the same statement that checks the cart is still due, so no run – also
-not two at once – publishes a cart twice; cleared when the reminder skips the cart or the publish fails, so the cart
-can be found again. Each cart has at most one message in flight. A cart marked for more than 24 hours without a
+not two at once – publishes a cart twice. It means "waiting in the queue": cleared when the reminder is sent (so a
+custom `ReminderPolicyInterface` can schedule the next one), when the reminder skips the cart, and when the publish
+fails, so the cart can be found again. Each cart has at most one message in flight. A cart marked for more than 24 hours without a
 reminder (a consumer crashed holding its message) is found again. A duplicate message is harmless: the reminder's
 own claim, checked against the cart and its consent at send time, lets one delivery send.
 
@@ -255,7 +256,7 @@ own claim, checked against the cart and its consent at send time, lets one deliv
   A shopper who orders, unsubscribes or changes the cart while its message waits is re-checked at send time and
   skipped; switching the feature off makes waiting messages skip.
 - **Maximum reminders per hour** is the brake for your email provider's rate limit and sender reputation. A finder
-  run publishes only what still fits in the hour (sent plus queued), and every reminder checks it again when
+  run publishes only what still fits in the hour (sent, plus queued carts whose subscription is still valid), and every reminder checks it again when
   sending, under a lock (`commercekings_abandoned_cart_hourly`, held only for the count and the claim), so it holds
   even when a delayed backlog drains after a consumer outage. Carts over it wait for a later hour; none are lost.
 - Run the consumer with `--max-messages` (e.g. 1,000): Magento's email template rendering grows a worker by about

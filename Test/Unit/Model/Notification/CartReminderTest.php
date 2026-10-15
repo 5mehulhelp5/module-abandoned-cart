@@ -143,7 +143,7 @@ class CartReminderTest extends TestCase
         $this->assertCount(1, $this->updates, 'no claim');
         $this->assertSame('ck_abandoned_cart', $this->updates[0]['table']);
         $this->assertSame(['queued_at' => null], $this->updates[0]['data']);
-        $this->assertSame(['quote_id = ?', 'queued_at = ?', 'reminded_at IS NULL OR reminded_at < queued_at'],
+        $this->assertSame(['quote_id = ?', 'queued_at = ?'],
             self::conditions($this->updates[0]['where']));
         $this->assertSame(42, $this->updates[0]['where']['quote_id = ?']);
         $this->assertSame('2026-10-01 12:30:00', $this->updates[0]['where']['queued_at = ?'], 'only the reservation it read');
@@ -283,7 +283,8 @@ class CartReminderTest extends TestCase
         $this->assertContains(['s.subscription_id = ?', 42], $this->selectWhere, 'the reference is the subscription id');
         $claim = $this->updates[0];
         $this->assertSame(self::joined(), $claim['table']);
-        $this->assertSame(['c.reminded_at'], array_keys($claim['data']), 'Magento\'s quote row is not written');
+        $this->assertSame(['c.reminded_at', 'c.queued_at'], array_keys($claim['data']), 'Magento\'s quote row is not written');
+        $this->assertNull($claim['data']['c.queued_at'], 'sent: no longer waiting in the queue');
         $this->assertSame('NOW()', (string)$claim['data']['c.reminded_at']);
         $this->assertSame(42, $claim['where']['c.quote_id = ?']);
         $this->assertContains('c.reminded_at IS NULL', self::conditions($claim['where']));
@@ -316,7 +317,7 @@ class CartReminderTest extends TestCase
         $this->assertSame([], $this->mail);
         $this->assertCount(2, $this->updates, 'the lost claim, then the pending place is released');
         $this->assertSame(['queued_at' => null], $this->updates[1]['data']);
-        $this->assertContains('reminded_at IS NULL OR reminded_at < queued_at', self::conditions($this->updates[1]['where']),
+        $this->assertContains('queued_at = ?', self::conditions($this->updates[1]['where']),
             'never touches a cart another delivery just reminded');
     }
 
@@ -376,7 +377,7 @@ class CartReminderTest extends TestCase
         $this->assertNull($release['data']['reminded_at']);
         $this->assertNull($release['data']['queued_at']);
         $this->assertSame(['reminded_at', 'queued_at'], array_keys($release['data']), 'only the cart state is released');
-        $this->assertSame(self::ROW['queued_at'], $release['where']['queued_at <=> ?'], 'only its own mark');
+        $this->assertContains('queued_at IS NULL', self::conditions($release['where']), 'not over a newer mark');
     }
 
     public function testOneClickHeadersAreOptionalAndDoNotReplaceTemplateVariables(): void
@@ -465,7 +466,7 @@ class CartReminderTest extends TestCase
         $this->fetchOneResult = '4';
         $this->consumer()->process('42');
         $this->assertSame(1, $this->sentMessages);
-        $this->assertSame(['c.reminded_at'], array_keys($this->updates[0]['data']), 'claimed');
+        $this->assertSame(['c.reminded_at', 'c.queued_at'], array_keys($this->updates[0]['data']), 'claimed');
         $this->assertSame('unlock', end($this->lockEvents)[0], 'unlocked before sending finished');
     }
 

@@ -25,13 +25,14 @@ use Psr\Log\LoggerInterface;
  * the backlog and the consumers set the pace; a run publishes for at most MAX_RUN_SECONDS and the next one continues.
  *
  * The cart is marked "queued" in the same statement that checks it is still due, so no run - also not two at once -
- * publishes it twice; the reminder clears the mark when it skips, so a cart can be found again later.
+ * publishes it twice. The mark means "waiting in the queue": the reminder clears it when it sends (so a recurring
+ * policy can schedule the next one) and when it skips (so the cart can be found again later).
  * A failed publish clears the mark at once and the exception reaches cron: the next run publishes again. If the
  * broker had accepted the message after all, the copy is harmless - the reminder's own claim sends once.
  * Safety net: a cart still marked after STUCK_HOURS without a reminder (a consumer crashed holding its message) is
  * found again.
  *
- * "Maximum reminders per hour": a run only publishes what still fits in the hour (sent plus queued); the reminder
+ * "Maximum reminders per hour": a run only publishes what still fits in the hour (sent plus validly queued); the reminder
  * checks it again when sending. Recipient cooldown suppresses recent addresses. Store settings and policy
  * conditions are repeated in the queue claim so a stale selection cannot authorize delivery.
  */
@@ -62,10 +63,8 @@ class FindAbandonedCarts
             return 0;
         }
         $db = $this->resource->getConnection();
-        $stuck = $db->update($this->carts->name(), ['queued_at' => null], [
-            'queued_at < NOW() - INTERVAL ' . self::STUCK_HOURS . ' HOUR',
-            'reminded_at IS NULL OR reminded_at < queued_at',
-        ]);
+        $stuck = $db->update($this->carts->name(), ['queued_at' => null],
+            ['queued_at < NOW() - INTERVAL ' . self::STUCK_HOURS . ' HOUR']);
         if ($stuck) {
             $this->logger->warning(sprintf('CommerceKings_AbandonedCart: %d cart(s) waited over %d hours, queued again',
                 $stuck, self::STUCK_HOURS));
@@ -98,8 +97,7 @@ class FindAbandonedCarts
             try {
                 $this->queue->publish(CartReminder::CODE, (string)$subscriptionId);
             } catch (\Throwable $error) {
-                $db->update($this->carts->name(), ['queued_at' => null],
-                    ['quote_id = ?' => $id, 'reminded_at IS NULL OR reminded_at < queued_at']);
+                $db->update($this->carts->name(), ['queued_at' => null], ['quote_id = ?' => $id]);
                 throw $error;
             }
             if (++$published >= $room) {
@@ -112,13 +110,19 @@ class FindAbandonedCarts
         return $published;
     }
 
-    /** Reminders sent in the last hour plus carts queued and not sent since. */
+    /**
+     * Reminders sent in the last hour plus carts waiting in the queue whose subscription still has a valid consent:
+     * a withdrawn cart's message is dropped unsent, so it does not take a place in the hour.
+     */
     private function sentOrQueuedLastHour(): int
     {
         $db = $this->resource->getConnection();
-        return (int)$db->fetchOne($db->select()->from($this->carts->name(), new Expression('COUNT(*)'))
-            ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'
-                . ' OR (queued_at IS NOT NULL AND (reminded_at IS NULL OR reminded_at < queued_at))'));
+        $sent = (int)$db->fetchOne($db->select()->from($this->carts->name(), new Expression('COUNT(*)'))
+            ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'));
+        $queued = (int)$db->fetchOne($this->carts->select([new Expression('COUNT(*)')])
+            ->where('c.queued_at IS NOT NULL')
+            ->where($this->guard->validCondition('s.consent_id')));
+        return $sent + $queued;
     }
 
     /**

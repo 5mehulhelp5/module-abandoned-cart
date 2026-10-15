@@ -105,7 +105,8 @@ class CartReminder implements NotificationTypeInterface
         $this->carts->ensure($id);
         $claim = fn (): int => $db->update(
             $this->carts->joined(),
-            ['c.reminded_at' => new Expression('NOW()')],
+            // sent: the cart no longer waits in the queue, so a recurring policy can schedule the next reminder
+            ['c.reminded_at' => new Expression('NOW()'), 'c.queued_at' => null],
             [
                 'c.quote_id = ?' => $id,
                 's.subscription_id = ?' => (int)$row['subscription_id'],
@@ -158,7 +159,8 @@ class CartReminder implements NotificationTypeInterface
         $storeId = (int)$row['store_id'];
         $restore = fn () => $db->update($this->carts->name(),
             ['reminded_at' => $row['reminded_at'], 'queued_at' => null],
-            ['quote_id = ?' => $id, 'queued_at <=> ?' => $queuedAt ?? new Expression('NULL')]);
+            // this claim cleared the mark; a newer mark means the cart is queued again - leave that alone
+            ['quote_id = ?' => $id, 'queued_at IS NULL']);
         $message = new Message(
             $storeId,
             $this->config->getTemplate($storeId),
@@ -199,18 +201,15 @@ class CartReminder implements NotificationTypeInterface
 
     /**
      * The cart no longer waits for this message: clear its "queued" mark so the finder can find it again when it is
-     * due. Only the mark this worker read is cleared, and a cart reminded since it was queued is left alone: that
-     * delivery won. (Should a newer mark carry the same second, the worst case is one more message - and the
-     * reminder's claim still sends once.)
+     * due. Only the mark this worker read is cleared; sending clears it too, so a cart sent since is left alone.
+     * (Should a newer mark carry the same second, the worst case is one more message - the claim still sends once.)
      */
     private function release(int $id, ?string $queuedAt): void
     {
         if ($id && $queuedAt !== null) {
-            $this->resource->getConnection()->update($this->carts->name(), ['queued_at' => null], [
-                'quote_id = ?' => $id,
-                'queued_at = ?' => $queuedAt,
-                'reminded_at IS NULL OR reminded_at < queued_at',
-            ]);
+            // sending clears the mark, so an unchanged mark also proves nothing was sent since
+            $this->resource->getConnection()->update($this->carts->name(), ['queued_at' => null],
+                ['quote_id = ?' => $id, 'queued_at = ?' => $queuedAt]);
         }
     }
 
