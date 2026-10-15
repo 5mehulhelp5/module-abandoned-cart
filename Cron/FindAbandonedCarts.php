@@ -152,7 +152,7 @@ class FindAbandonedCarts
                 $delay,
                 $delay,
                 $this->lifetime->validCondition('q.updated_at', $id),
-                $this->policy->dueCondition(new ReminderQuery($id, 'c'))
+                $this->policy->dueCondition(new ReminderQuery($id, 'c', 'q'))
             );
         }
         return $branches ? '(' . implode(' OR ', $branches) . ')' : '0 = 1';

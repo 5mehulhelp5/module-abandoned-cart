@@ -105,7 +105,7 @@ class CartReminder implements NotificationTypeInterface
                 'c.quote_id = ?' => $id,
                 's.subscription_id = ?' => (int)$row['subscription_id'],
                 'q.store_id = ?' => (int)$row['store_id'],
-                $this->policy->dueCondition(new ReminderQuery((int)$row['store_id'], 'c')),
+                $this->policy->dueCondition(new ReminderQuery((int)$row['store_id'], 'c', 'q')),
                 // Compare the state that was checked too, so parallel consumers cannot claim it twice.
                 $row['reminded_at'] === null ? 'c.reminded_at IS NULL'
                     : $db->quoteInto('c.reminded_at = ?', $row['reminded_at']),

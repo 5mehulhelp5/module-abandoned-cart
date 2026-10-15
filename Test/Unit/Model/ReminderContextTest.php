@@ -23,15 +23,22 @@ class ReminderContextTest extends TestCase
         }
     }
 
-    public function testQuerySupportsCartIdentityAndPolicyColumnsInSelectionAndClaims(): void
+    public function testQuerySuppliesTheCartIdAndOnlySendHistoryColumns(): void
     {
-        $selection = new ReminderQuery(2, 'c');
-        $claim = new ReminderQuery(2);
-        $this->assertSame(2, $selection->storeId);
-        $this->assertSame('c.quote_id', $selection->column('quote_id'));
-        $this->assertSame('c.reminded_at', $selection->column('reminded_at'));
-        $this->assertSame('quote_id', $claim->column('quote_id'));
-        $this->assertSame('reminded_at', $claim->column('reminded_at'));
+        $query = new ReminderQuery(2, 'c', 'q');
+        $this->assertSame(2, $query->storeId);
+        $this->assertSame('q.entity_id', $query->quoteId(), 'present in every selection and claim');
+        $this->assertSame('c.reminded_at', $query->column('reminded_at'));
+        $this->assertSame('c.queued_at', $query->column('queued_at'));
+        $this->assertSame('entity_id', (new ReminderQuery(2))->quoteId());
+        foreach (['entity_id', 'quote_id', 'updated_at'] as $column) {
+            try {
+                $query->column($column);
+                $this->fail($column . ' is not a send-history column a policy may use.');
+            } catch (\InvalidArgumentException $error) {
+                $this->assertStringContainsString('quoteId()', $error->getMessage());
+            }
+        }
     }
 
     public function testMalformedSqlIdentifiersAreRejectedBeforeBuildingACondition(): void
@@ -40,6 +47,12 @@ class ReminderContextTest extends TestCase
             try {
                 new ReminderQuery(1, $identifier);
                 $this->fail('Invalid alias was accepted.');
+            } catch (\InvalidArgumentException $error) {
+                $this->assertStringContainsString('alias', $error->getMessage());
+            }
+            try {
+                new ReminderQuery(1, 'c', $identifier);
+                $this->fail('Invalid cart alias was accepted.');
             } catch (\InvalidArgumentException $error) {
                 $this->assertStringContainsString('alias', $error->getMessage());
             }

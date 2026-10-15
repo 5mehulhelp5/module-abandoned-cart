@@ -19,7 +19,7 @@ First release. Features:
   (default seven days), store-emulated rendering and optional RFC 8058 one-click unsubscribe headers. A
   failure after the mail server accepted the email never causes a second reminder.
 - **Delivery policy:** replaceable `ReminderPolicyInterface` (default one reminder per cart) with typed state
-  and SQL contexts; Magento's quote lifetime per store; finder and delivery recheck delay, expiry, cart
+  and SQL contexts (`ReminderQuery::quoteId()` and the send-history columns `queued_at`/`reminded_at`); Magento's quote lifetime per store; finder and delivery recheck delay, expiry, cart
   state and consent. Stale queue claims are released and queued again.
 - **Withdrawal:** Notification's handler, registered for `cart_reminder`, removes the cart's subscription
   while the send history stays, so opting in again cannot cause a second reminder.

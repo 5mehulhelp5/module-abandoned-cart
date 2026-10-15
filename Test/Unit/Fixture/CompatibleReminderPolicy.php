@@ -25,6 +25,6 @@ class CompatibleReminderPolicy implements ReminderPolicyInterface
 
     public function dueCondition(ReminderQuery $query): string
     {
-        return $query->column('entity_id') . ' < 0';
+        return $query->quoteId() . ' < 0 AND ' . $query->column('reminded_at') . ' IS NULL';
     }
 }

@@ -205,7 +205,7 @@ class CartReminderTest extends TestCase
             $state->quoteId === 42 && $state->storeId === 1 && $state->lastRemindedAt === $last
             && $state->getAttribute('updated_at') === self::ROW['updated_at']))->willReturn(true);
         $this->policy->expects($this->once())->method('dueCondition')->with($this->callback(fn (ReminderQuery $query) =>
-            $query->storeId === 1 && $query->column('quote_id') === 'c.quote_id'))->willReturn('CUSTOM_POLICY');
+            $query->storeId === 1 && $query->quoteId() === 'q.entity_id' && $query->column('reminded_at') === 'c.reminded_at'))->willReturn('CUSTOM_POLICY');
         $this->consumer(['reminded_at' => $last] + self::ROW)->process('42');
         $this->assertSame(1, $this->sentMessages);
         $this->assertContains('CUSTOM_POLICY', self::conditions($this->updates[0]['where']));

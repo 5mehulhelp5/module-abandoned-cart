@@ -51,6 +51,8 @@ class ReminderPolicyTest extends TestCase
     private array $storeIds = [];
     private array $quoteIds = [];
     private array $published = [];
+    /** a replaced reminder policy; null = the default OncePerCart */
+    private ?ReminderPolicyInterface $policy = null;
     private int $sent = 0;
     private string $email;
     private bool $sendFails = false;
@@ -216,7 +218,7 @@ class ReminderPolicyTest extends TestCase
         $queue = $this->createStub(QueueInterface::class);
         $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = $this->quoteOf((int)$id); });
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
-            new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
+            $this->policy ?? new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
             $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class));
     }
 
@@ -242,7 +244,7 @@ class ReminderPolicyTest extends TestCase
         $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->cooldown(), $this->notificationConfig());
         return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
             $data, $mailer, $this->config(), $consent, $this->guard(),
-            new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
+            $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
             $this->om->get(ReminderEmailResolverInterface::class),
             $this->createStub(\CommerceKings\Consent\Model\Config::class), $this->om->get(CartTable::class));
     }
@@ -443,6 +445,46 @@ class ReminderPolicyTest extends TestCase
             $this->om->get(CartTable::class), $this->om->get(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class));
         $quote = $this->om->get(CartRepositoryInterfaceFactory::class)->create()->get($id);
         $this->assertFalse($access->isAvailable($quote));
+    }
+
+    public function testFrozenCompatibilityPolicyRunsThroughTheRealFinderSql(): void
+    {
+        $this->policy = new \CommerceKings\AbandonedCart\Test\Unit\Fixture\CompatibleReminderPolicy();
+        $id = $this->quote();
+        // a stale queue claim also runs the release statement with the policy's condition
+        $this->state($id, ['queued_at' => gmdate('Y-m-d H:i:s', time() - 7200)]);
+        $this->assertSame(0, $this->finder()->execute(), 'quote ids are positive: never due, but valid SQL');
+        $this->assertSame([], $this->published);
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(0, $this->sent);
+    }
+
+    public function testHistoryPolicyCanUseTheCartIdInSelectionAndClaimSql(): void
+    {
+        $history = $this->table('ck_abandoned_cart');
+        // a third-party policy with its own history subquery, keyed by the cart id; once per cart like the default
+        $this->policy = new class($history) implements ReminderPolicyInterface {
+            public function __construct(private readonly string $history) {}
+            public function getDescription(): string { return 'history'; }
+            public function canSend(\CommerceKings\AbandonedCart\Api\Data\ReminderState $state): bool
+            {
+                return $state->lastRemindedAt === null;
+            }
+            public function dueCondition(\CommerceKings\AbandonedCart\Api\Data\ReminderQuery $query): string
+            {
+                return sprintf('NOT EXISTS (SELECT 1 FROM %s AS h WHERE h.quote_id = %s AND h.reminded_at IS NOT NULL)'
+                    . ' AND %s IS NULL', $this->history, $query->quoteId(), $query->column('reminded_at'));
+            }
+        };
+        $id = $this->quote();
+        $this->assertNull($this->row($id)['queued_at'], 'never queued: the send history row does not exist yet');
+        $this->assertSame(1, $this->finder()->execute());
+        $this->assertSame([$id], $this->published);
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(1, $this->sent);
+        $this->assertNotNull($this->row($id)['reminded_at']);
+        $this->published = [];
+        $this->assertSame(0, $this->finder()->execute());
     }
 
     public function testAdminPreviewIsReadOnlyAndUsesTheSelectedStoreScope(): void

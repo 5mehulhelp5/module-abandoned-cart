@@ -45,9 +45,12 @@ also need to consider delivery history and per-email restore-link expiry; no rec
 
 The policy contract is finalized before its first public release. `ReminderState` contains quote id,
 store id and the previous reminder timestamp, plus optional attributes (currently the quote's update
-time). `ReminderQuery` supplies the store id and qualified quote-column names for selection/claims.
-A future policy can use the quote id to read its own delivery-history repository in PHP and reference
-the same id in a SQL subquery, without changing this interface.
+time). `ReminderQuery` supplies the store id, `quoteId()` – the cart's id, present in every selection and
+claim – and `column()` for the send-history columns `queued_at` and `reminded_at` (`ReminderQuery::COLUMNS`;
+NULL while a cart was never queued). Any other column is refused when the condition is built. A future policy
+can use the quote id to read its own delivery-history repository in PHP and reference `quoteId()` in a SQL
+subquery, without changing this interface. The SQL regressions run the frozen compatibility fixture and such a
+history-backed policy through the real finder and claim statements.
 
 After publication, policy method signatures and existing context fields keep their meaning. Additive
 optional state is allowed; required constructor parameters, renamed fields or new required interface

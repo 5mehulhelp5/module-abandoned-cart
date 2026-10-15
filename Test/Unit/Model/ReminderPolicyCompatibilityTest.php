@@ -29,13 +29,14 @@ class ReminderPolicyCompatibilityTest extends TestCase
         $policy = new CompatibleReminderPolicy();
         $state = new ReminderState(quoteId: 42, storeId: 1, lastRemindedAt: null,
             attributes: ['future_attribute' => 'new state']);
-        $query = new ReminderQuery(storeId: 1, tableAlias: 'q');
+        $query = new ReminderQuery(storeId: 1, tableAlias: 'c', quoteAlias: 'q');
         $this->assertSame(42, $state->quoteId);
         $this->assertSame(1, $state->storeId);
         $this->assertNull($state->lastRemindedAt);
         $this->assertSame('new state', $state->getAttribute('future_attribute'));
         $this->assertSame('Compatibility fixture', $policy->getDescription());
         $this->assertFalse($policy->canSend($state));
-        $this->assertSame('q.entity_id < 0', $policy->dueCondition($query));
+        $this->assertSame('q.entity_id < 0 AND c.reminded_at IS NULL', $policy->dueCondition($query));
+        // ReminderPolicyTest runs this fixture through the real finder and claim SQL.
     }
 }
