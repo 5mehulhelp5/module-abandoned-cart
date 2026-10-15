@@ -38,14 +38,6 @@
                         <field id="enabled">1</field>
                     </depends>
                 </field>
-                <field id="recipient_cooldown_days" translate="label comment" type="text" sortOrder="37" showInDefault="1" showInWebsite="0" showInStore="0">
-                    <label>Email cooldown (days)</label>
-                    <comment>Minimum gap between reminders to the same address, across all stores. Default: 7 days.</comment>
-                    <validate>validate-digits validate-greater-than-zero</validate>
-                    <depends>
-                        <field id="enabled">1</field>
-                    </depends>
-                </field>
                 <field id="template" translate="label" type="select" sortOrder="40" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Email template</label>
                     <source_model>Magento\Config\Model\Config\Source\Email\Template</source_model>

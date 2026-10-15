@@ -11,7 +11,9 @@ use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
-use Magento\Framework\MessageQueue\PublisherInterface;
+use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
+use CommerceKings\Notification\Api\CooldownInterface;
+use CommerceKings\Notification\Api\QueueInterface;
 use Magento\Store\Api\Data\StoreInterface;
 use Magento\Store\Model\StoreManagerInterface;
 use PHPUnit\Framework\TestCase;
@@ -41,13 +43,13 @@ class FindAbandonedCartsTest extends TestCase
             $values[$id] = $store;
         }
         $stores->method('getStores')->willReturn($values);
-        $publisher = $this->createStub(PublisherInterface::class);
-        $publisher->method('publish')->willReturnCallback(function ($topic, $id) { $this->published[] = [$topic, $id]; });
+        $queue = $this->createStub(QueueInterface::class);
+        $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = [$type, $id]; });
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn ($id) => in_array($id, $this->unresolved, true) ? null : 'fixture@example.test');
-        $history = $this->createStub(\CommerceKings\AbandonedCart\Model\RecipientHistory::class);
+        $history = $this->createStub(CooldownInterface::class);
         $history->method('isRecent')->willReturnCallback(fn () => $this->recent);
-        return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $publisher,
+        return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue,
             $this->policy ?? new OncePerCart(), $lifetime, $stores, $this->createStub(LoggerInterface::class), $recipients, $history);
     }
 
@@ -109,7 +111,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->fetchColResult = ['10', '11', '12'];
         $this->updateResults = [0, 1, 0, 1];
         $this->assertSame(2, $this->finder()->execute());
-        $this->assertSame([[FindAbandonedCarts::TOPIC, '10'], [FindAbandonedCarts::TOPIC, '12']], $this->published);
+        $this->assertSame([[CartReminder::CODE, '10'], [CartReminder::CODE, '12']], $this->published);
         $claim = $this->updates[1];
         $this->assertSame('NOW()', (string)$claim['data']['ck_abandoned_queued_at']);
         $this->assertSame('updated_at', (string)$claim['data']['updated_at']);
@@ -139,7 +141,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->unresolved = range(1, 200);
         $this->fetchColResults = [range(1, 200), [201]];
         $this->assertSame(1, $this->finder()->execute());
-        $this->assertSame([[FindAbandonedCarts::TOPIC, '201']], $this->published);
+        $this->assertSame([[CartReminder::CODE, '201']], $this->published);
         $this->assertSame([[200, 0], [200, 200]], $this->limits);
     }
 }

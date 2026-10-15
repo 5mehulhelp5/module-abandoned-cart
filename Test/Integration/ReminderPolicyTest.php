@@ -9,7 +9,7 @@ use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
-use CommerceKings\AbandonedCart\Model\Consumer;
+use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\AbandonedCart\Model\QuoteScope;
@@ -27,7 +27,10 @@ use Magento\Framework\App\State;
 use Magento\Framework\Data\FormFactory;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Framework\Mail\TransportInterface;
-use Magento\Framework\MessageQueue\PublisherInterface;
+use CommerceKings\Notification\Api\QueueInterface;
+use CommerceKings\Notification\Model\Config as NotificationConfig;
+use CommerceKings\Notification\Model\Cooldown;
+use CommerceKings\Notification\Model\Mailer;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\CartRepositoryInterfaceFactory;
@@ -78,7 +81,7 @@ class ReminderPolicyTest extends TestCase
         if ($this->quoteIds) {
             $emails = $db->fetchCol($db->select()->from($this->table('quote'), 'ck_abandoned_email')->where('entity_id IN (?)', $this->quoteIds));
             $hashes = array_map(fn ($email) => $this->history()->hash($email), array_filter($emails));
-            if ($hashes) { $db->delete($this->table('ck_abandoned_cart_recipient'), ['recipient_hash IN (?)' => $hashes]); }
+            if ($hashes) { $db->delete($this->table('ck_notification_cooldown'), ['recipient_hash IN (?)' => $hashes]); }
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quoteIds]);
         }
         if ($this->storeIds) { $db->delete($this->table('store'), ['store_id IN (?)' => array_values($this->storeIds)]); }
@@ -115,7 +118,6 @@ class ReminderPolicyTest extends TestCase
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturnCallback(fn ($id) => in_array($id, $this->storeIds, true));
         $config->method('getDelayMinutes')->willReturn(1);
-        $config->method('getRecipientCooldownDays')->willReturn(7);
         $config->method('getTemplate')->willReturn('fixture');
         $config->method('getIdentity')->willReturn('general');
         return $config;
@@ -128,11 +130,18 @@ class ReminderPolicyTest extends TestCase
         return new QuoteLifetime($config);
     }
 
-    private function history(): \CommerceKings\AbandonedCart\Model\RecipientHistory
+    private function notificationConfig(): NotificationConfig
     {
-        return new \CommerceKings\AbandonedCart\Model\RecipientHistory($this->resource,
+        $config = $this->createStub(NotificationConfig::class);
+        $config->method('getCooldownDays')->willReturn(7);
+        return $config;
+    }
+
+    private function history(): Cooldown
+    {
+        return new Cooldown($this->resource,
             $this->om->get(\Magento\Framework\Encryption\EncryptorInterface::class),
-            $this->om->get(\Magento\Framework\Math\Random::class), $this->config());
+            $this->om->get(\Magento\Framework\Math\Random::class), $this->notificationConfig());
     }
 
     private function guard(): ConsentGuardInterface
@@ -146,14 +155,14 @@ class ReminderPolicyTest extends TestCase
     {
         $stores = $this->createStub(StoreManagerInterface::class);
         $stores->method('getStores')->willReturn(array_map(fn ($id) => $this->stores->getStore($id), $this->storeIds));
-        $publisher = $this->createStub(PublisherInterface::class);
-        $publisher->method('publish')->willReturnCallback(function ($topic, $id) { $this->published[] = (int)$id; });
-        return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $publisher,
+        $queue = $this->createStub(QueueInterface::class);
+        $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = (int)$id; });
+        return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
             new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
             $this->om->get(ReminderEmailResolverInterface::class), $this->history());
     }
 
-    private function consumer(): Consumer
+    private function consumer(): CartReminder
     {
         $consent = $this->createStub(ConsentInterface::class);
         $consent->method('isValid')->willReturn(true);
@@ -172,11 +181,12 @@ class ReminderPolicyTest extends TestCase
         $builder->method('getTransport')->willReturn($transport);
         $data = $this->createStub(ReminderData::class);
         $data->method('build')->willReturn(['customer_name' => '']);
-        return new Consumer($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
-            $data, $builder, $this->createStub(Emulation::class), $this->config(), $consent, $this->guard(),
+        $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->history(), $this->notificationConfig());
+        return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
+            $data, $mailer, $this->config(), $consent, $this->guard(),
             new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
             $this->om->get(ReminderEmailResolverInterface::class),
-            $this->createStub(\CommerceKings\Consent\Model\Config::class), $this->history());
+            $this->createStub(\CommerceKings\Consent\Model\Config::class));
     }
 
     public function testFinderUsesEachQuotesStoreLifetimeRatherThanTheOldSevenDaySetting(): void
@@ -220,8 +230,8 @@ class ReminderPolicyTest extends TestCase
         $second = $this->quote();
         $this->consumer()->process((string)$first);
         $this->assertSame(0, $this->finder()->execute());
-        $this->resource->getConnection()->update($this->table('ck_abandoned_cart_recipient'),
-            ['reminded_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)],
+        $this->resource->getConnection()->update($this->table('ck_notification_cooldown'),
+            ['sent_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)],
             ['recipient_hash = ?' => $this->history()->hash($this->email)]);
         $this->assertSame(1, $this->finder()->execute());
         $this->assertSame([$second], $this->published);
@@ -251,8 +261,8 @@ class ReminderPolicyTest extends TestCase
         $this->assertNull($history->claim($this->email));
         $history->release($this->email, str_repeat('0', 32));
         $this->assertTrue($history->isRecent($this->email));
-        $this->resource->getConnection()->update($this->table('ck_abandoned_cart_recipient'),
-            ['reminded_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)],
+        $this->resource->getConnection()->update($this->table('ck_notification_cooldown'),
+            ['sent_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)],
             ['recipient_hash = ?' => $history->hash($this->email)]);
         $replacement = $history->claim($this->email);
         $this->assertNotNull($replacement);

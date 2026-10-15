@@ -8,18 +8,19 @@ use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
-use CommerceKings\AbandonedCart\Model\RecipientHistory;
+use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
+use CommerceKings\Notification\Api\CooldownInterface;
+use CommerceKings\Notification\Api\QueueInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
-use Magento\Framework\MessageQueue\PublisherInterface;
 use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
  * Every 15 minutes: carts that have items and an email, were not ordered, have been untouched for
  * the configured delay, unexpired under Magento's quote lifetime and eligible under the reminder
- * policy -> one message per cart to the queue. The cart is
+ * policy -> one message per cart to CommerceKings_Notification's queue. The cart is
  * marked "queued" first, so the next run does not publish it again.
  *
  * Stale claims: a cart queued more than STALE_MINUTES ago but never reminded (publish failed, or the
@@ -31,7 +32,6 @@ use Psr\Log\LoggerInterface;
  */
 class FindAbandonedCarts
 {
-    public const TOPIC = 'commercekings.abandoned_cart.remind';
     private const BATCH = 200;
     private const STALE_MINUTES = 60;
 
@@ -39,13 +39,13 @@ class FindAbandonedCarts
         private readonly Config $config,
         private readonly ResourceConnection $resource,
         private readonly ConsentGuardInterface $guard,
-        private readonly PublisherInterface $publisher,
+        private readonly QueueInterface $queue,
         private readonly ReminderPolicyInterface $policy,
         private readonly QuoteLifetime $lifetime,
         private readonly StoreManagerInterface $stores,
         private readonly LoggerInterface $logger,
         private readonly ReminderEmailResolverInterface $recipients,
-        private readonly RecipientHistory $history
+        private readonly CooldownInterface $cooldown
     ) {
     }
 
@@ -80,7 +80,7 @@ class FindAbandonedCarts
                 array_merge(['entity_id = ?' => (int)$id], $this->eligibleConditions(''))
             );
             if ($claimed) {
-                $this->publisher->publish(self::TOPIC, (string)$id);
+                $this->queue->publish(CartReminder::CODE, (string)$id);
                 $published++;
             }
         }
@@ -110,7 +110,7 @@ class FindAbandonedCarts
             $ids = $db->fetchCol((clone $select)->limit(self::BATCH, $offset));
             foreach ($ids as $id) {
                 $email = $this->recipients->resolve((int)$id);
-                if ($email !== null && !$this->history->isRecent($email)) {
+                if ($email !== null && !$this->cooldown->isRecent($email)) {
                     $due[] = (int)$id;
                     if (count($due) === self::BATCH) {
                         return $due;

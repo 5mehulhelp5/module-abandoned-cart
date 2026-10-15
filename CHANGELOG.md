@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Sending moved to `commercekings/module-notification`: the shared queue consumer `commerceKingsNotificationSend`
+  replaces `commerceKingsAbandonedCartRemind`, the cooldown table `ck_notification_cooldown` replaces
+  `ck_abandoned_cart_recipient` (dropped on upgrade), and *Email cooldown (days)* moved to CommerceKings > Notifications
+  (0 turns it off). The reminder itself (`Model\Notification\CartReminder`) keeps its checks and atomic claim.
+
 - Use CommerceKings_Core for the shared admin configuration tab and branding.
 
 - Simplify admin wording and use native field dependencies to hide settings while reminders are disabled.

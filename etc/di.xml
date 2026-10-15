@@ -29,6 +29,14 @@
             </argument>
         </arguments>
     </type>
+    <!-- sending: CommerceKings_Notification's shared queue consumer hands cart ids to this type -->
+    <type name="CommerceKings\Notification\Model\TypePool">
+        <arguments>
+            <argument name="types" xsi:type="array">
+                <item name="cart_reminder" xsi:type="object">CommerceKings\AbandonedCart\Model\Notification\CartReminder</item>
+            </argument>
+        </arguments>
+    </type>
     <!-- the consent purpose this feature uses (CommerceKings_Consent) - any consent source can grant it -->
     <type name="CommerceKings\Consent\Model\PurposePool">
         <arguments>

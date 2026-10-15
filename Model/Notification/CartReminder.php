@@ -1,26 +1,32 @@
 <?php
 declare(strict_types=1);
 
-namespace CommerceKings\AbandonedCart\Model;
+namespace CommerceKings\AbandonedCart\Model\Notification;
 
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
+use CommerceKings\AbandonedCart\Model\Config;
+use CommerceKings\AbandonedCart\Model\QuoteLifetime;
+use CommerceKings\AbandonedCart\Model\QuoteScope;
+use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Api\Data\ReminderState;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use CommerceKings\Consent\Model\Config as ConsentConfig;
-use Magento\Framework\App\Area;
+use CommerceKings\Notification\Api\Data\Message;
+use CommerceKings\Notification\Api\Data\MessageContent;
+use CommerceKings\Notification\Api\MailerInterface;
+use CommerceKings\Notification\Api\NotificationTypeInterface;
+use CommerceKings\Notification\Exception\MessageSentException;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
-use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Quote;
-use Magento\Store\Model\App\Emulation;
 use Psr\Log\LoggerInterface;
 
 /**
- * Queue consumer "commerceKingsAbandonedCartRemind". Message = quote id.
+ * Notification type "cart_reminder" (CommerceKings_Notification's shared consumer). Reference = quote id.
  *
  * Messages can arrive twice or late, so everything is re-checked against the current cart:
  * still active (not ordered), has items, an email and a valid consent (CommerceKings_Consent: not
@@ -29,17 +35,19 @@ use Psr\Log\LoggerInterface;
  * The cart is then claimed with one atomic UPDATE that repeats the cart and consent checks - only one
  * delivery can win, and none after a withdrawal is stored. Mail already handed to the mail server can't
  * be recalled.
+ * Sending (recipient cooldown, store emulation, one-click headers) is CommerceKings_Notification's Mailer.
  * If sending fails the claim is released (queued_at too), so the next cron run queues it again;
  * the exception makes Magento log the failure.
  */
-class Consumer
+class CartReminder implements NotificationTypeInterface
 {
+    public const CODE = 'cart_reminder';
+
     public function __construct(
         private readonly ResourceConnection $resource,
         private readonly CartRepositoryInterface $cartRepository,
         private readonly ReminderData $reminderData,
-        private readonly TransportBuilder $transportBuilder,
-        private readonly Emulation $emulation,
+        private readonly MailerInterface $mailer,
         private readonly Config $config,
         private readonly ConsentInterface $consent,
         private readonly ConsentGuardInterface $guard,
@@ -48,14 +56,13 @@ class Consumer
         private readonly QuoteScope $scope,
         private readonly QuoteLifetime $lifetime,
         private readonly ReminderEmailResolverInterface $recipients,
-        private readonly ConsentConfig $consentConfig,
-        private readonly RecipientHistory $history
+        private readonly ConsentConfig $consentConfig
     ) {
     }
 
-    public function process(string $quoteId): void
+    public function process(string $reference): void
     {
-        $id = (int)$quoteId;
+        $id = (int)$reference;
         $db = $this->resource->getConnection();
         $table = $this->resource->getTableName('quote');
         $row = $db->fetchRow(
@@ -118,75 +125,42 @@ class Consumer
             return;
         }
         $storeId = (int)$row['store_id'];
-        $sent = false;
-        $recipientClaim = null;
-        try {
-            $recipientClaim = $this->history->claim($email);
-            if ($recipientClaim === null) {
-                $db->update($table, ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'],
-                    'ck_abandoned_queued_at' => null] + $keepUpdatedAt, ['entity_id = ?' => $id]);
-                $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (recipient cooldown)', $id));
-                return;
-            }
-            // A replaced resolver may read an external recipient source. Recheck it after claiming too.
-            if ($this->recipients->resolve($id) !== $email) {
-                $this->history->release($email, $recipientClaim);
-                $db->update($table, ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'],
-                    'ck_abandoned_queued_at' => null] + $keepUpdatedAt, ['entity_id = ?' => $id]);
-                $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (recipient changed)', $id));
-                return;
-            }
-            $this->emulation->startEnvironmentEmulation($storeId, Area::AREA_FRONTEND, true);
-            try {
+        $restore = fn () => $db->update($table, ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'],
+            'ck_abandoned_queued_at' => null] + $keepUpdatedAt, ['entity_id = ?' => $id]);
+        $message = new Message(
+            $storeId,
+            $this->config->getTemplate($storeId),
+            $this->config->getIdentity($storeId),
+            $email,
+            function () use ($id): MessageContent {
                 $quote = $this->cartRepository->get($id);
                 if (!$quote instanceof Quote) {
                     throw new \UnexpectedValueException('Cart repository must return a Magento quote for a reminder.');
                 }
                 $vars = $this->reminderData->build($quote);
-                $transport = $this->transportBuilder
-                    ->setTemplateIdentifier($this->config->getTemplate($storeId))
-                    ->setTemplateOptions(['area' => Area::AREA_FRONTEND, 'store' => $storeId])
-                    ->setTemplateVars($vars)
-                    ->setFromByScope($this->config->getIdentity($storeId), $storeId)
-                    ->addTo($email, $vars['customer_name'] ?: null)
-                    ->getTransport();
-                if ($this->consentConfig->isOneClickUnsubscribeEnabled()) {
-                    $message = $transport->getMessage();
-                    if (!is_object($message) || !method_exists($message, 'getSymfonyMessage')) {
-                        throw new \UnexpectedValueException('The reminder mail transport does not support one-click headers.');
-                    }
-                    $url = $vars['optout_url'];
-                    if (parse_url($url, PHP_URL_SCHEME) !== 'https') {
-                        throw new \UnexpectedValueException('One-click unsubscribe requires an HTTPS opt-out URL.');
-                    }
-                    $headers = $message->getSymfonyMessage()->getHeaders();
-                    $headers->remove('List-Unsubscribe');
-                    $headers->remove('List-Unsubscribe-Post');
-                    $headers->addTextHeader('List-Unsubscribe', '<' . $url . '>');
-                    $headers->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
-                }
-                $transport->sendMessage();
-                $sent = true;
-            } finally {
-                $this->emulation->stopEnvironmentEmulation();
-            }
+                return new MessageContent($vars, $vars['customer_name'] ?? null,
+                    $this->consentConfig->isOneClickUnsubscribeEnabled() ? $vars['optout_url'] : null);
+            },
+            true,
+            // A replaced resolver may read an external recipient source. Recheck it after claiming too.
+            fn (): bool => $this->recipients->resolve($id) === $email
+        );
+        try {
+            $status = $this->mailer->send($message);
+        } catch (MessageSentException $e) {
+            // SMTP returned successfully. Keep the claim: a later cleanup error must not enable a duplicate.
+            $this->logger->error(sprintf('CommerceKings_AbandonedCart: cart %d sent; post-send cleanup failed', $id),
+                ['exception_class' => get_class($e->getPrevious() ?? $e)]);
+            throw $e->getPrevious() ?? $e;
         } catch (\Throwable $e) {
-            if ($sent) {
-                // SMTP returned successfully. A later emulation cleanup error must not enable a duplicate.
-                $this->logger->error(sprintf('CommerceKings_AbandonedCart: cart %d sent; post-send cleanup failed', $id),
-                    ['exception_class' => get_class($e)]);
-                throw $e;
-            }
             // Restore the previous policy state and release queuing so the next cron run can retry.
-            $db->update(
-                $table,
-                ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'], 'ck_abandoned_queued_at' => null] + $keepUpdatedAt,
-                ['entity_id = ?' => $id]
-            );
-            if ($recipientClaim !== null) {
-                $this->history->release($email, $recipientClaim);
-            }
+            $restore();
             throw $e;
+        }
+        if ($status !== MailerInterface::SENT) {
+            $restore();
+            $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $status));
+            return;
         }
         $this->logger->info(sprintf('CommerceKings_AbandonedCart: reminder sent for cart %d', $id));
     }

@@ -33,11 +33,6 @@ class Config
     }
 
     /** Global across stores so switching websites cannot bypass recipient suppression. */
-    public function getRecipientCooldownDays(): int
-    {
-        return max(1, (int)$this->scopeConfig->getValue(self::PREFIX . 'recipient_cooldown_days'));
-    }
-
 
     public function getTemplate(int $storeId): string
     {

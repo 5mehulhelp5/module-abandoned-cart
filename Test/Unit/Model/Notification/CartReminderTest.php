@@ -1,10 +1,10 @@
 <?php
 declare(strict_types=1);
 
-namespace CommerceKings\AbandonedCart\Test\Unit\Model;
+namespace CommerceKings\AbandonedCart\Test\Unit\Model\Notification;
 
 use CommerceKings\AbandonedCart\Model\Config;
-use CommerceKings\AbandonedCart\Model\Consumer;
+use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\Consent\Api\ConsentInterface;
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
@@ -15,6 +15,9 @@ use CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
+use CommerceKings\Notification\Api\CooldownInterface;
+use CommerceKings\Notification\Model\Config as NotificationConfig;
+use CommerceKings\Notification\Model\Mailer;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Framework\Mail\TransportInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
@@ -26,7 +29,8 @@ use Psr\Log\LoggerInterface;
 
 // Shared fixtures use scenario-specific expectations; other outcomes are asserted from captured data.
 #[\PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations]
-class ConsumerTest extends TestCase
+/** The cart rules plus the real CommerceKings_Notification Mailer, with Magento's transport stubbed. */
+class CartReminderTest extends TestCase
 {
     use DbTestTrait;
 
@@ -53,7 +57,7 @@ class ConsumerTest extends TestCase
     private \Symfony\Component\Mime\Email $nativeMessage;
     private string $optoutUrl = 'https://shop.test/ckconsent/optout?c=id&t=signature';
 
-    private function consumer(array|false $row = self::ROW, bool $enabled = true, bool $withdrawn = false): Consumer
+    private function consumer(array|false $row = self::ROW, bool $enabled = true, bool $withdrawn = false): CartReminder
     {
         $this->fetchRowResult = $row;
         $config = $this->createStub(Config::class);
@@ -102,7 +106,7 @@ class ConsumerTest extends TestCase
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn () => $this->recipientSequence !== null
             ? array_shift($this->recipientSequence) : ($row ? ($row['customer_id'] === null ? $row['ck_abandoned_email'] : $row['customer_email']) : null));
-        $history = $this->createStub(\CommerceKings\AbandonedCart\Model\RecipientHistory::class);
+        $history = $this->createStub(CooldownInterface::class);
         $history->method('claim')->willReturnCallback(function () {
             if ($this->recipientClaimed) { return null; }
             $this->recipientClaimed = true;
@@ -112,7 +116,10 @@ class ConsumerTest extends TestCase
             $this->releasedRecipients[] = [$email, $token];
             $this->recipientClaimed = false;
         });
-        return new Consumer($this->resource(), $repo, $data, $builder, $this->emulation, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig, $history);
+        $notificationConfig = $this->createStub(NotificationConfig::class);
+        $notificationConfig->method('getCooldownDays')->willReturn(7);
+        $mailer = new Mailer($builder, $this->emulation, $history, $notificationConfig);
+        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig);
     }
 
     /** @dataProvider skipCases */

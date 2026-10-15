@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 use CommerceKings\AbandonedCart\Cron\FindAbandonedCarts;
 use CommerceKings\AbandonedCart\Model\Config;
-use CommerceKings\AbandonedCart\Model\Consumer;
+use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\AbandonedCart\Model\ReminderData;
@@ -12,13 +12,16 @@ use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use CommerceKings\Consent\Api\Data\Consent;
+use CommerceKings\Notification\Api\CooldownInterface;
+use CommerceKings\Notification\Api\QueueInterface;
+use CommerceKings\Notification\Model\Config as NotificationConfig;
+use CommerceKings\Notification\Model\Mailer;
 use Magento\Framework\App\Bootstrap;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\App\State;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Framework\Mail\TransportInterface;
-use Magento\Framework\MessageQueue\PublisherInterface;
 use Magento\Quote\Api\CartRepositoryInterfaceFactory;
 use Magento\Quote\Model\Quote;
 use Magento\Store\Model\App\Emulation;
@@ -50,9 +53,9 @@ $lifetime = new QuoteLifetime($om->get(ScopeConfigInterface::class));
 $recipients = $om->get(ReminderEmailResolverInterface::class);
 $published = [];
 $sent = 0;
-$publisher = new class($published) implements PublisherInterface {
+$queue = new class($published) implements QueueInterface {
     public function __construct(private array &$published) {}
-    public function publish($topicName, $data): void { $this->published[] = (int)$data; usleep(10000); }
+    public function publish(string $type, string $reference): void { $this->published[] = (int)$reference; usleep(10000); }
 };
 $consents = new class($websiteId) implements ConsentInterface {
     public function __construct(private int $websiteId) {}
@@ -102,12 +105,13 @@ while (!is_file($barrier . '.go')) {
     usleep(10000);
 }
 if ($mode === 'finder') {
-    (new FindAbandonedCarts($config, $resource, $guard, $publisher, new OncePerCart(), $lifetime,
-        $stores, new NullLogger(), $recipients, $om->get(\CommerceKings\AbandonedCart\Model\RecipientHistory::class)))->execute();
+    (new FindAbandonedCarts($config, $resource, $guard, $queue, new OncePerCart(), $lifetime,
+        $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class)))->execute();
 } else {
-    $consumer = new Consumer($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
-        $builder, $emulation, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
-        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class), $om->get(\CommerceKings\AbandonedCart\Model\RecipientHistory::class));
+    $mailer = new Mailer($builder, $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
+    $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
+        $mailer, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
+        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class));
     foreach ($ids as $id) { $consumer->process((string)$id); }
 }
 echo json_encode(['published' => $published, 'sent' => $sent]), PHP_EOL;
