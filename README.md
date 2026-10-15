@@ -29,7 +29,7 @@ Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (featur
    - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also removes the guest's subscription;
    - customer: opening checkout (or switching the consent on there) → `POST /V1/ck-notification/subscriptions/mine` `{"type":"cart_reminder","reference":"<quote id>"}` (`js/customer-consent.js`, Magento's session REST for storefront AJAX); the email comes from the account. A change of consent or browser restarts the delay; re-opening checkout with the same consent does not.
    - Stored by Notification: the cart's subscription (guest contact or customer, consent id, browser id hash, `captured_at`) in one INSERT that also checks the consent is still valid and the cart is still the authorized one (active, same store, same guest or customer) – a request still on its way can't undo a withdrawal. Magento's quote is not written.
-3. **Finder** (cron `commercekings_abandoned_cart_find`, every 15 min) selects active, nonempty carts with a subscription whose consent is valid, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_cart.queued_at`) and published to Notification's shared topic `commercekings.notification.send` as `cart_reminder|<subscription id>`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
+3. **Finder** (cron `commercekings_abandoned_cart_find`, every minute) keeps up to **Maximum pending reminders** carts queued: each run only refills what the consumers sent, failed, skipped or lost since the last one, so the number of consumers sets the pace (see *Flash sales* below). It selects active, nonempty carts with a subscription whose consent is valid, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_cart.queued_at`) and published to Notification's shared topic `commercekings.notification.send` as `cart_reminder|<subscription id>`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
 4. **Consumer** `commerceKingsNotificationSend` (`commercekings/module-notification`, shared by all notifications) hands the subscription to the `cart_reminder` type (`Model\Notification\CartReminder`) only while it still exists with a valid consent. The type re-checks the policy, store, consent, inactivity delay and quote expiry, then claims the cart atomically and sends in store emulation. Selection and claim share the policy's SQL condition. A failed send restores the prior reminder timestamp and clears the queue claim for retry. Duplicate messages cannot claim the same state twice.
 5. **Email** – the module ships a **neutral English default** (`view/frontend/email/reminder.html`, "Abandoned Cart Reminder"). Use your own: **Marketing > Email Templates > Add New Template**, load "Abandoned Cart Reminder", change text and design, select it in **Abandoned Cart > Email template**. Variables: `customer_name`, `items_html` (ready-made rows: picture, the store's predefined options only, qty × price), `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; the footer gets `cart_reminder_email="1"` for a label. Sender defaults to **General Contact** – use a no-reply address.
 
@@ -217,6 +217,8 @@ Other settings are hidden while **Enabled** is **No**.
 |---|---|
 | Enabled (store) | No – switch on after setting the sender and the banner category |
 | Inactivity delay (minutes) | 180 |
+| Maximum pending reminders (global) | 2000 – carts queued but not sent yet; the finder tops up to this every minute |
+| Maximum reminders per hour (global) | 0 = no limit – set it to your email provider's sending limit |
 | Cart lifetime (days, read-only, selected scope) | Inherited from Sales > Checkout > Shopping Cart; normally 30 days |
 | Reminders per cart (read-only) | `1 (one-time)`, reported by the delivery policy |
 | Email template (store) | `commercekings_abandoned_cart_general_template` |
@@ -234,6 +236,25 @@ bin/magento setup:upgrade   # feature tables and consent schema
 - Verify the sender domain's **SPF and DKIM** (and DMARC) for the no-reply address before launch – otherwise reminders land in spam.
 - After deploying new code, **restart the resident notification consumer** (see Queue transport).
 - A custom theme email footer can use `cart_reminder_email` to identify reminder messages.
+
+## Flash sales
+
+The finder runs every minute and tops the queue up to **Maximum pending reminders** (default 2,000), reading carts
+in pages of 200 for at most 30 seconds. A cart is pending while it is queued, not sent since, queued within the last
+60 minutes and its subscription still has a valid consent; sent, failed, skipped and withdrawn carts free their
+place. Only one finder fills at a time (Magento's lock `commercekings_abandoned_cart_finder`), across cron overlaps,
+manual runs and servers.
+
+- **More consumers send faster with no other change**: they drain the queue sooner, so the next run refills more.
+  Measured in the sandbox (developer mode): ~190 emails a minute per consumer, ~1,230 with eight; production renders
+  faster. Add consumers before a sale.
+- **Maximum reminders per hour** is the brake for your email provider's rate limit and sender reputation; carts
+  over it wait for the next hour, none are lost.
+- Run the consumer with `--max-messages` (e.g. 1,000): Magento's email template rendering grows a worker by about
+  0.17 MB per email.
+- The pending limit counts carts, not broker messages. A cart still unsent after 60 minutes is released and queued
+  again; while consumers are stopped, its first message may still be in the broker. Duplicate messages are harmless:
+  the reminder's own claim lets only one delivery send.
 
 ## Queue transport
 

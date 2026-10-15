@@ -51,6 +51,7 @@ class ReminderPolicyTest extends TestCase
     private array $storeIds = [];
     private array $quoteIds = [];
     private array $published = [];
+    private int $maxPending = 2000;
     /** a replaced reminder policy; null = the default OncePerCart */
     private ?ReminderPolicyInterface $policy = null;
     private int $sent = 0;
@@ -180,6 +181,8 @@ class ReminderPolicyTest extends TestCase
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturnCallback(fn ($id) => in_array($id, $this->storeIds, true));
         $config->method('getDelayMinutes')->willReturn(1);
+        $config->method('getMaxPending')->willReturnCallback(fn () => $this->maxPending);
+        $config->method('getMaxPerHour')->willReturn(0);
         $config->method('getTemplate')->willReturn('fixture');
         $config->method('getIdentity')->willReturn('general');
         return $config;
@@ -228,7 +231,8 @@ class ReminderPolicyTest extends TestCase
         });
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
             $this->policy ?? new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
-            $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class));
+            $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class),
+            $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class));
     }
 
     private function consumer(): CartReminder
@@ -537,6 +541,54 @@ class ReminderPolicyTest extends TestCase
         $this->assertNotNull($this->row($id)['reminded_at']);
         $this->published = [];
         $this->assertSame(0, $this->finder()->execute());
+    }
+
+    public function testFinderKeepsOnlyMaximumPendingAndRefillsWhatIsReleased(): void
+    {
+        $this->maxPending = 2;
+        [$first, $second, $third, $fourth] = [$this->quote(), $this->quote(), $this->quote(), $this->quote()];
+        foreach ([$first, $second, $third, $fourth] as $id) { $this->state($id, ['email' => $id . '-' . $this->email]); }
+        $this->assertSame(2, $this->finder()->execute());
+        $this->assertSame(0, $this->finder()->execute(), 'two are waiting: no room');
+        [$a, $b] = $this->published;
+
+        // a sent cart frees its place
+        $this->consumer()->process($this->subscriptionOf($a));
+        $this->assertSame(1, $this->sent);
+        $this->assertSame(1, $this->finder()->execute());
+
+        // a skipped cart frees its place too (it changed after queuing), and is queued again once due
+        $this->resource->getConnection()->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s')],
+            ['entity_id = ?' => $b]);
+        $this->consumer()->process($this->subscriptionOf($b));
+        $this->assertNull($this->row($b)['queued_at'], 'the skip released the cart');
+        $this->assertSame(1, $this->finder()->execute());
+
+        // a withdrawn subscription no longer counts as pending, although its message is still in the broker
+        $waiting = array_values(array_diff($this->published, [$a, $b]));
+        $this->resource->getConnection()->delete($this->table(SubscriptionManagement::TABLE),
+            ['type = ?' => CartReminder::CODE, 'reference_id = ?' => $waiting[0]]);
+        $this->assertNotNull($this->row($waiting[0])['queued_at']);
+        $this->assertSame(0, $this->finder()->execute(), 'the changed cart is not due yet; nothing else is eligible');
+        $published = $this->published;
+        sort($published);
+        $this->assertSame([$first, $second, $third, $fourth], $published, 'every cart was queued exactly once');
+    }
+
+    public function testASecondFinderExitsWhileOneHoldsTheLock(): void
+    {
+        $id = $this->quote();
+        // another process: its own database connection holds the finder lock
+        $other = $this->om->create(\Magento\Framework\Lock\Backend\Database::class,
+            ['resource' => $this->om->create(\Magento\Framework\App\ResourceConnection::class)]);
+        $this->assertTrue($other->lock('commercekings_abandoned_cart_finder', 0));
+        try {
+            $this->assertSame(0, $this->finder()->execute());
+            $this->assertNull($this->row($id)['queued_at'], 'no claim either');
+        } finally {
+            $other->unlock('commercekings_abandoned_cart_finder');
+        }
+        $this->assertSame(1, $this->finder()->execute(), 'free again');
     }
 
     public function testAdminPreviewIsReadOnlyAndUsesTheSelectedStoreScope(): void

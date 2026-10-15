@@ -88,6 +88,7 @@ class CartReminder implements NotificationTypeInterface
             default => null,
         };
         if ($skip !== null) {
+            $this->release($id);
             $this->logger->info($id ? sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $skip)
                 : sprintf('CommerceKings_AbandonedCart: subscription %d skipped (%s)', (int)$reference, $skip));
             return;
@@ -123,6 +124,8 @@ class CartReminder implements NotificationTypeInterface
             ]
         );
         if (!$claimed) {
+            // another delivery won, or the cart changed meanwhile; free the pending place unless it was just sent
+            $this->release($id);
             return;
         }
         $storeId = (int)$row['store_id'];
@@ -164,6 +167,21 @@ class CartReminder implements NotificationTypeInterface
             return;
         }
         $this->logger->info(sprintf('CommerceKings_AbandonedCart: reminder sent for cart %d', $id));
+    }
+
+    /**
+     * The cart no longer waits for this message: free its place under "Maximum pending reminders" so the finder can
+     * refill it. A cart reminded since it was queued is left alone - that delivery won.
+     */
+    private function release(int $id): void
+    {
+        if ($id) {
+            $this->resource->getConnection()->update($this->carts->name(), ['queued_at' => null], [
+                'quote_id = ?' => $id,
+                'queued_at IS NOT NULL',
+                'reminded_at IS NULL OR reminded_at < queued_at',
+            ]);
+        }
     }
 
     private function matchesConsent(array $row): bool

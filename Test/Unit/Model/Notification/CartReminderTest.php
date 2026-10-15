@@ -124,12 +124,23 @@ class CartReminderTest extends TestCase
         return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig, $this->carts());
     }
 
+    /** No claim, no email: only the cart's place under "Maximum pending reminders" is released for the finder. */
+    private function assertReleasedOnly(): void
+    {
+        $this->assertCount(1, $this->updates, 'no claim');
+        $this->assertSame('ck_abandoned_cart', $this->updates[0]['table']);
+        $this->assertSame(['queued_at' => null], $this->updates[0]['data']);
+        $this->assertSame(['quote_id = ?', 'queued_at IS NOT NULL', 'reminded_at IS NULL OR reminded_at < queued_at'],
+            self::conditions($this->updates[0]['where']));
+        $this->assertSame(42, $this->updates[0]['where']['quote_id = ?']);
+    }
+
     /** @dataProvider skipCases */
     #[\PHPUnit\Framework\Attributes\DataProvider('skipCases')]
     public function testSkipsWithReason(array|false $row, bool $enabled, bool $withdrawn, string $reason): void
     {
         $this->consumer($row, $enabled, $withdrawn)->process('42');
-        $this->assertSame([], $this->updates, 'no claim');
+        $row === false ? $this->assertSame([], $this->updates, 'nothing to release') : $this->assertReleasedOnly();
         $this->assertSame([], $this->mail, 'no email');
         $this->assertSame([$row === false ? "CommerceKings_AbandonedCart: subscription 42 skipped ($reason)"
             : "CommerceKings_AbandonedCart: cart 42 skipped ($reason)"], $this->logs);
@@ -152,7 +163,7 @@ class CartReminderTest extends TestCase
     {
         $this->scopeMatches = false;
         $this->consumer()->process('42');
-        $this->assertSame([], $this->updates);
+        $this->assertReleasedOnly();
         $this->assertSame([], $this->mail);
         $this->assertSame(['CommerceKings_AbandonedCart: cart 42 skipped (consent purpose / website mismatch)'], $this->logs);
     }
@@ -184,7 +195,7 @@ class CartReminderTest extends TestCase
     {
         $this->expired = true;
         $this->consumer()->process('42');
-        $this->assertSame([], $this->updates);
+        $this->assertReleasedOnly();
         $this->assertSame(0, $this->sentMessages);
         $this->assertSame(['CommerceKings_AbandonedCart: cart 42 skipped (quote expired)'], $this->logs);
     }
@@ -192,7 +203,7 @@ class CartReminderTest extends TestCase
     public function testActivityAfterQueuingPostponesDelivery(): void
     {
         $this->consumer(['updated_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
-        $this->assertSame([], $this->updates);
+        $this->assertReleasedOnly();
         $this->assertSame(0, $this->sentMessages);
         $this->assertSame(['CommerceKings_AbandonedCart: cart 42 skipped (cart recently updated)'], $this->logs);
     }
@@ -289,7 +300,10 @@ class CartReminderTest extends TestCase
         $this->updateResults = [0];
         $consumer->process('42');
         $this->assertSame([], $this->mail);
-        $this->assertCount(1, $this->updates, 'nothing to release');
+        $this->assertCount(2, $this->updates, 'the lost claim, then the pending place is released');
+        $this->assertSame(['queued_at' => null], $this->updates[1]['data']);
+        $this->assertContains('reminded_at IS NULL OR reminded_at < queued_at', self::conditions($this->updates[1]['where']),
+            'never touches a cart another delivery just reminded');
     }
 
     public function testDuplicateDeliveryLosesTheClaimAndSendsNothing(): void
@@ -303,7 +317,7 @@ class CartReminderTest extends TestCase
     public function testRecentSubscriptionChangePostponesDelivery(): void
     {
         $this->consumer(['captured_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
-        $this->assertSame([], $this->updates);
+        $this->assertReleasedOnly();
         $this->assertSame([], $this->mail);
     }
 
@@ -329,7 +343,7 @@ class CartReminderTest extends TestCase
         // a customer's consent or browser change stamps the subscription's captured_at, as a guest's email change does
         $this->consumer(['customer_id' => 7, 'customer_email' => 'account@test.com',
             'captured_at' => gmdate('Y-m-d H:i:s')] + self::ROW)->process('42');
-        $this->assertSame([], $this->updates);
+        $this->assertReleasedOnly();
         $this->assertSame([], $this->mail);
     }
 

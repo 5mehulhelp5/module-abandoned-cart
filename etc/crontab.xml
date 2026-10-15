@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/crontab.xsd">
     <group id="default">
-        <!-- finds abandoned carts and publishes one message per cart; the consumer sends -->
+        <!-- every minute: tops the queue up to "Maximum pending reminders"; the consumers send -->
         <job name="commercekings_abandoned_cart_find" instance="CommerceKings\AbandonedCart\Cron\FindAbandonedCarts" method="execute">
-            <schedule>*/15 * * * *</schedule>
+            <schedule>* * * * *</schedule>
         </job>
     </group>
 </config>
