@@ -152,23 +152,20 @@ class CartRestoreTest extends TestCase
         $this->assertSame('commit', end($this->transactionEvents));
     }
 
-    public function testUnavailableProductsAreRejectedBeforeEitherCartIsChanged(): void
+    public function testUnavailableProductsMergeLikeMagentosSignInMerge(): void
     {
+        // Magento's login merge never refuses: unavailable items show as cart errors and checkout enforces stock
         $service = $this->service();
         $product = $this->createStub(Product::class);
         $product->method('isSalable')->willReturn(false);
         $this->sourceItems = [$this->mockWith(Item::class, [
-            'getProduct' => $product, 'getHasError' => false, 'isDeleted' => false,
+            'getProduct' => $product, 'getHasError' => true, 'isDeleted' => false,
         ])];
-        try {
-            $service->execute(42, $this->current, 'token', 0);
-            $this->fail('unavailable product must not be discarded by a successful merge');
-        } catch (LocalizedException) {
-            $this->assertSame([], $this->saved);
-            $this->assertSame([], $this->merged);
-            $this->assertTrue($this->sourceActive);
-            $this->assertSame('rollBack', end($this->transactionEvents));
-        }
+        $service->execute(42, $this->current, 'token', 0);
+        $this->assertNotSame([], $this->merged, 'merged');
+        $this->assertNotSame([], $this->saved);
+        $this->assertFalse($this->sourceActive, 'the saved cart is consumed once');
+        $this->assertSame('commit', end($this->transactionEvents));
     }
 
     public function testLoggedInCustomerKeepsTheirDestinationEvenWhenItIsEmpty(): void

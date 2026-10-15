@@ -150,7 +150,7 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 - guest cart → **GET shows a confirmation page without merging or replacing the session cart**. If it is already the session cart, the visitor goes straight to the cart page;
 - confirmation → **POST with a valid Magento form key**. Source and destination quote rows are locked in id order, then freshly loaded. Browser ownership, store, expiry and destination account/active status are checked again;
 - guest with no existing cart → the saved cart becomes the session cart. An existing cart, including an empty one or a logged-in customer's cart, keeps its identity and receives the saved products through `Quote::merge`;
-- a merge keeps the destination's contact details, account, addresses and coupon. Matching product configurations have their quantities added; distinct configurations remain separate. Totals and shipping rates are recalculated; unavailable products or quantity errors refuse the merge;
+- a merge keeps the destination's contact details, account, addresses and coupon. Matching product configurations have their quantities added; distinct configurations remain separate. Totals and shipping rates are recalculated. Like Magento's own merge when a guest signs in, unavailable products and quantities above stock do not refuse the merge: they show as cart errors and checkout refuses the order until the shopper fixes them;
 - both carts are saved in one database transaction. Only after it commits does the session switch and the saved cart become closed. A failed save rolls back both carts; a repeated or concurrent restore cannot add the closed source twice. Success: "Your saved cart has been restored.";
 - after restore/merge the customer-data `cart` section is marked stale (`section_data_ids` cookie), so the mini cart shows the right count.
 - that customer-data cookie uses Magento's configured cookie lifetime and domain (zero lifetime creates a session cookie). Its path stays `/`, matching Magento's customer-data JavaScript even when the session cookie has a narrower path.
@@ -322,7 +322,7 @@ no demo products:
 MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Integration/CartSubscriptionTest.php
 ```
 
-Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, stock limits and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
+Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, a merged quantity above stock (merged with Magento's cart error) and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
 
 The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It runs the production finder, Magento's native publisher and consumer, and a run-specific queue using either `amqp` or `db`. The 30 browser scenarios also cover dedicated recipient updates, authenticated checkout, same-address cooldown and deferred carts, variant images, expiry, queued withdrawal and a failed send followed by successful retry. Cron scheduling is checked separately.
 
@@ -366,7 +366,7 @@ and remove their own queue, message and status rows during cleanup.
 - Other browser (with or without its own consent) → homepage, nothing added.
 - Owner browser: GET shows confirmation and leaves both carts unchanged; confirmation POST restores into a lost session or merges into the current cart; mini cart count correct.
 - Matching products add quantities once; distinct configurations remain separate; current email, addresses and coupon survive.
-- Repeated/concurrent POSTs do not duplicate products. Invalid form key, wrong store/account, stock errors and save failures leave the current cart intact.
+- Repeated/concurrent POSTs do not duplicate products. Invalid form key, wrong store/account and save failures leave the current cart intact; stock problems merge with Magento's cart errors, as on sign-in.
 - Owner emptied the cart → "This reminder link is no longer available. You can continue shopping with your current cart."
 - Customer cart: logged in → cart page; logged out → login page with notice.
 

@@ -191,23 +191,25 @@ class CartRestoreTest extends TestCase
         $this->assertSame(['24-MB01' => 2.0], $this->quantities($source));
     }
 
-    public function testMergedQuantityAboveTheStockLimitLeavesBothCartsUnchanged(): void
+    public function testMergedQuantityAboveTheStockLimitMergesWithMagentosCartError(): void
     {
+        // Magento's own merge (as when a guest signs in): quantities add up; the cart shows the stock error and
+        // checkout refuses the order until the shopper fixes it - restore does not decide stock
         $product = $this->om->get(ProductRepositoryInterface::class)->get('24-MB01');
         $stock = $this->om->get(StockRegistryInterface::class)->getStockItem((int)$product->getId());
         $quantity = min((int)$stock->getQty(), (int)$stock->getMaxSaleQty());
         $this->assertGreaterThan(2, $quantity);
         $source = $this->source([['24-MB01', 2, []]]);
         $current = $this->quote([['24-MB01', $quantity, []]], 'current@example.test');
-        try {
-            $this->service()->execute((int)$source->getId(), $current, $this->token($source), 0);
-            $this->fail('quantity beyond available stock must not close the source');
-        } catch (LocalizedException) {
-            $this->assertSame(['24-MB01' => (float)$quantity], $this->quantities($current));
-            $this->assertSame(['24-MB01' => 2.0], $this->quantities($source));
-            $this->assertSame(1, (int)$this->resource->getConnection()->fetchOne('SELECT is_active FROM '
-                . $this->resource->getTableName('quote') . ' WHERE entity_id = ?', [(int)$source->getId()]));
-        }
+        $result = $this->service()->execute((int)$source->getId(), $current, $this->token($source), 0);
+        $this->assertSame((int)$current->getId(), (int)$result->getId());
+        $this->assertSame(['24-MB01' => (float)($quantity + 2)], $this->quantities($current));
+        $this->assertSame(0, (int)$this->resource->getConnection()->fetchOne('SELECT is_active FROM '
+            . $this->resource->getTableName('quote') . ' WHERE entity_id = ?', [(int)$source->getId()]), 'consumed once');
+        $reloaded = $this->om->get(\Magento\Quote\Api\CartRepositoryInterfaceFactory::class)->create()->get((int)$current->getId());
+        $reloaded->collectTotals();
+        $this->assertTrue((bool)array_filter($reloaded->getAllVisibleItems(), fn ($item) => $item->getHasError()),
+            'Magento flags the quantity in the cart');
     }
 
     public function testConcurrentRestoresConsumeTheSourceOnlyOnce(): void

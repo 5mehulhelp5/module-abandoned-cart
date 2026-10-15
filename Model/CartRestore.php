@@ -50,14 +50,13 @@ class CartRestore
                 $db->commit();
                 return $source;
             }
-            $this->validateItems($source);
-            $this->validateItems($destination);
+            // Magento's own merge (as when a guest signs in): no stock refusal here. Unavailable products and
+            // quantities show as cart errors and checkout enforces stock, exactly as for Magento's login merge.
             $coupon = $destination->getCouponCode();
             $destination->merge($source)->setIsActive(true)->setCouponCode($coupon)->setTotalsCollectedFlag(false);
             $destination->getShippingAddress()->setCollectShippingRates(true);
-            $this->validateItems($destination);
+            $destination->collectTotals();
             $repository->save($destination);
-            $this->validateItems($destination);
             $source->setIsActive(false);
             $repository->save($source);
             $db->commit();
@@ -65,15 +64,6 @@ class CartRestore
         } catch (\Throwable $error) {
             $db->rollBack();
             throw $error;
-        }
-    }
-
-    private function validateItems(Quote $quote): void
-    {
-        foreach ($quote->getAllItems() as $item) {
-            if ($item->isDeleted() || $item->getHasError() || !$item->getProduct()->isSalable()) {
-                throw new LocalizedException(__('Some products are unavailable or their quantities cannot be added. Your current cart has been kept.'));
-            }
         }
     }
 }
