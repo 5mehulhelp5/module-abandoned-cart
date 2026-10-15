@@ -47,10 +47,10 @@ class FindAbandonedCartsTest extends TestCase
         $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = [$type, $id]; });
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn ($id) => in_array($id, $this->unresolved, true) ? null : 'fixture@example.test');
-        $history = $this->createStub(CooldownInterface::class);
-        $history->method('isRecent')->willReturnCallback(fn () => $this->recent);
+        $cooldown = $this->createStub(CooldownInterface::class);
+        $cooldown->method('isRecent')->willReturnCallback(fn () => $this->recent);
         return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue,
-            $this->policy ?? new OncePerCart(), $lifetime, $stores, $this->createStub(LoggerInterface::class), $recipients, $history, $this->carts());
+            $this->policy ?? new OncePerCart(), $lifetime, $stores, $this->createStub(LoggerInterface::class), $recipients, $cooldown, $this->carts());
     }
 
     public function testDisabledStoresDoNothing(): void

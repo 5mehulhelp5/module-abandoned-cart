@@ -83,7 +83,7 @@ class ReminderPolicyTest extends TestCase
             $emails = $db->fetchCol($db->select()->from(['c' => $this->table('ck_abandoned_cart')], [])
                 ->join(['n' => $this->table('ck_notification_contact')], 'n.contact_id = c.contact_id', 'email')
                 ->where('c.quote_id IN (?)', $this->quoteIds));
-            $hashes = array_map(fn ($email) => $this->history()->hash($email), array_filter($emails));
+            $hashes = array_map(fn ($email) => $this->cooldown()->hash($email), array_filter($emails));
             if ($hashes) { $db->delete($this->table('ck_notification_cooldown'), ['recipient_hash IN (?)' => $hashes]); }
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quoteIds]);
             if ($emails) { $db->delete($this->table('ck_notification_contact'), ['email IN (?)' => $emails]); }
@@ -161,7 +161,7 @@ class ReminderPolicyTest extends TestCase
         return $config;
     }
 
-    private function history(): Cooldown
+    private function cooldown(): Cooldown
     {
         return new Cooldown($this->resource,
             $this->om->get(\Magento\Framework\Encryption\EncryptorInterface::class),
@@ -183,7 +183,7 @@ class ReminderPolicyTest extends TestCase
         $queue->method('publish')->willReturnCallback(function ($type, $id) { $this->published[] = (int)$id; });
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
             new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
-            $this->om->get(ReminderEmailResolverInterface::class), $this->history(), $this->om->get(CartTable::class));
+            $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class));
     }
 
     private function consumer(): CartReminder
@@ -205,7 +205,7 @@ class ReminderPolicyTest extends TestCase
         $builder->method('getTransport')->willReturn($transport);
         $data = $this->createStub(ReminderData::class);
         $data->method('build')->willReturn(['customer_name' => '']);
-        $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->history(), $this->notificationConfig());
+        $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->cooldown(), $this->notificationConfig());
         return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
             $data, $mailer, $this->config(), $consent, $this->guard(),
             new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
@@ -256,7 +256,7 @@ class ReminderPolicyTest extends TestCase
         $this->assertSame(0, $this->finder()->execute());
         $this->resource->getConnection()->update($this->table('ck_notification_cooldown'),
             ['sent_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)],
-            ['recipient_hash = ?' => $this->history()->hash($this->email)]);
+            ['recipient_hash = ?' => $this->cooldown()->hash($this->email)]);
         $this->assertSame(1, $this->finder()->execute());
         $this->assertSame([$second], $this->published);
         $this->consumer()->process((string)$second);
@@ -269,7 +269,7 @@ class ReminderPolicyTest extends TestCase
         $this->sendFails = true;
         try { $this->consumer()->process((string)$id); $this->fail('Expected fixture failure'); }
         catch (\RuntimeException $e) { $this->assertSame('Fixture SMTP failure', $e->getMessage()); }
-        $this->assertFalse($this->history()->isRecent($this->email));
+        $this->assertFalse($this->cooldown()->isRecent($this->email));
         $this->assertNull($this->row($id)['reminded_at']);
         $this->sendFails = false;
         $this->consumer()->process((string)$id);
@@ -279,22 +279,22 @@ class ReminderPolicyTest extends TestCase
     public function testNormalizedRecipientsAndOwnedRelease(): void
     {
         $this->quote(); // Registers this fixture address for cleanup.
-        $history = $this->history();
-        $first = $history->claim('  ' . strtoupper($this->email) . '  ');
+        $cooldown = $this->cooldown();
+        $first = $cooldown->claim('  ' . strtoupper($this->email) . '  ');
         $this->assertNotNull($first);
-        $this->assertNull($history->claim($this->email));
-        $history->release($this->email, str_repeat('0', 32));
-        $this->assertTrue($history->isRecent($this->email));
+        $this->assertNull($cooldown->claim($this->email));
+        $cooldown->release($this->email, str_repeat('0', 32));
+        $this->assertTrue($cooldown->isRecent($this->email));
         $this->resource->getConnection()->update($this->table('ck_notification_cooldown'),
             ['sent_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)],
-            ['recipient_hash = ?' => $history->hash($this->email)]);
-        $replacement = $history->claim($this->email);
+            ['recipient_hash = ?' => $cooldown->hash($this->email)]);
+        $replacement = $cooldown->claim($this->email);
         $this->assertNotNull($replacement);
         $this->assertNotSame($first, $replacement);
-        $history->release($this->email, $first);
-        $this->assertTrue($history->isRecent($this->email));
-        $history->release($this->email, $replacement);
-        $this->assertFalse($history->isRecent($this->email));
+        $cooldown->release($this->email, $first);
+        $this->assertTrue($cooldown->isRecent($this->email));
+        $cooldown->release($this->email, $replacement);
+        $this->assertFalse($cooldown->isRecent($this->email));
     }
 
     private function workers(string $mode, array $ids, int $count = 4): array

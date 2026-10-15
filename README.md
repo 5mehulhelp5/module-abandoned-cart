@@ -6,7 +6,7 @@ Install in a Magento project with `composer require commercekings/module-abandon
 release is published. Then enable its modules:
 
 ```sh
-bin/magento module:enable CommerceKings_Core CommerceKings_Consent CommerceKings_AbandonedCart
+bin/magento module:enable CommerceKings_Core CommerceKings_Consent CommerceKings_Notification CommerceKings_AbandonedCart
 bin/magento setup:upgrade
 bin/magento cache:clean
 ```
@@ -229,59 +229,22 @@ Other settings are hidden while **Enabled** is **No**.
 ## Deploy
 
 ```sh
-bin/magento module:enable CommerceKings_Core CommerceKings_Consent CommerceKings_ConsentDefaults CommerceKings_ConsentVanilla CommerceKings_AbandonedCart
+bin/magento module:enable CommerceKings_Core CommerceKings_Consent CommerceKings_ConsentDefaults CommerceKings_ConsentVanilla CommerceKings_Notification CommerceKings_AbandonedCart
 bin/magento setup:upgrade   # feature tables and consent schema
 ```
 
 - Define the chosen adapter's categories/services in your site module and map one optional choice to `cart_reminder`. Select that source in Consent settings. The ConsentDefaults preset maps `cart_reminder` to Personalization automatically; sites with explicit categories must add that mapping themselves.
 - Check the selected sender in **Stores → Configuration → General → Store Email Addresses**.
 - Verify the sender domain's **SPF and DKIM** (and DMARC) for the no-reply address before launch – otherwise reminders land in spam.
-- After deploying new code, **restart the resident consumer** (it keeps the old code in memory): stop the running `queue:consumers:start commerceKingsNotificationSend` process; `cron_consumers_runner` starts it again on the next cron run.
-- Magento's cron consumer runner (`cron_consumers_runner`) can start the consumer. `queue/consumers_wait_for_messages` controls whether it waits for more messages when the queue is empty.
+- After deploying new code, **restart the resident notification consumer** (see Queue transport).
 - A custom theme email footer can use `cart_reminder_email` to identify reminder messages.
 
 ## Queue transport
 
-The publisher, topology and consumer use Magento's deployment default connection. The same
-reminder handler and cart claims work with RabbitMQ (`amqp`) and Magento's database queue
-(`db`); no additional CommerceKings adapter module is required.
-
-For a shop without RabbitMQ, ensure `Magento_MysqlMq` is installed and enabled:
-
-```sh
-bin/magento module:status Magento_MysqlMq
-bin/magento module:enable Magento_MysqlMq
-```
-
-Merge these values into the existing `queue` section of `app/etc/env.php`:
-
-```php
-'queue' => [
-    'default_connection' => 'db',
-    'consumers_wait_for_messages' => 0,
-],
-```
-
-Keep the other deployment settings. `default_connection` affects every queue without an
-explicit XML connection; review other installed modules when changing it. Magento also
-defaults to `db` when no external broker or explicit default is configured. The optional
-`consumers_wait_for_messages` setting lets consumers exit when no messages remain.
-See Adobe's [deployment configuration reference](https://experienceleague.adobe.com/en/docs/commerce-operations/configuration-guide/files/config-reference-envphp).
-
-After enabling the module or changing transport, run:
-
-```sh
-bin/magento setup:upgrade
-bin/magento cache:clean config
-bin/magento queue:consumers:start commerceKingsNotificationSend --max-messages=100
-```
-
-Restart existing consumer processes after a transport change. Messages already queued are
-not moved between transports; drain the old queue before switching. Keep Magento cron
-running for cart discovery, consumer startup and the native SQL queue cleanup job.
-Ensure any `cron_consumers_runner/consumers` allowlist includes
-`commerceKingsNotificationSend`. Database delivery uses Magento's `queue`, `queue_message`
-and `queue_message_status` tables and adds work to the shop database.
+Reminders go through `CommerceKings_Notification`'s shared consumer `commerceKingsNotificationSend`.
+RabbitMQ (`amqp`) and Magento's database queue (`db`) both work; setup, consumer restarts and the cron
+allowlist are in [module-notification's README](https://github.com/commercekings/module-notification#queue-transport).
+Keep Magento cron running for cart discovery.
 
 A failed send releases the cart claim. Magento rejects that message; a later finder run
 can publish a new one if the cart is still eligible. This is the same policy on both
@@ -289,7 +252,7 @@ transports; switching to SQL does not add a per-cart retry limit or delivery bac
 
 ## Manual testing
 
-- Run the finder now: `bin/magento cron:run` (job `commercekings_abandoned_cart_find`), or set *Send after* to a few minutes on a test shop; send queued reminders with `bin/magento queue:consumers:start commerceKingsNotificationSend --max-messages=10`.
+- Run the finder now: `bin/magento cron:run` (job `commercekings_abandoned_cart_find`), or set *Inactivity delay (minutes)* to a few minutes on a test shop; send queued reminders with `bin/magento queue:consumers:start commerceKingsNotificationSend --max-messages=10`.
 - Watch `var/log/system.log` for `CommerceKings_AbandonedCart:` lines (queued, sent, skipped with the reason).
 - Use a **fresh private window** per scenario (private windows of one browser share cookies while any is open) and a second browser as "another device".
 - Simulate a lost session: browser dev tools → Cookies → delete the Magento session cookie (its name can vary), keep the banner cookie and `ck_consent_browser`; clear local/session storage.

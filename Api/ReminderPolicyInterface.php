@@ -20,8 +20,8 @@ interface ReminderPolicyInterface
     public function canSend(ReminderState $state): bool;
 
     /**
-     * Equivalent SQL for finder selection and atomic claims. The context describes the quote's
-     * table alias and store. Implementations must keep this condition consistent with canSend(),
+     * Equivalent SQL for finder selection and atomic claims. The context describes the reminder
+     * state's table alias and store. Implementations must keep this condition consistent with canSend(),
      * including after a previous reminder. New state belongs in the context or a policy's own
      * repository; additional required interface methods would break existing implementations.
      */

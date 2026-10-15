@@ -106,19 +106,19 @@ class CartReminderTest extends TestCase
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn () => $this->recipientSequence !== null
             ? array_shift($this->recipientSequence) : ($row ? ($row['customer_id'] === null ? ($row['contact_id'] ? 'a@test.com' : null) : $row['customer_email']) : null));
-        $history = $this->createStub(CooldownInterface::class);
-        $history->method('claim')->willReturnCallback(function () {
+        $cooldown = $this->createStub(CooldownInterface::class);
+        $cooldown->method('claim')->willReturnCallback(function () {
             if ($this->recipientClaimed) { return null; }
             $this->recipientClaimed = true;
             return 'claim-token';
         });
-        $history->method('release')->willReturnCallback(function ($email, $token) {
+        $cooldown->method('release')->willReturnCallback(function ($email, $token) {
             $this->releasedRecipients[] = [$email, $token];
             $this->recipientClaimed = false;
         });
         $notificationConfig = $this->createStub(NotificationConfig::class);
         $notificationConfig->method('getCooldownDays')->willReturn(7);
-        $mailer = new Mailer($builder, $this->emulation, $history, $notificationConfig);
+        $mailer = new Mailer($builder, $this->emulation, $cooldown, $notificationConfig);
         return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig, $this->carts());
     }
 

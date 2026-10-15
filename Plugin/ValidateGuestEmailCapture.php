@@ -9,7 +9,7 @@ use Magento\Framework\Filter\FilterManager;
 use Magento\Framework\Validator\EmailAddress;
 use Magento\Framework\Validator\StringLength;
 
-/** Validate primitive API input before the capture service can mutate a quote. */
+/** Validate primitive API input before the capture service can change a cart's reminder state. */
 class ValidateGuestEmailCapture
 {
     public function __construct(

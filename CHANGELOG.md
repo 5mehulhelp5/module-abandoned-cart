@@ -2,60 +2,31 @@
 
 ## Unreleased
 
-- Reminder state moved off Magento's `quote` table into `ck_abandoned_cart` (one row per cart, deleted with
-  the quote); guest emails are `commercekings/module-notification` contacts (`ck_notification_contact`).
-  The six `quote.ck_abandoned_*` columns are dropped on upgrade (pending reminders on existing installs are
-  not migrated). Claims stay single atomic UPDATEs (joined to `quote`). `ReminderQuery::column()` now
-  qualifies `ck_abandoned_cart` columns (e.g. `reminded_at`); `ReminderData::build()` takes the consent id.
+First release. Features:
 
-- Sending moved to `commercekings/module-notification`: the shared queue consumer `commerceKingsNotificationSend`
-  replaces `commerceKingsAbandonedCartRemind`, the cooldown table `ck_notification_cooldown` replaces
-  `ck_abandoned_cart_recipient` (dropped on upgrade), and *Email cooldown (days)* moved to CommerceKings > Notifications
-  (0 turns it off). The reminder itself (`Model\Notification\CartReminder`) keeps its checks and atomic claim.
-
-- Use CommerceKings_Core for the shared admin configuration tab and branding.
-
-- Simplify admin wording and use native field dependencies to hide settings while reminders are disabled.
-
-- Restore recipient cooldown with a configurable seven-day default, native keyed hashes, atomic owned claims, daily pruning and concurrent-worker regressions. Keep one reminder per cart.
-- Optionally add RFC 8058 headers to reminder emails without replacing their confirmation link or changing withdrawal cleanup.
-
-- Keep the delivery claim after SMTP returns successfully even if subsequent environment cleanup fails, preventing another reminder from a post-send exception. Add concurrent finder/consumer and interrupted-worker regressions.
-
-- Remove the development-only opt-out redirect, obsolete route fixtures/documentation and retired recipient-table migration metadata. Email opt-out belongs exclusively to Consent.
-
-- Register reminder cleanup through Consent's typed withdrawal pool instead of an event observer. Share the same field cleanup for guests and customers, preserve native Magento emails and delivery history, and allow durable retries against the original withdrawn consent IDs.
-
-- Keep captured guest reminder email and its change timestamp in dedicated quote columns. Preserve Magento checkout email during capture and withdrawal, resolve guest/customer recipients through a replaceable API, and include contact activity in the abandonment delay without extending quote lifetime or resetting delivery history.
-
-- Validate guest email through a global before plugin on `GuestEmailCaptureInterface`, using Magento's native `stringTrim` filter and `EmailAddress` / `StringLength` validators with the length limit in DI. Aggregate input errors without echoing email values; retain the single V1 endpoint, flat payload, explicit clearing and service authorization checks.
-
-- Refresh the mini-cart cookie using Magento's configured cookie lifetime and domain, with session cookies at zero lifetime; preserve Magento customer-data's root path.
-
-- Use Magento SQL expressions for queue/send claims and withdrawal cleanup; use Magento's JSON serializer for mini-cart cookie updates and tolerate malformed cookie values after restore.
-
-- Generate and verify recovery signatures exclusively through Magento's native encryptor, without a legacy raw-key fallback; test encoded/current keys, invalid keys, forged hashes and signer failures.
-
-- Document Magento's native SQL queue setup alongside RabbitMQ, remove RabbitMQ-only package/admin wording, and add transport-selectable sandbox delivery checks with failed-send retry and scoped SQL cleanup.
-
-- Reject forged recovery signatures before loading a quote; refuse signing with missing, empty or invalid deployment keys and reject validation safely.
-
-- Finalize the new policy API around typed state and SQL contexts before first publication, allowing additive state and history-backed policies without changing existing method signatures later.
-
-- Keep one reminder per cart through a replaceable policy API; retain a separate recipient cooldown without changing this policy contract. Inherit Magento quote lifetime per store, show read-only admin previews for lifetime and delivery frequency, and recheck delay/expiry during delivery and restore.
-
-- Authorize capture by quote website/store, retain scope in atomic writes and clears, verify customer acknowledgements, reject mismatched queue consents, and retire unsafe quote-only opt-out links.
-
-- Use Consent's shared withdrawal-link API and confirmation page, with module-owned cart cleanup.
-- Clarify reminder email wording without promising a saved cart snapshot, and distinguish an unavailable reminder link from the current cart.
-- Serialize guest email capture, acknowledge saved data, retry transient failures and clear stale guest capture on invalid or empty input.
-- Require confirmation and a form-key POST for guest restores; lock and reload carts, preserve destination details, validate stock and save merges atomically.
-- Add guest capture JavaScript tests and real quote integration tests for merging, concurrent requests and rollback.
-- Consent-based cart reminders, guarded queue processing and signed restore/opt-out links.
-- Prepare Composer metadata, Magento dependency bounds and source/distribution packaging for the first public release.
-- Adapt unit tests to PHPUnit 12 while retaining older data-provider annotations.
-- Use English UI defaults, remove bundled locale translations and replace fixture/example text with English; correct the documented greeting behavior.
-- Add PHP syntax/metadata/archive CI checks and explicit compatibility notes.
-- Align reminder rendering with Magento quote models, load masked ids through the resource model, and use declared product-type APIs for PHPStan level 5.
+- **Consent-based reminders:** one reminder email per abandoned cart, only with a valid `cart_reminder`
+  consent from `commercekings/module-consent` (not withdrawn, expired or from an older revision). Consent is
+  checked in PHP and repeated inside every atomic SQL claim, so a withdrawal at the same moment wins.
+- **Capture:** guests through `POST /V1/guest-carts/:cartId/ck-abandoned-email`
+  (`GuestEmailCaptureInterface`), validated by a global before plugin with Magento's native filters and
+  validators; logged-in customers on checkout through a form-key POST. Capture is authorized against the
+  cart's website and store. Magento's quote and its checkout email are never written.
+- **Data:** reminder state per cart in `ck_abandoned_cart` (consent id, browser id hash, capture, queue and
+  reminder times; deleted with the quote). Guest addresses are shared `commercekings/module-notification`
+  contacts; customers use their account email.
+- **Sending** through `commercekings/module-notification`: shared queue consumer
+  `commerceKingsNotificationSend` (RabbitMQ or Magento's database queue), optional recipient cooldown
+  (default seven days), store-emulated rendering and optional RFC 8058 one-click unsubscribe headers. A
+  failure after the mail server accepted the email never causes a second reminder.
+- **Delivery policy:** replaceable `ReminderPolicyInterface` (default one reminder per cart) with typed state
+  and SQL contexts; Magento's quote lifetime per store; finder and delivery recheck delay, expiry, cart
+  state and consent. Stale queue claims are released and queued again.
+- **Withdrawal:** registered with Consent's withdrawal pool; capture is cleared from open carts while
+  delivery history stays, so opting in again cannot cause a second reminder.
+- **Restore links:** signed with Magento's encryptor, confirmed by a form-key POST, bound to the browser
+  and store, with locked carts, stock validation and atomic merges.
+- **Admin:** CommerceKings > Abandoned Cart, with read-only previews of quote lifetime and reminders per cart.
+- English defaults, PHP 8.1–8.5, PHPStan level 5, unit, SQL integration and JavaScript tests, CI and
+  source/distribution packaging.
 
 No public release has been tagged or published yet.

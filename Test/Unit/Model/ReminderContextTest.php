@@ -23,15 +23,15 @@ class ReminderContextTest extends TestCase
         }
     }
 
-    public function testQuerySupportsQuoteIdentityAndPolicyColumnsInSelectionAndClaims(): void
+    public function testQuerySupportsCartIdentityAndPolicyColumnsInSelectionAndClaims(): void
     {
-        $selection = new ReminderQuery(2, 'q');
+        $selection = new ReminderQuery(2, 'c');
         $claim = new ReminderQuery(2);
         $this->assertSame(2, $selection->storeId);
-        $this->assertSame('q.entity_id', $selection->column('entity_id'));
-        $this->assertSame('q.ck_abandoned_reminded_at', $selection->column('ck_abandoned_reminded_at'));
-        $this->assertSame('entity_id', $claim->column('entity_id'));
-        $this->assertSame('ck_abandoned_reminded_at', $claim->column('ck_abandoned_reminded_at'));
+        $this->assertSame('c.quote_id', $selection->column('quote_id'));
+        $this->assertSame('c.reminded_at', $selection->column('reminded_at'));
+        $this->assertSame('quote_id', $claim->column('quote_id'));
+        $this->assertSame('reminded_at', $claim->column('reminded_at'));
     }
 
     public function testMalformedSqlIdentifiersAreRejectedBeforeBuildingACondition(): void

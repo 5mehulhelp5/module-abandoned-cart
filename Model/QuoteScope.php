@@ -7,7 +7,7 @@ use CommerceKings\Consent\Api\Data\Consent;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Store\Model\StoreManagerInterface;
 
-/** Authorize capture against the current website before reading consent or changing quote data. */
+/** Authorize capture against the current website before reading consent or changing the cart's reminder state. */
 class QuoteScope
 {
     public function __construct(
