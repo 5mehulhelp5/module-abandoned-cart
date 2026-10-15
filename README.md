@@ -114,7 +114,7 @@ checkout emails are copied automatically into the new field.
   - retries use the original consent IDs, so a later grant/capture remains untouched;
   - clearing a checkout email only clears that cart's capture; it does not withdraw browser consent.
 - **Opt-out** ("Unsubscribe") withdraws the cart's consent (`ConsentInterface::withdraw($id, 'email')` – with every other active reminder consent of that browser). That browser's old choice is refused (e.g. opted out on the phone, the old "yes" is still on the laptop – also after re-saving the banner for another category); switching the choice mapped to `cart_reminder` on again is a new consent. The address is never blocked.
-- **Banner revision raised** (Consent → Banner revision) or **purpose terms revision raised** (`etc/di.xml`, `terms_revision`): every consent given before stops being valid – waiting reminders are not sent; the visitor is asked again.
+- **Source revision raised** (Consent → Source revision) or **purpose terms revision raised** (`etc/di.xml`, `terms_revision`): every consent given before stops being valid – waiting reminders are not sent; the visitor is asked again.
 
 ## Abuse protection
 
@@ -164,7 +164,7 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 - **One reminder per cart, ever**, with the default `OncePerCart` policy. Distinct carts using the same email address also respect recipient cooldown. Adding products after the reminder does not send another.
 - **The restore link opens the cart as it is now**, not as it was in the email. Products the customer removed are not brought back (no snapshot); an emptied cart shows "This reminder link is no longer available. You can continue shopping with your current cart."
 - **Another device / cleared cookie / expired cookie → homepage.** The link only works in the browser that gave the consent (deliberate: nobody else sees the cart, email or address).
-- Visitors who answered the banner **before** the category existed are not asked again unless **Banner revision** (Consent section) is raised; until then the category stays off for them.
+- Visitors who answered the banner **before** the category existed are not asked again unless **Source revision** (Consent section) is raised; until then the category stays off for them.
 - **Scanner-safe opt-out:** GET/HEAD do not withdraw or change banner preferences; the visitor must explicitly submit the confirmation form. Consent's optional RFC 8058 Yes/No setting adds mail-client unsubscribe headers alongside the regular confirmation link. The header and visible link use the same signed URL and withdrawal cleanup. The sending provider must DKIM-sign both headers. Header insertion uses Magento's native Symfony mail API (verified on 2.4.9); an unsupported custom or legacy mail backend fails before sending when this option is enabled.
 - **Delivery is not atomic with SMTP.** The reminder timestamp is claimed before handoff. A hard worker interruption after claiming can leave a cart marked reminded even if nothing was sent; it is not automatically retried. Caught send failures release the claim, but an SMTP exception may itself be ambiguous. Review transport/provider evidence before manually retrying an uncertain attempt. Once `sendMessage()` returns successfully, a later emulation cleanup error keeps the claim to prevent a duplicate. The timestamp is not proof of inbox delivery.
 - Guest carts are deleted by Magento's own `sales_clean_quotes` after "Quote Lifetime" (default 30 days) with their email; the consent record stays in `CommerceKings_Consent` until its own cleanup.
@@ -363,7 +363,7 @@ and remove their own queue, message and status rows during cleanup.
 - Only unrelated purpose choices off → nothing changes for the reminder (the cart keeps its consent).
 - "Reject all" on checkout and on a product page → cleared (withdraw request 200, not 499).
 - On again → a new consent id stored (guest: also when returning to checkout with the prefilled email).
-- Banner revision raised → banner asks again; the old consent is invalid but not marked withdrawn; waiting reminders are not sent; accepting again → new consent.
+- Source revision raised → banner asks again; the old consent is invalid but not marked withdrawn; waiting reminders are not sent; accepting again → new consent.
 
 **Sending**
 - Cart with consent untouched past the delay → `published: 1`; email from no-reply with items, predefined options only, total, footnote, opt-out, footer label; greeted by a sanitised first name.
