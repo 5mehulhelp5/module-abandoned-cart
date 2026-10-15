@@ -28,7 +28,7 @@ Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (featur
    - guest: typing a valid email in checkout, or entering checkout with an email Magento prefilled → `POST /V1/ck-notification/subscriptions` `{"type":"cart_reminder","reference":"<masked cart id>","email":"…"}` (`js/email-capture-mixin.js`), 1 s after the last change. Requests are serialized and rapid edits coalesce to the latest email. A save is deduplicated only after the server acknowledges it, including an identical successful retry;
    - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also removes the guest's subscription;
    - customer: opening checkout (or switching the consent on there) → `POST /V1/ck-notification/subscriptions/mine` `{"type":"cart_reminder","reference":"<quote id>"}` (`js/customer-consent.js`, Magento's session REST for storefront AJAX); the email comes from the account. A change of consent or browser restarts the delay; re-opening checkout with the same consent does not.
-   - Stored by Notification: the cart's subscription (guest contact or customer, consent id, browser id hash, `captured_at`) in one INSERT that also checks the consent is still valid and the cart is still the authorized one (active, same store, same guest or customer) – a request still on its way can't undo a withdrawal. Magento's quote is not written.
+   - Stored by Notification: the cart's subscription (guest contact or customer, consent id, `captured_at`) in one INSERT that also checks the consent is still valid and the cart is still the authorized one (active, same store, same guest or customer) – a request still on its way can't undo a withdrawal. Magento's quote is not written.
 3. **Finder** (cron `commercekings_abandoned_cart_find`, every minute) publishes the carts that became due; the queue holds the backlog and the consumers set the pace (see *Flash sales* below). It selects active, nonempty carts with a subscription whose consent is valid, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_cart.queued_at`) and published to Notification's shared topic `commercekings.notification.send` as `cart_reminder|<subscription id>`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
 4. **Consumer** `commerceKingsNotificationSend` (`commercekings/module-notification`, shared by all notifications) hands the subscription to the `cart_reminder` type (`Model\Notification\CartReminder`) only while it still exists with a valid consent. The type re-checks the policy, store, consent, inactivity delay and quote expiry, then claims the cart atomically and sends in store emulation. Selection and claim share the policy's SQL condition. A failed send restores the prior reminder timestamp and clears the queue claim for retry. Duplicate messages cannot claim the same state twice.
 5. **Email** – the module ships a **neutral English default** (`view/frontend/email/reminder.html`, "Abandoned Cart Reminder"). Use your own: **Marketing > Email Templates > Add New Template**, load "Abandoned Cart Reminder", change text and design, select it in **Abandoned Cart > Email template**. Variables: `customer_name`, `items_html` (ready-made rows: picture, the store's predefined options only, qty × price), `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; the footer gets `cart_reminder_email="1"` for a label. Sender defaults to **General Contact** – use a no-reply address.
@@ -88,8 +88,8 @@ recipient claim; successful or interrupted handoffs retain it conservatively.
 
 Magento's `quote` table is not changed or written. Who subscribed a cart, with which consent, is its
 `commercekings/module-notification` subscription (`ck_notification_subscription`, type `cart_reminder`,
-reference = quote id): the guest contact (`ck_notification_contact`) or the customer, the consent id, the browser id
-hash (the restore link works only in this browser) and `captured_at` (last change; identical retries preserve it).
+reference = quote id): the guest contact (`ck_notification_contact`) or the customer, the consent id
+(the restore link works only in the browser that consent was given in) and `captured_at` (last change; identical retries preserve it).
 This module keeps only the send history in `ck_abandoned_cart` (one row per cart, created when it is first queued,
 deleted with the quote by Magento's cart cleanup):
 
@@ -115,7 +115,7 @@ Carts subscribed before this version need checkout capture again; nothing is mig
 
 - A **consent** = one choice in the consent source, recorded by `CommerceKings_Consent` with its own id.
 - **Switched off in the consent source** (incl. "reject all", on any page): `CommerceKings_Consent` commits withdrawal and pending cleanup together, then invokes `CommerceKings\Notification\Model\WithdrawalHandler`, registered for purpose `cart_reminder` in this module's `di.xml`. It deletes **every subscription with those consent IDs**, including the abandoned cart of an expired session. Failed cleanup remains pending for Consent's cron retry; reminders are blocked as soon as consent is revoked. On guest checkout the subscribe endpoint is also called with an empty email.
-  - the subscription (guest contact link, consent and browser binding) is removed; the send history stays;
+  - the subscription (guest contact link and consent) is removed; the send history stays;
   - Magento checkout email is preserved for guests and customers.
   - retries use the original consent IDs, so a later grant/subscription remains untouched;
   - clearing a checkout email only removes that cart's subscription; it does not withdraw browser consent.
@@ -140,11 +140,15 @@ Older development links can stop working when their raw-key signatures differ fr
 current-key signatures. Use a fresh cart to generate a reminder when testing this change. Comparison uses
 `hash_equals`; password-hash formats and unkeyed hashes cannot authorize recovery.
 
-**Restore** `/cartreminder/cart/restore`:
+**Restore** `/cartreminder/cart/restore` – only when the subscription's permission can identify the visitor
+(`identifiesVisitor()`, true with Consent). Otherwise `restore_url` is Magento's cart page (`checkout/cart`): the
+visitor's own session or account cart, with no restore or merge.
+
+Restore steps:
 
 - invalid/forged signature or changed quote id → homepage before any quote lookup;
 - link generation requires a nonempty string deployment `crypt/key`; missing, blank or invalid keys stop generation and signature validation rejects safely;
-- the browser id (`CommerceKings_Consent`, cookie `ck_consent_browser`) must match the cart's subscription (`ck_notification_subscription.browser_hash`), and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
+- the visitor must be the one who gave the subscription's permission – Notification's `SubscriptionPermissionInterface::isCurrentVisitor()`; with Consent: the browser id (cookie `ck_consent_browser`) must match the browser the consent was given in – and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
 - cart ordered/closed, emptied or expired under Magento's quote lifetime, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `reminded_at`) → notice "This reminder link is no longer available. You can continue shopping with your current cart." (owner only);
 - customer cart → cart page if logged in as that customer, otherwise login page with "Sign in to continue shopping – your cart is waiting for you.";
 - guest cart → **GET shows a confirmation page without merging or replacing the session cart**. If it is already the session cart, the visitor goes straight to the cart page;

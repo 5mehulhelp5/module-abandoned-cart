@@ -18,7 +18,6 @@ use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart;
 use CommerceKings\AbandonedCart\Model\RestoreAccess;
-use CommerceKings\Consent\Api\BrowserIdentityInterface;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
 use CommerceKings\Consent\Api\Data\Consent;
@@ -118,7 +117,7 @@ class ReminderPolicyTest extends TestCase
             'items_count' => 1, 'updated_at' => $updatedAt], ['entity_id = ?' => $id]);
         $this->resource->getConnection()->insert($this->table(SubscriptionManagement::TABLE), [
             'type' => CartReminder::CODE, 'reference_id' => $id, 'store_id' => $this->storeIds[$days], 'subject_key' => '',
-            'consent_id' => 'fixture-consent', 'browser_hash' => 'fixture-browser', 'captured_at' => $updatedAt]);
+            'consent_id' => 'fixture-consent', 'captured_at' => $updatedAt]);
         $this->state($id, ['email' => $this->email]);
         return $id;
     }
@@ -157,7 +156,7 @@ class ReminderPolicyTest extends TestCase
             ->from(['q' => $this->table('quote')])
             ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
-                ['subscription_id', 'contact_id', 'consent_id', 'browser_hash', 'captured_at'])
+                ['subscription_id', 'contact_id', 'consent_id', 'captured_at'])
             ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id', ['queued_at', 'reminded_at'])
             ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email'])
             ->where('q.entity_id = ?', $id));
@@ -499,8 +498,8 @@ class ReminderPolicyTest extends TestCase
     {
         $id = $this->quote(2, 3 * 86400);
         $this->state($id, ['reminded_at' => gmdate('Y-m-d H:i:s')]);
-        $browser = $this->createStub(BrowserIdentityInterface::class);
-        $access = new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores, $this->lifetime(),
+        $access = new RestoreAccess($this->om->get(LinkSignature::class),
+            $this->createStub(\CommerceKings\Notification\Api\SubscriptionPermissionInterface::class), $this->stores, $this->lifetime(),
             $this->om->get(CartTable::class), $this->om->get(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class));
         $quote = $this->om->get(CartRepositoryInterfaceFactory::class)->create()->get($id);
         $this->assertFalse($access->isAvailable($quote));

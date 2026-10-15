@@ -4,20 +4,22 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Model;
 
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
-use CommerceKings\Consent\Api\BrowserIdentityInterface;
+use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Api\SubscriptionRepositoryInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Store\Model\StoreManagerInterface;
 
 /**
- * Restore authorization is checked again against locked, freshly loaded carts on POST. The link works only in
- * the browser that subscribed the cart; a withdrawal deletes the subscription, and with it the restore.
+ * Restore authorization is checked again against locked, freshly loaded carts on POST. The link works only for
+ * the visitor who gave the subscription's permission (Notification's permission must be able to tell - with
+ * CommerceKings_Consent: the browser the consent was given in); a withdrawal deletes the subscription, and with it
+ * the restore. When the permission cannot identify visitors, reminders link to the cart page instead.
  */
 class RestoreAccess
 {
     public function __construct(
         private readonly LinkSignature $signature,
-        private readonly BrowserIdentityInterface $browser,
+        private readonly SubscriptionPermissionInterface $permission,
         private readonly StoreManagerInterface $stores,
         private readonly QuoteLifetime $lifetime,
         private readonly CartTable $carts,
@@ -34,10 +36,10 @@ class RestoreAccess
     public function isOwner(Quote $quote, string $token): bool
     {
         $subscription = $this->subscriptions->find(CartReminder::CODE, (int)$quote->getId())[0] ?? null;
-        $hash = $subscription?->browserHash ?? '';
-        return (int)$quote->getStoreId() === (int)$this->stores->getStore()->getId()
+        return $subscription !== null
+            && (int)$quote->getStoreId() === (int)$this->stores->getStore()->getId()
             && $this->isSigned((int)$quote->getId(), $token)
-            && $hash !== '' && hash_equals($hash, $this->browser->hash());
+            && $this->permission->isCurrentVisitor($subscription->consentId);
     }
 
     public function isAvailable(Quote $quote): bool

@@ -5,6 +5,7 @@ namespace CommerceKings\AbandonedCart\Model;
 
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
+use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use Magento\Catalog\Helper\Image as ImageHelper;
 use Magento\Catalog\Helper\Product\Configuration as ProductConfiguration;
 use Magento\Framework\Escaper;
@@ -38,7 +39,8 @@ class ReminderData
         private readonly UrlInterface $url,
         private readonly Escaper $escaper,
         private readonly UnsubscribeLinkInterface $unsubscribeLinks,
-        private readonly LinkSignature $signature
+        private readonly LinkSignature $signature,
+        private readonly SubscriptionPermissionInterface $permission
     ) {
     }
 
@@ -53,19 +55,31 @@ class ReminderData
             'customer_name' => $this->greetingName((string)($quote->getCustomerFirstname() ?: $quote->getBillingAddress()->getFirstname())),
             'items_html' => $this->itemsHtml($quote),
             'grand_total' => $this->price((float)$quote->getGrandTotal()),
-            'restore_url' => $this->url->getUrl('cartreminder/cart/restore', [
-                '_query' => [
-                    'q' => (int)$quote->getId(),
-                    't' => $this->signature->sign('restore', (int)$quote->getId()),
-                ],
-                '_nosid' => true,
-            ]),
+            'restore_url' => $this->restoreUrl($quote),
             'store_url' => $this->url->getUrl('', ['_nosid' => true]),
             'contact_url' => $this->url->getUrl('contact', ['_nosid' => true]),
             'optout_url' => $this->unsubscribeLinks->getUrl(new UnsubscribeContext($consentId, (int)$quote->getStoreId(),
                 $context + ['quote_id' => (int)$quote->getId(),
                     'customer_id' => $quote->getCustomerId() ? (int)$quote->getCustomerId() : null])),
         ];
+    }
+
+    /**
+     * The signed restore link only when the permission can tell who subscribed (RestoreAccess hands the cart to
+     * that visitor only); otherwise Magento's cart page - the visitor's own session or account cart.
+     */
+    private function restoreUrl(Quote $quote): string
+    {
+        if (!$this->permission->identifiesVisitor()) {
+            return $this->url->getUrl('checkout/cart', ['_nosid' => true]);
+        }
+        return $this->url->getUrl('cartreminder/cart/restore', [
+            '_query' => [
+                'q' => (int)$quote->getId(),
+                't' => $this->signature->sign('restore', (int)$quote->getId()),
+            ],
+            '_nosid' => true,
+        ]);
     }
 
     private function itemsHtml(Quote $quote): string

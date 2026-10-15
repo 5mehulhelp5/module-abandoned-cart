@@ -15,9 +15,11 @@ use CommerceKings\Consent\Api\ConsentInterface;
 use CommerceKings\Consent\Api\Data\Consent;
 use CommerceKings\Consent\Api\Data\WithdrawalContext;
 use CommerceKings\Consent\Api\WithdrawalHandlerInterface;
+use CommerceKings\Consent\Model\ConsentStore;
 use CommerceKings\Consent\Model\WithdrawalPool;
 use CommerceKings\Notification\Api\ContactRepositoryInterface;
 use CommerceKings\Notification\Model\ContactRepository;
+use CommerceKings\Notification\Model\Consent\ConsentPermission;
 use CommerceKings\Notification\Model\SubscriptionManagement;
 use CommerceKings\Notification\Model\SubscriptionTypePool;
 use Magento\Customer\Api\CustomerRepositoryInterface;
@@ -120,7 +122,7 @@ class CartSubscriptionTest extends TestCase
         return $this->resource->getTableName($name);
     }
 
-    /** A guest cart subscribed with captured@example.test under consent "original" from browser "original-browser". */
+    /** A guest cart subscribed with captured@example.test under consent "original". */
     private function quote(bool $foreign = false): array
     {
         $quote = $this->om->get(QuoteFactory::class)->create();
@@ -146,7 +148,7 @@ class CartSubscriptionTest extends TestCase
         $this->resource->getConnection()->insertOnDuplicate($this->table(SubscriptionManagement::TABLE), [
             'type' => CartReminder::CODE, 'reference_id' => $id, 'store_id' => $storeId, 'subject_key' => '',
             'contact_id' => $contactId, 'customer_id' => $customerId, 'consent_id' => $consentId,
-            'browser_hash' => 'original-browser', 'captured_at' => '2026-01-01 00:00:00',
+            'captured_at' => '2026-01-01 00:00:00',
         ]);
     }
 
@@ -158,7 +160,7 @@ class CartSubscriptionTest extends TestCase
             ->from(['q' => $this->table('quote')], ['store_id', 'customer_email', 'updated_at'])
             ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
-                ['captured_at', 'consent_id', 'browser_hash', 'customer_id'])
+                ['captured_at', 'consent_id', 'customer_id'])
             ->joinLeft(['c' => $this->table(CartTable::TABLE)], 'c.quote_id = q.entity_id', ['reminded_at'])
             ->joinLeft(['n' => $this->table(ContactRepository::TABLE)], 'n.contact_id = s.contact_id', ['email'])
             ->where('q.entity_id = ?', $id));
@@ -178,14 +180,14 @@ class CartSubscriptionTest extends TestCase
     {
         $guard = $this->createStub(ConsentGuardInterface::class);
         $guard->method('validCondition')->willReturn($guardValid ? '1 = 1' : '0 = 1');
-        $browser = $this->createStub(BrowserIdentityInterface::class);
-        $browser->method('hash')->willReturn('new-browser');
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturn($enabled);
         $type = new CartSubscription($this->om->get(QuoteIdMaskFactory::class), $this->om->get(QuoteIdMask::class),
             $scope ?? $this->om->get(QuoteScope::class), $config, $this->resource);
         return new SubscriptionManagement($this->resource, new SubscriptionTypePool([CartReminder::CODE => $type]),
-            $consent ?? $this->consent(), $guard, $browser, $this->om->get(ContactRepositoryInterface::class), $this->stores,
+            new ConsentPermission($consent ?? $this->consent(), $guard, $this->stores,
+                $this->createStub(BrowserIdentityInterface::class), $this->createStub(ConsentStore::class)),
+            $this->om->get(ContactRepositoryInterface::class), $this->stores,
             new EmailAddress(), new StringLength(['max' => 255]), $this->om->create(FilterManager::class));
     }
 
@@ -219,7 +221,6 @@ class CartSubscriptionTest extends TestCase
         $this->assertTrue($management->subscribeGuest(CartReminder::CODE, $mask, 'new@example.test'));
         $this->assertTrue($management->subscribeGuest(CartReminder::CODE, $mask, 'new@example.test'));
         $this->assertSame('new-consent', $this->row($id)['consent_id']);
-        $this->assertSame('new-browser', $this->row($id)['browser_hash']);
         $this->assertSame('new@example.test', $this->row($id)['email']);
         $this->assertSame('fixture@example.test', $this->row($id)['customer_email']);
         $this->assertSame($nativeUpdatedAt, $this->row($id)['updated_at'], 'Magento\'s quote is not written');
@@ -375,7 +376,7 @@ class CartSubscriptionTest extends TestCase
         $handler->execute($context); // At-least-once retry is harmless.
         foreach ([$guest, $registered] as $id) {
             $after = $this->row($id);
-            foreach (['email', 'captured_at', 'consent_id', 'browser_hash'] as $field) {
+            foreach (['email', 'captured_at', 'consent_id'] as $field) {
                 $this->assertNull($after[$field]);
             }
             foreach (['customer_email', 'updated_at', 'reminded_at'] as $field) {

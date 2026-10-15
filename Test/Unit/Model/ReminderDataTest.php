@@ -8,6 +8,7 @@ use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
 use CommerceKings\AbandonedCart\Model\ConsentUnsubscribeLink;
 use CommerceKings\Consent\Api\WithdrawalLinkInterface;
+use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use Magento\Catalog\Helper\Image as ImageHelper;
@@ -25,6 +26,8 @@ use PHPUnit\Framework\TestCase;
 
 class ReminderDataTest extends TestCase
 {
+    /** whether the subscription's permission can tell who subscribed (Consent: yes) */
+    private bool $identifiesVisitor = true;
     private ?UnsubscribeLinkInterface $unsubscribe = null;
 
     use DbTestTrait;
@@ -55,8 +58,10 @@ class ReminderDataTest extends TestCase
         $withdrawal->method('getUrl')->willReturnCallback(fn ($id) => "https://shop/ckconsent/optout?c=$id&t=o");
         $signature = $this->createStub(LinkSignature::class);
         $signature->method('sign')->willReturnCallback(fn ($purpose, $id) => "$purpose-$id");
+        $permission = $this->createStub(SubscriptionPermissionInterface::class);
+        $permission->method('identifiesVisitor')->willReturnCallback(fn () => $this->identifiesVisitor);
         return new ReminderData($image, $configuration, $price, $url, $escaper,
-            $this->unsubscribe ?? new ConsentUnsubscribeLink($withdrawal), $signature);
+            $this->unsubscribe ?? new ConsentUnsubscribeLink($withdrawal), $signature, $permission);
     }
 
     private function quote(array $items = [], ?string $firstname = 'Jane', ?string $billingName = null): Quote
@@ -85,6 +90,16 @@ class ReminderDataTest extends TestCase
         $this->assertStringNotContainsString('a@test.com', $vars['restore_url'] . $vars['optout_url']);
         $this->assertSame('https://shop/contact', $vars['contact_url']);
         $this->assertTrue($this->urls['cartreminder/cart/restore']['_nosid']);
+    }
+
+    /** Without a way to tell who subscribed (opt-out), nobody gets a restore link: the cart page shows the visitor's own cart. */
+    public function testWithoutVisitorIdentificationTheLinkIsTheCartPage(): void
+    {
+        $this->identifiesVisitor = false;
+        $vars = $this->data()->build($this->quote(), 'cid-1');
+        $this->assertSame('https://shop/checkout/cart', $vars['restore_url']);
+        $this->assertTrue($this->urls['checkout/cart']['_nosid']);
+        $this->assertArrayNotHasKey('cartreminder/cart/restore', $this->urls, 'no signed link is made');
     }
 
     public function testTotalAndGreeting(): void

@@ -6,7 +6,7 @@ namespace CommerceKings\AbandonedCart\Test\Integration;
 use CommerceKings\AbandonedCart\Model\CartRestore;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Model\RestoreAccess;
-use CommerceKings\Consent\Api\BrowserIdentityInterface;
+use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\CatalogInventory\Api\StockRegistryInterface;
 use Magento\Framework\App\Bootstrap;
@@ -80,7 +80,7 @@ class CartRestoreTest extends TestCase
         // the cart's subscription from the owner browser (Notification) and its send history: reminder sent
         $this->resource->getConnection()->insert($this->resource->getTableName('ck_notification_subscription'), [
             'type' => 'cart_reminder', 'reference_id' => (int)$quote->getId(), 'store_id' => (int)$quote->getStoreId(),
-            'subject_key' => '', 'consent_id' => 'fixture-consent', 'browser_hash' => self::HASH]);
+            'subject_key' => '', 'consent_id' => 'fixture-consent']);
         $carts = $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class);
         $carts->ensure((int)$quote->getId());
         $this->resource->getConnection()->update($carts->name(),
@@ -90,9 +90,10 @@ class CartRestoreTest extends TestCase
 
     private function access(string $hash = self::HASH): RestoreAccess
     {
-        $browser = $this->createStub(BrowserIdentityInterface::class);
-        $browser->method('hash')->willReturn($hash);
-        return new RestoreAccess($this->om->get(LinkSignature::class), $browser, $this->stores,
+        // the fixture consent was given in browser self::HASH; this visitor's browser is $hash
+        $permission = $this->createStub(SubscriptionPermissionInterface::class);
+        $permission->method('isCurrentVisitor')->willReturnCallback(fn ($ref) => $ref === 'fixture-consent' && $hash === self::HASH);
+        return new RestoreAccess($this->om->get(LinkSignature::class), $permission, $this->stores,
             $this->om->get(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class), $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class),
             $this->om->get(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class));
     }

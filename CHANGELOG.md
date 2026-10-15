@@ -34,6 +34,9 @@ First release. Features:
   while the send history stays, so opting in again cannot cause a second reminder.
 - **Unsubscribe link:** replaceable `UnsubscribeLinkInterface` with an `UnsubscribeContext` (consent id, store
   and named attributes: cart, customer, subscription, recipient); the default is Consent's signed withdrawal link.
+- **Restore without a browser in Notification:** the restore link asks Notification's permission whether the
+  current visitor gave the subscription's permission (Consent: the consent's browser); a permission that cannot tell
+  makes `restore_url` the cart page.
 - **Restore links:** signed with Magento's encryptor, confirmed by a form-key POST, bound to the browser
   and store, with locked carts and atomic merges that behave like Magento's sign-in merge (stock is enforced at checkout).
 - **Admin:** CommerceKings > Abandoned Cart, with read-only previews of quote lifetime and reminders per cart.
