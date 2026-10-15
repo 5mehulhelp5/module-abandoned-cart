@@ -69,7 +69,7 @@ expiry. A reminder sent near expiry can therefore have a shorter restore window.
 quote lifetime affects pending delivery and restore checks; this module never extends retention.
 
 Each cart can receive one reminder. A separate recipient cooldown also limits sends across
-all carts and stores sharing an email address. **Recipient cooldown (days)** is a global admin
+all carts and stores sharing an email address. **Email cooldown (days)** is a global admin
 setting, default **7**, minimum **1**, under CommerceKings > Abandoned Cart. Deferred carts
 remain unsent and may become eligible after the cooldown if their quote and consent are still valid.
 
@@ -211,11 +211,13 @@ GraphQL is covered only if a resolver calls this service. This module declares n
 
 ## Settings (default scope unless noted)
 
+Other settings are hidden while **Enabled** is **No**.
+
 | Field | Default |
 |---|---|
 | Enabled (store) | No – switch on after setting the sender and the banner category |
-| Send after (minutes untouched) | 180 |
-| Magento quote lifetime (read-only, selected scope) | Inherited from Sales > Checkout > Shopping Cart; normally 30 days |
+| Inactivity delay (minutes) | 180 |
+| Cart lifetime (days, read-only, selected scope) | Inherited from Sales > Checkout > Shopping Cart; normally 30 days |
 | Reminders per cart (read-only) | `1 (one-time)`, reported by the delivery policy |
 | Recipient cooldown (days, global) | 7; applies across stores and carts sharing an email address |
 | Email template (store) | `commercekings_abandoned_cart_general_template` |

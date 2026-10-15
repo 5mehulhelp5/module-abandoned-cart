@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Simplify admin wording and use native field dependencies to hide settings while reminders are disabled.
+
 - Restore recipient cooldown with a configurable seven-day default, native keyed hashes, atomic owned claims, daily pruning and concurrent-worker regressions. Keep one reminder per cart.
 - Optionally add RFC 8058 headers to reminder emails without replacing their confirmation link or changing withdrawal cleanup.
 
