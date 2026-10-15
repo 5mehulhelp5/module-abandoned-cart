@@ -29,7 +29,12 @@
                 <field id="reminders_per_cart" translate="label comment" type="label" sortOrder="35" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Reminders per cart (read-only)</label>
                     <frontend_model>CommerceKings\AbandonedCart\Block\Adminhtml\System\Config\ReminderPolicy</frontend_model>
-                    <comment>Defined by the delivery policy in code. Distinct eligible carts using the same email address can each receive a reminder.</comment>
+                    <comment>Defined by the delivery policy in code. The recipient cooldown also limits reminders across carts sharing an email address.</comment>
+                </field>
+                <field id="recipient_cooldown_days" translate="label comment" type="text" sortOrder="37" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Recipient cooldown (days)</label>
+                    <comment>Default: 7 days. Applies across all stores and carts using the same email address. Deferred carts remain eligible after the cooldown if consent and the quote are still valid.</comment>
+                    <validate>validate-digits validate-greater-than-zero</validate>
                 </field>
                 <field id="template" translate="label" type="select" sortOrder="40" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Email template</label>

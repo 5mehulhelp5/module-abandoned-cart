@@ -8,6 +8,7 @@ use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
+use CommerceKings\AbandonedCart\Model\RecipientHistory;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
@@ -25,7 +26,7 @@ use Psr\Log\LoggerInterface;
  * message was lost) is released first, so this same run queues it again. A duplicate message is
  * harmless - the consumer's own claim lets only one delivery send.
  *
- * Each cart is independent, including carts using the same email address. Store settings and policy
+ * Recipient cooldown suppresses recent addresses. Store settings and policy
  * conditions are repeated in the atomic queue claim so a stale selection cannot authorize delivery.
  */
 class FindAbandonedCarts
@@ -43,7 +44,8 @@ class FindAbandonedCarts
         private readonly QuoteLifetime $lifetime,
         private readonly StoreManagerInterface $stores,
         private readonly LoggerInterface $logger,
-        private readonly ReminderEmailResolverInterface $recipients
+        private readonly ReminderEmailResolverInterface $recipients,
+        private readonly RecipientHistory $history
     ) {
     }
 
@@ -89,7 +91,7 @@ class FindAbandonedCarts
     }
 
     /**
-     * Up to BATCH eligible carts, oldest first. Email addresses do not group or suppress carts.
+     * Up to BATCH eligible carts, oldest first, excluding recipients still in cooldown.
      *
      * @return int[]
      */
@@ -107,7 +109,8 @@ class FindAbandonedCarts
         do {
             $ids = $db->fetchCol((clone $select)->limit(self::BATCH, $offset));
             foreach ($ids as $id) {
-                if ($this->recipients->resolve((int)$id) !== null) {
+                $email = $this->recipients->resolve((int)$id);
+                if ($email !== null && !$this->history->isRecent($email)) {
                     $due[] = (int)$id;
                     if (count($due) === self::BATCH) {
                         return $due;

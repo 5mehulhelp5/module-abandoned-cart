@@ -11,5 +11,18 @@
         "index": {
             "QUOTE_CK_ABANDONED_CONSENT_ID": true
         }
+    },
+    "ck_abandoned_cart_recipient": {
+        "column": {
+            "recipient_hash": true,
+            "reminded_at": true,
+            "claim_token": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        },
+        "index": {
+            "CK_ABANDONED_CART_RECIPIENT_REMINDED_AT": true
+        }
     }
 }

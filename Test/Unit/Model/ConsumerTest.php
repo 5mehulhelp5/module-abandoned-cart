@@ -47,6 +47,8 @@ class ConsumerTest extends TestCase
     private bool $scopeMatches = true;
     private ?array $recipientSequence = null;
     private bool $oneClick = false;
+    private bool $recipientClaimed = false;
+    private array $releasedRecipients = [];
     private bool $headerSupport = true;
     private \Symfony\Component\Mime\Email $nativeMessage;
     private string $optoutUrl = 'https://shop.test/ckconsent/optout?c=id&t=signature';
@@ -100,7 +102,17 @@ class ConsumerTest extends TestCase
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn () => $this->recipientSequence !== null
             ? array_shift($this->recipientSequence) : ($row ? ($row['customer_id'] === null ? $row['ck_abandoned_email'] : $row['customer_email']) : null));
-        return new Consumer($this->resource(), $repo, $data, $builder, $this->emulation, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig);
+        $history = $this->createStub(\CommerceKings\AbandonedCart\Model\RecipientHistory::class);
+        $history->method('claim')->willReturnCallback(function () {
+            if ($this->recipientClaimed) { return null; }
+            $this->recipientClaimed = true;
+            return 'claim-token';
+        });
+        $history->method('release')->willReturnCallback(function ($email, $token) {
+            $this->releasedRecipients[] = [$email, $token];
+            $this->recipientClaimed = false;
+        });
+        return new Consumer($this->resource(), $repo, $data, $builder, $this->emulation, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig, $history);
     }
 
     /** @dataProvider skipCases */
@@ -136,13 +148,27 @@ class ConsumerTest extends TestCase
         $this->assertSame(['CommerceKings_AbandonedCart: cart 42 skipped (consent purpose / website mismatch)'], $this->logs);
     }
 
-    public function testTwoCartsUsingTheSameAddressBothSend(): void
+    public function testTwoCartsUsingTheSameAddressSendOnlyOnceDuringCooldown(): void
     {
         $consumer = $this->consumer();
         $consumer->process('42');
         $consumer->process('43');
-        $this->assertSame(2, $this->sentMessages);
-        $this->assertSame([42, 43], array_map(fn ($update) => $update['where']['entity_id = ?'], $this->updates));
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertNull($this->updates[2]['data']['ck_abandoned_reminded_at']);
+        $this->assertNull($this->updates[2]['data']['ck_abandoned_queued_at']);
+        $this->assertSame([], $this->releasedRecipients);
+    }
+
+    public function testFailedSendReleasesRecipientClaimForRetry(): void
+    {
+        $consumer = $this->consumer();
+        $this->sendFails = true;
+        try { $consumer->process('42'); $this->fail('Expected SMTP failure'); }
+        catch (\RuntimeException $e) { $this->assertSame('SMTP down', $e->getMessage()); }
+        $this->assertSame([['a@test.com', 'claim-token']], $this->releasedRecipients);
+        $this->sendFails = false;
+        $consumer->process('42');
+        $this->assertSame(1, $this->sentMessages);
     }
 
     public function testExpiredQuoteCannotClaimOrSend(): void
@@ -306,6 +332,7 @@ class ConsumerTest extends TestCase
         $originalVars = $this->mail['setTemplateVars'];
         $this->nativeMessage->getHeaders()->addTextHeader('List-Unsubscribe', '<https://old.test/unsubscribe>');
         $this->oneClick = true;
+        $this->recipientClaimed = false; // The independent second delivery is outside its cooldown.
         $consumer->process('43');
         $this->assertSame('<' . $this->optoutUrl . '>', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe'));
         $this->assertSame('List-Unsubscribe=One-Click', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe-Post'));
@@ -356,5 +383,6 @@ class ConsumerTest extends TestCase
         }
         $this->assertSame(1, $this->sentMessages);
         $this->assertCount(1, $this->updates, 'Keep the existing reminder claim after successful SMTP handoff');
+        $this->assertSame([], $this->releasedRecipients, 'Preserve recipient suppression after SMTP handoff');
     }
 }

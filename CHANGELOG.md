@@ -2,9 +2,10 @@
 
 ## Unreleased
 
+- Restore recipient cooldown with a configurable seven-day default, native keyed hashes, atomic owned claims, daily pruning and concurrent-worker regressions. Keep one reminder per cart.
 - Optionally add RFC 8058 headers to reminder emails without replacing their confirmation link or changing withdrawal cleanup.
 
-- Keep the delivery claim after SMTP returns successfully even if subsequent environment cleanup fails, preventing another reminder from a post-send exception. Add concurrent finder/consumer and interrupted-worker regressions; keep independent-cart sending without a recipient cooldown.
+- Keep the delivery claim after SMTP returns successfully even if subsequent environment cleanup fails, preventing another reminder from a post-send exception. Add concurrent finder/consumer and interrupted-worker regressions.
 
 - Remove the development-only opt-out redirect, obsolete route fixtures/documentation and retired recipient-table migration metadata. Email opt-out belongs exclusively to Consent.
 
@@ -26,7 +27,7 @@
 
 - Finalize the new policy API around typed state and SQL contexts before first publication, allowing additive state and history-backed policies without changing existing method signatures later.
 
-- Keep one reminder per cart through a replaceable policy API; remove cross-cart email cooldown and recipient history. Inherit Magento quote lifetime per store, show read-only admin previews for lifetime and delivery frequency, and recheck delay/expiry during delivery and restore.
+- Keep one reminder per cart through a replaceable policy API; retain a separate recipient cooldown without changing this policy contract. Inherit Magento quote lifetime per store, show read-only admin previews for lifetime and delivery frequency, and recheck delay/expiry during delivery and restore.
 
 - Authorize capture by quote website/store, retain scope in atomic writes and clears, verify customer acknowledgements, reject mismatched queue consents, and retire unsafe quote-only opt-out links.
 

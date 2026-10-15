@@ -103,11 +103,11 @@ while (!is_file($barrier . '.go')) {
 }
 if ($mode === 'finder') {
     (new FindAbandonedCarts($config, $resource, $guard, $publisher, new OncePerCart(), $lifetime,
-        $stores, new NullLogger(), $recipients))->execute();
+        $stores, new NullLogger(), $recipients, $om->get(\CommerceKings\AbandonedCart\Model\RecipientHistory::class)))->execute();
 } else {
     $consumer = new Consumer($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
         $builder, $emulation, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
-        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class));
+        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class), $om->get(\CommerceKings\AbandonedCart\Model\RecipientHistory::class));
     foreach ($ids as $id) { $consumer->process((string)$id); }
 }
 echo json_encode(['published' => $published, 'sent' => $sent]), PHP_EOL;

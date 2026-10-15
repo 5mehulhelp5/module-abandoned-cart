@@ -1,23 +1,25 @@
 # Compatibility and verification
 
+The first-release runtime target is Magento Open Source 2.4.9 with PHP 8.5 and Luma.
 The Composer PHP range is a dependency constraint, not a claim that every Magento/PHP
 combination has passed runtime testing.
 
 | Magento Open Source | PHP | Runtime verification |
 | --- | --- | --- |
 | 2.4.9 | 8.5 | Passed locally: Composer, PHP lint, DI compilation, PHPStan level 5, unit/JavaScript tests and quote integration tests |
-| Older supported releases | 8.1–8.4 | Pending; use a matching Magento dependency set and services |
+| Other Magento releases | 8.1–8.4 | Unverified; use a matching Magento dependency set and services |
 
 The five-package sandbox also checks consent mapping against temporary database tables,
 the JavaScript lifecycle, and native Vanilla consent choices, guest checkout capture, local
 reminder delivery, confirmed restore/merge and unsubscribe in a browser. Quote integration
 tests use Magento demo data and cover rollback, stock limits and concurrent restores.
-Reminder SQL regressions also cover independent same-address carts, store-specific quote lifetime, late delivery and restore expiry.
+Reminder SQL regressions also cover same-address cooldown and parallel recipient claims, store-specific quote lifetime, late delivery and restore expiry.
 Endpoint regressions also cover website isolation, strict form keys, malformed input, HEAD safety and link replay. Its database is MariaDB 11.8. These checks do not certify other themes, third-party
 tracking scripts, checkout customizations or Adobe Commerce-specific features.
 
-Both native SQL (`Magento_MysqlMq`, connection `db`) and RabbitMQ 4.3 (`amqp`) passed all 29
-isolated browser scenarios each on Magento 2.4.9 / PHP 8.5 / MariaDB 11.8. Checks include native publication and
+The sandbox provides 30 isolated browser scenarios for native SQL (`Magento_MysqlMq`, connection
+`db`) and RabbitMQ 4.3 (`amqp`) on Magento 2.4.9 / PHP 8.5 / MariaDB 11.8. A complete rerun on
+both transports remains a release gate after restoring recipient cooldown. Checks include native publication and
 consumer dispatch, duplicate protection, acknowledgement/rejection status, failed-send retry,
 restore/withdrawal and cleanup of run-owned queue rows. Selection without external broker
 configuration is checked through Magento's default connection provider. This does not prove

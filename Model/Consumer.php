@@ -48,7 +48,8 @@ class Consumer
         private readonly QuoteScope $scope,
         private readonly QuoteLifetime $lifetime,
         private readonly ReminderEmailResolverInterface $recipients,
-        private readonly ConsentConfig $consentConfig
+        private readonly ConsentConfig $consentConfig,
+        private readonly RecipientHistory $history
     ) {
     }
 
@@ -118,9 +119,18 @@ class Consumer
         }
         $storeId = (int)$row['store_id'];
         $sent = false;
+        $recipientClaim = null;
         try {
+            $recipientClaim = $this->history->claim($email);
+            if ($recipientClaim === null) {
+                $db->update($table, ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'],
+                    'ck_abandoned_queued_at' => null] + $keepUpdatedAt, ['entity_id = ?' => $id]);
+                $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (recipient cooldown)', $id));
+                return;
+            }
             // A replaced resolver may read an external recipient source. Recheck it after claiming too.
             if ($this->recipients->resolve($id) !== $email) {
+                $this->history->release($email, $recipientClaim);
                 $db->update($table, ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'],
                     'ck_abandoned_queued_at' => null] + $keepUpdatedAt, ['entity_id = ?' => $id]);
                 $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (recipient changed)', $id));
@@ -173,6 +183,9 @@ class Consumer
                 ['ck_abandoned_reminded_at' => $row['ck_abandoned_reminded_at'], 'ck_abandoned_queued_at' => null] + $keepUpdatedAt,
                 ['entity_id = ?' => $id]
             );
+            if ($recipientClaim !== null) {
+                $this->history->release($email, $recipientClaim);
+            }
             throw $e;
         }
         $this->logger->info(sprintf('CommerceKings_AbandonedCart: reminder sent for cart %d', $id));

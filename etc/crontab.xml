@@ -1,6 +1,9 @@
 <?xml version="1.0"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/crontab.xsd">
     <group id="default">
+        <job name="commercekings_abandoned_cart_cleanup" instance="CommerceKings\AbandonedCart\Cron\Cleanup" method="execute">
+            <schedule>0 3 * * *</schedule>
+        </job>
         <!-- finds abandoned carts and publishes one message per cart; the consumer sends -->
         <job name="commercekings_abandoned_cart_find" instance="CommerceKings\AbandonedCart\Cron\FindAbandonedCarts" method="execute">
             <schedule>*/15 * * * *</schedule>

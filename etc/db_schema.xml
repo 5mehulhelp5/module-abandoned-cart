@@ -15,4 +15,15 @@
             <column name="ck_abandoned_consent_id"/>
         </index>
     </table>
+    <table name="ck_abandoned_cart_recipient" resource="default" engine="innodb" comment="CK abandoned cart: temporary recipient suppression">
+        <column xsi:type="varchar" name="recipient_hash" nullable="false" length="64" comment="Keyed hash of normalized recipient"/>
+        <column xsi:type="timestamp" name="reminded_at" nullable="false" on_update="false" default="CURRENT_TIMESTAMP" comment="Reminder claim time"/>
+        <column xsi:type="varchar" name="claim_token" nullable="true" length="32" comment="Owner of delivery claim"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="recipient_hash"/>
+        </constraint>
+        <index referenceId="CK_ABANDONED_CART_RECIPIENT_REMINDED_AT" indexType="btree">
+            <column name="reminded_at"/>
+        </index>
+    </table>
 </schema>

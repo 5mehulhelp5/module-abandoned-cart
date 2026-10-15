@@ -21,11 +21,12 @@ class ConfigTest extends TestCase
     {
         $p = 'commercekings_abandoned_cart/general/';
         $config = $this->config([
-            $p . 'enabled' => '1', $p . 'delay_minutes' => '180',
+            $p . 'enabled' => '1', $p . 'delay_minutes' => '180', $p . 'recipient_cooldown_days' => '7',
             $p . 'template' => 'tpl', $p . 'identity' => 'custom1',
         ]);
         $this->assertTrue($config->isEnabled());
         $this->assertSame(180, $config->getDelayMinutes());
+        $this->assertSame(7, $config->getRecipientCooldownDays());
         $this->assertSame('tpl', $config->getTemplate(1));
         $this->assertSame('custom1', $config->getIdentity(1));
     }
@@ -35,5 +36,6 @@ class ConfigTest extends TestCase
         $config = $this->config([]);
         $this->assertFalse($config->isEnabled());
         $this->assertSame(1, $config->getDelayMinutes());
+        $this->assertSame(1, $config->getRecipientCooldownDays());
     }
 }

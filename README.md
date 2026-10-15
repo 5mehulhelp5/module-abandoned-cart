@@ -1,6 +1,6 @@
 # Abandoned cart reminder
 
-**Development status:** preparing the first public release.
+**Development status:** first-release feature scope frozen; polishing and verification remain before publication.
 
 Install in a Magento project with `composer require commercekings/module-abandoned-cart:^0.1` after the first
 release is published. Then enable its modules:
@@ -29,7 +29,7 @@ Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (featur
    - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also clears a previously captured guest email;
    - customer: opening checkout (or switching the consent on there) → `POST /cartreminder/consent/capture` (`CustomerConsentCapture`, `js/customer-consent.js`); the email comes from the account. Stored only when the consent changes, so re-opening checkout does not restart the delay.
    - Stored: the guest reminder email, its change timestamp, the consent id and the browser id hash, in one UPDATE that also checks the consent is still valid (`ConsentGuardInterface`) – a capture request still on its way can't undo a withdrawal. Magento's checkout email is preserved.
-3. **Finder** (cron `commercekings_abandoned_cart_find`, every 15 min) selects active, nonempty carts with an email and valid consent, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_queued_at`) and its id published to `commercekings.abandoned_cart.remind`. Distinct carts using the same address are independent.
+3. **Finder** (cron `commercekings_abandoned_cart_find`, every 15 min) selects active, nonempty carts with an email and valid consent, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_queued_at`) and its id published to `commercekings.abandoned_cart.remind`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
 4. **Consumer** `commerceKingsAbandonedCartRemind` re-checks the policy, store, consent, inactivity delay and quote expiry, then claims the cart atomically and sends in store emulation. Selection and claim share the policy's SQL condition. A failed send restores the prior reminder timestamp and clears the queue claim for retry. Duplicate messages cannot claim the same state twice.
 5. **Email** – the module ships a **neutral English default** (`view/frontend/email/reminder.html`, "Abandoned Cart Reminder"). Use your own: **Marketing > Email Templates > Add New Template**, load "Abandoned Cart Reminder", change text and design, select it in **Abandoned Cart > Email template**. Variables: `customer_name`, `items_html` (ready-made rows: picture, the store's predefined options only, qty × price), `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; the footer gets `cart_reminder_email="1"` for a label. Sender defaults to **General Contact** – use a no-reply address.
 
@@ -40,7 +40,7 @@ The default policy sends one reminder per cart. Replace
 frequency rule. `getDescription()` supplies its read-only admin frequency preview.
 `canSend(ReminderState)` and `dueCondition(ReminderQuery)` must agree;
 the finder, stale queue release and atomic delivery claim all use the policy. Consent, website,
-quote expiry, abandonment delay and cart-state checks remain mandatory. Future recurring policies
+quote expiry, abandonment delay, recipient cooldown and cart-state checks remain mandatory. Future recurring policies
 also need to consider delivery history and per-email restore-link expiry; no recurrence ships here.
 
 The policy contract is finalized before its first public release. `ReminderState` contains quote id,
@@ -68,7 +68,17 @@ Restore access stops at the earlier of seven days after sending and the current 
 expiry. A reminder sent near expiry can therefore have a shorter restore window. Changing Magento's
 quote lifetime affects pending delivery and restore checks; this module never extends retention.
 
-Reminders are per cart, without an email cooldown or a separate recipient-history table.
+Each cart can receive one reminder. A separate recipient cooldown also limits sends across
+all carts and stores sharing an email address. **Recipient cooldown (days)** is a global admin
+setting, default **7**, minimum **1**, under CommerceKings > Abandoned Cart. Deferred carts
+remain unsent and may become eligible after the cooldown if their quote and consent are still valid.
+
+`ck_abandoned_cart_recipient` stores Magento-native keyed hashes of normalized email addresses,
+claim timestamps and random claim tokens; it contains no raw email. This is suppression data,
+not a consent identity. It survives cart deletion and consent withdrawal, so these cannot reset
+the send limit; daily cron removes rows older than the current cooldown. Key rotation resets
+suppression for addresses hashed with the previous key. Failed sends release only their own
+recipient claim; successful or interrupted handoffs retain it conservatively.
 
 ## Data
 
@@ -80,6 +90,7 @@ Reminders are per cart, without an email cooldown or a separate recipient-histor
 | `quote` | `ck_abandoned_reminded_at` | email sent – one reminder per cart |
 | `quote` | `ck_abandoned_consent_id` | the consent (`CommerceKings_Consent`, `ck_consent`) – indexed; the evidence lives there |
 | `quote` | `ck_abandoned_browser_hash` | the browser id hash – the restore link works only in this browser |
+| `ck_abandoned_cart_recipient` | `recipient_hash`, `reminded_at`, `claim_token` | temporary keyed-hash recipient suppression and claim ownership |
 
 Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. AbandonedCart stores the latest guest reminder email in `quote.ck_abandoned_email`; it does not retain an email history. Guest capture and withdrawal preserve Magento's `quote.customer_email` and `quote.updated_at`. The reminder delay uses the later of cart activity and guest email activity; quote expiry still uses Magento's cart timestamp. Customer consent capture changes the cart timestamp only when its consent binding changes.
 
@@ -150,7 +161,7 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 
 ## Known behaviour / limitations
 
-- **One reminder per cart, ever**, with the default `OncePerCart` policy. Distinct carts using the same email address can each send once. Adding products after the reminder does not send another.
+- **One reminder per cart, ever**, with the default `OncePerCart` policy. Distinct carts using the same email address also respect recipient cooldown. Adding products after the reminder does not send another.
 - **The restore link opens the cart as it is now**, not as it was in the email. Products the customer removed are not brought back (no snapshot); an emptied cart shows "This reminder link is no longer available. You can continue shopping with your current cart."
 - **Another device / cleared cookie / expired cookie → homepage.** The link only works in the browser that gave the consent (deliberate: nobody else sees the cart, email or address).
 - Visitors who answered the banner **before** the category existed are not asked again unless **Banner revision** (Consent section) is raised; until then the category stays off for them.
@@ -206,6 +217,7 @@ GraphQL is covered only if a resolver calls this service. This module declares n
 | Send after (minutes untouched) | 180 |
 | Magento quote lifetime (read-only, selected scope) | Inherited from Sales > Checkout > Shopping Cart; normally 30 days |
 | Reminders per cart (read-only) | `1 (one-time)`, reported by the delivery policy |
+| Recipient cooldown (days, global) | 7; applies across stores and carts sharing an email address |
 | Email template (store) | `commercekings_abandoned_cart_general_template` |
 | Sender (store) | General Contact – set a no-reply address |
 
@@ -294,7 +306,7 @@ vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
   vendor/commercekings/module-abandoned-cart/Test/Integration/ReminderPolicyTest.php
 ```
 
-They verify independent carts using the same address, duplicate claims, store-specific lifetime,
+They verify recipient cooldown, same-address concurrency, expiry, owned release, failed-send retry, duplicate claims, store-specific lifetime,
 late queue delivery, read-only admin scope and restore expiry before physical quote deletion.
 
 `Test/Unit` uses `DbTestTrait`, a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, guest + customer capture (incl. the guard condition), withdrawal (reminder data cleared while Magento checkout email is preserved), reminder policy, quote lifetime, finder, consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, email data (signed links, options, escaping), restore (every branch incl. other browser, merge, mini cart cookie), consent endpoints. Shared withdrawal links, confirmation and preference sync are tested in Consent.
@@ -320,7 +332,7 @@ MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/aut
 
 Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, stock limits and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
 
-The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It runs the production finder, Magento's native publisher and consumer, and a run-specific queue using either `amqp` or `db`. The 30 browser scenarios also cover dedicated recipient updates, authenticated checkout, independent same-address carts, variant images, expiry, queued withdrawal and a failed send followed by successful retry. Cron scheduling is checked separately.
+The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It runs the production finder, Magento's native publisher and consumer, and a run-specific queue using either `amqp` or `db`. The 30 browser scenarios also cover dedicated recipient updates, authenticated checkout, same-address cooldown and deferred carts, variant images, expiry, queued withdrawal and a failed send followed by successful retry. Cron scheduling is checked separately.
 
 From the sandbox root:
 
@@ -353,7 +365,7 @@ and remove their own queue, message and status rows during cleanup.
 
 **Sending**
 - Cart with consent untouched past the delay → `published: 1`; email from no-reply with items, predefined options only, total, footnote, opt-out, footer label; greeted by a sanitised first name.
-- Two carts with the same address → both are reminded once; duplicate deliveries for either cart do not send again.
+- Two carts with the same address → one sends during the recipient cooldown; the other waits and may receive its first reminder afterward. Duplicate deliveries do not send again.
 - No consent / withdrawn or expired after queuing / older revision → consumer skips.
 - Second finder run → `published: 0`; ordered carts, carts touched within the delay and carts expired under their store's Magento quote lifetime are not queued. The consumer repeats the delay and expiry checks after queuing.
 
