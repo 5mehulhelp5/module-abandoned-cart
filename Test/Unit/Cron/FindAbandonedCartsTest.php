@@ -81,7 +81,7 @@ class FindAbandonedCartsTest extends TestCase
     {
         $this->finder()->execute();
         $conditions = array_column($this->selectWhere, 0);
-        foreach (['q.is_active = 1', 'q.items_count > 0', 'VALID(s.consent_id)', 'c.queued_at IS NULL'] as $condition) {
+        foreach (['q.is_active = 1', 'q.items_count > 0', 'VALID(s.permission_ref)', 'c.queued_at IS NULL'] as $condition) {
             $this->assertContains($condition, $conditions);
         }
         $branches = end($conditions);
@@ -139,7 +139,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertSame(1010, $claim['where']['s.subscription_id = ?'], 'the selected subscription, not a newer one');
         $conditions = self::conditions($claim['where']);
         $this->assertContains('c.queued_at IS NULL', $conditions);
-        $this->assertContains('VALID(s.consent_id)', $conditions);
+        $this->assertContains('VALID(s.permission_ref)', $conditions);
         $this->assertStringContainsString('updated_at > NOW() - INTERVAL 30 DAY', implode(' ', $conditions));
     }
 

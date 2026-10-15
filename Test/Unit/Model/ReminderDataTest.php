@@ -218,7 +218,7 @@ class ReminderDataTest extends TestCase
         };
         $vars = $this->data()->build($this->quote(), 'cid-1', ['subscription_id' => 9, 'email' => 'a@test.com']);
         $this->assertSame('https://shop/preferences/9', $vars['optout_url'], 'any link format');
-        $this->assertSame('cid-1', $seen->consentId);
+        $this->assertSame('cid-1', $seen->permissionRef);
         $this->assertSame(9, $seen->getAttribute('subscription_id'));
         $this->assertSame('a@test.com', $seen->getAttribute('email'));
         $this->assertArrayHasKey('quote_id', (fn () => $this->attributes)->call($seen));

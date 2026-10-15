@@ -117,19 +117,19 @@ class ReminderPolicyTest extends TestCase
             'items_count' => 1, 'updated_at' => $updatedAt], ['entity_id = ?' => $id]);
         $this->resource->getConnection()->insert($this->table(SubscriptionManagement::TABLE), [
             'type' => CartReminder::CODE, 'reference_id' => $id, 'store_id' => $this->storeIds[$days], 'subject_key' => '',
-            'consent_id' => 'fixture-consent', 'captured_at' => $updatedAt]);
+            'permission_ref' => 'fixture-consent', 'captured_at' => $updatedAt]);
         $this->state($id, ['email' => $this->email]);
         return $id;
     }
 
     /**
-     * Write the cart's subscription (email → the guest contact of the cart's website, consent_id, captured_at)
+     * Write the cart's subscription (email → the guest contact of the cart's website, permission_ref, captured_at)
      * and its send history (queued_at, reminded_at).
      */
     private function state(int $id, array $values): void
     {
         $db = $this->resource->getConnection();
-        $subscription = array_intersect_key($values, array_flip(['email', 'consent_id', 'captured_at']));
+        $subscription = array_intersect_key($values, array_flip(['email', 'permission_ref', 'captured_at']));
         if (isset($subscription['email'])) {
             $storeId = (int)$db->fetchOne($db->select()->from($this->table('quote'), 'store_id')->where('entity_id = ?', $id));
             $subscription['contact_id'] = $this->om->get(\CommerceKings\Notification\Api\ContactRepositoryInterface::class)
@@ -140,7 +140,7 @@ class ReminderPolicyTest extends TestCase
             $db->update($this->table(SubscriptionManagement::TABLE), $subscription,
                 ['type = ?' => CartReminder::CODE, 'reference_id = ?' => $id]);
         }
-        $history = array_diff_key($values, array_flip(['email', 'consent_id', 'captured_at']));
+        $history = array_diff_key($values, array_flip(['email', 'permission_ref', 'captured_at']));
         if ($history) {
             $carts = $this->om->get(CartTable::class);
             $carts->ensure($id);
@@ -156,7 +156,7 @@ class ReminderPolicyTest extends TestCase
             ->from(['q' => $this->table('quote')])
             ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
-                ['subscription_id', 'contact_id', 'consent_id', 'captured_at'])
+                ['subscription_id', 'contact_id', 'permission_ref', 'captured_at'])
             ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id', ['queued_at', 'reminded_at'])
             ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email'])
             ->where('q.entity_id = ?', $id));

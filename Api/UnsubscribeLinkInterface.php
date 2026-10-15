@@ -11,7 +11,9 @@ use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
  * The default uses CommerceKings_Consent's signed withdrawal link and page. Replace it through a DI preference to
  * use any link format: read what you need from the context. A replacement owns its page: it must make links
  * unguessable, accept the mail client's one-click POST (List-Unsubscribe=One-Click) when that is enabled, and
- * withdraw through CommerceKings\Consent\Api\ConsentInterface::withdraw($consentId, 'email').
+ * revoke the subscription: with the consent bridge, CommerceKings\Consent\Api\ConsentInterface::withdraw(
+ * $context->permissionRef, 'email'); without it, Notification's SubscriptionRemovalInterface::remove() with the
+ * subscription_id attribute.
  *
  * @api
  */

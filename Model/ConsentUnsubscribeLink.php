@@ -17,6 +17,6 @@ class ConsentUnsubscribeLink implements UnsubscribeLinkInterface
 
     public function getUrl(UnsubscribeContext $context): string
     {
-        return $this->withdrawalLinks->getUrl($context->consentId);
+        return $this->withdrawalLinks->getUrl($context->permissionRef);
     }
 }

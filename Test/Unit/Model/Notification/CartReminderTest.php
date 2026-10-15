@@ -38,7 +38,7 @@ class CartReminderTest extends TestCase
     private const ROW = [
         'entity_id' => '42', 'is_active' => '1', 'items_count' => '2', 'customer_email' => 'a@test.com', 'store_id' => '1',
         'customer_id' => null, 'updated_at' => '2026-10-01 12:00:00',
-        'subscription_id' => '9', 'contact_id' => '7', 'captured_at' => '2026-10-01 12:00:00', 'consent_id' => 'cid-1',
+        'subscription_id' => '9', 'contact_id' => '7', 'captured_at' => '2026-10-01 12:00:00', 'permission_ref' => 'cid-1',
         'reminded_at' => null, 'queued_at' => '2026-10-01 12:30:00',
     ];
     private int $perHour = 0;
@@ -305,8 +305,8 @@ class CartReminderTest extends TestCase
         $this->assertSame(9, $claim['where']['s.subscription_id = ?']);
         $this->assertSame('7', $claim['where']['s.contact_id <=> ?']);
         $this->assertSame('2026-10-01 12:00:00', $claim['where']['s.captured_at = ?']);
-        $this->assertSame('cid-1', $claim['where']['s.consent_id = ?']);
-        $this->assertContains('VALID(s.consent_id)', self::conditions($claim['where']));
+        $this->assertSame('cid-1', $claim['where']['s.permission_ref = ?']);
+        $this->assertContains('VALID(s.permission_ref)', self::conditions($claim['where']));
         $this->assertContains('NOT_EXPIRED(updated_at,1)', self::conditions($claim['where']));
         $this->assertContains('q.updated_at <= NOW() - INTERVAL 180 MINUTE', self::conditions($claim['where']));
         $this->assertContains('s.captured_at <= NOW() - INTERVAL 180 MINUTE', self::conditions($claim['where']));

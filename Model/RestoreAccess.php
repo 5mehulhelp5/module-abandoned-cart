@@ -39,7 +39,7 @@ class RestoreAccess
         return $subscription !== null
             && (int)$quote->getStoreId() === (int)$this->stores->getStore()->getId()
             && $this->isSigned((int)$quote->getId(), $token)
-            && $this->permission->isCurrentVisitor($subscription->consentId);
+            && $this->permission->isCurrentVisitor($subscription->permissionRef);
     }
 
     public function isAvailable(Quote $quote): bool

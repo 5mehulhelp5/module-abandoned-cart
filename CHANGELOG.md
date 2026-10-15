@@ -32,7 +32,7 @@ First release. Features:
   state and consent.
 - **Withdrawal:** Notification's handler, registered for `cart_reminder`, removes the cart's subscription
   while the send history stays, so opting in again cannot cause a second reminder.
-- **Unsubscribe link:** replaceable `UnsubscribeLinkInterface` with an `UnsubscribeContext` (consent id, store
+- **Unsubscribe link:** replaceable `UnsubscribeLinkInterface` with an `UnsubscribeContext` (permission reference, store
   and named attributes: cart, customer, subscription, recipient); the default is Consent's signed withdrawal link.
 - **Restore without a browser in Notification:** the restore link asks Notification's permission whether the
   current visitor gave the subscription's permission (Consent: the consent's browser); a permission that cannot tell

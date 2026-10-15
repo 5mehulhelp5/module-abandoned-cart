@@ -13,12 +13,13 @@ namespace CommerceKings\AbandonedCart\Api\Data;
 class UnsubscribeContext
 {
     /**
-     * @param string $consentId the CommerceKings_Consent consent the reminder was sent under
+     * @param string $permissionRef the subscription's permission reference (with the consent bridge: the consent id;
+     *     '' when the permission has none - use the subscription_id attribute)
      * @param int $storeId store the email is sent from
      * @param array<string, mixed> $attributes additional context; a missing attribute returns null
      */
     public function __construct(
-        public readonly string $consentId,
+        public readonly string $permissionRef,
         public readonly int $storeId,
         private readonly array $attributes = []
     ) {

@@ -121,7 +121,7 @@ class FindAbandonedCarts
             ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'));
         $queued = (int)$db->fetchOne($this->carts->select([new Expression('COUNT(*)')])
             ->where('c.queued_at IS NOT NULL')
-            ->where($this->guard->validCondition('s.consent_id')));
+            ->where($this->guard->validCondition('s.permission_ref')));
         return $sent + $queued;
     }
 
@@ -171,7 +171,7 @@ class FindAbandonedCarts
         return [
             'q.is_active = 1',
             'q.items_count > 0',
-            $this->guard->validCondition('s.consent_id'),
+            $this->guard->validCondition('s.permission_ref'),
             'c.queued_at IS NULL',
             $this->storeCondition(),
         ];

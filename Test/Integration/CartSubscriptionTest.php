@@ -147,7 +147,7 @@ class CartSubscriptionTest extends TestCase
             ->save((int)$this->stores->getStore($storeId)->getWebsiteId(), $email);
         $this->resource->getConnection()->insertOnDuplicate($this->table(SubscriptionManagement::TABLE), [
             'type' => CartReminder::CODE, 'reference_id' => $id, 'store_id' => $storeId, 'subject_key' => '',
-            'contact_id' => $contactId, 'customer_id' => $customerId, 'consent_id' => $consentId,
+            'contact_id' => $contactId, 'customer_id' => $customerId, 'permission_ref' => $consentId,
             'captured_at' => '2026-01-01 00:00:00',
         ]);
     }
@@ -160,7 +160,7 @@ class CartSubscriptionTest extends TestCase
             ->from(['q' => $this->table('quote')], ['store_id', 'customer_email', 'updated_at'])
             ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
-                ['captured_at', 'consent_id', 'customer_id'])
+                ['captured_at', 'permission_ref', 'customer_id'])
             ->joinLeft(['c' => $this->table(CartTable::TABLE)], 'c.quote_id = q.entity_id', ['reminded_at'])
             ->joinLeft(['n' => $this->table(ContactRepository::TABLE)], 'n.contact_id = s.contact_id', ['email'])
             ->where('q.entity_id = ?', $id));
@@ -220,13 +220,13 @@ class CartSubscriptionTest extends TestCase
         $management = $this->management();
         $this->assertTrue($management->subscribeGuest(CartReminder::CODE, $mask, 'new@example.test'));
         $this->assertTrue($management->subscribeGuest(CartReminder::CODE, $mask, 'new@example.test'));
-        $this->assertSame('new-consent', $this->row($id)['consent_id']);
+        $this->assertSame('new-consent', $this->row($id)['permission_ref']);
         $this->assertSame('new@example.test', $this->row($id)['email']);
         $this->assertSame('fixture@example.test', $this->row($id)['customer_email']);
         $this->assertSame($nativeUpdatedAt, $this->row($id)['updated_at'], 'Magento\'s quote is not written');
         $this->assertFalse($management->subscribeGuest(CartReminder::CODE, $mask, ''));
         $this->assertNull($this->row($id)['email']);
-        $this->assertNull($this->row($id)['consent_id']);
+        $this->assertNull($this->row($id)['permission_ref']);
         $this->assertSame('fixture@example.test', $this->row($id)['customer_email']);
     }
 
@@ -234,7 +234,7 @@ class CartSubscriptionTest extends TestCase
     {
         [$id, $mask] = $this->quote();
         $this->assertFalse($this->management(enabled: false)->subscribeGuest(CartReminder::CODE, $mask, 'new@example.test'));
-        $this->assertNull($this->row($id)['consent_id']);
+        $this->assertNull($this->row($id)['permission_ref']);
     }
 
     public function testStoreChangeAfterAuthorizationCannotWriteOrRemove(): void
@@ -247,9 +247,9 @@ class CartSubscriptionTest extends TestCase
             return ['store_id' => $storeId];
         });
         $this->assertFalse($this->management(scope: $scope)->subscribeGuest(CartReminder::CODE, $mask, 'new@example.test'));
-        $this->assertSame('original', $this->row($id)['consent_id']);
+        $this->assertSame('original', $this->row($id)['permission_ref']);
         $this->assertFalse($this->management(scope: $scope, enabled: false)->subscribeGuest(CartReminder::CODE, $mask, ''));
-        $this->assertSame('original', $this->row($id)['consent_id']);
+        $this->assertSame('original', $this->row($id)['permission_ref']);
     }
 
     public function testWrongConsentWebsiteAndPurposeDoNotChangeTheCart(): void
@@ -284,7 +284,7 @@ class CartSubscriptionTest extends TestCase
         $this->resource->getConnection()->update($this->table('quote'), ['customer_id' => $owner], ['entity_id = ?' => $id]);
         $management = $this->management();
         $this->assertFalse($management->subscribeCustomer($this->customer(), CartReminder::CODE, (string)$id));
-        $this->assertNull($this->row($id)['consent_id']);
+        $this->assertNull($this->row($id)['permission_ref']);
         $this->assertTrue($management->subscribeCustomer($owner, CartReminder::CODE, (string)$id));
         $this->assertSame((string)$owner, $this->row($id)['customer_id']);
         $this->assertNull($this->row($id)['email'], 'customers use their account email, not a contact');
@@ -376,7 +376,7 @@ class CartSubscriptionTest extends TestCase
         $handler->execute($context); // At-least-once retry is harmless.
         foreach ([$guest, $registered] as $id) {
             $after = $this->row($id);
-            foreach (['email', 'captured_at', 'consent_id'] as $field) {
+            foreach (['email', 'captured_at', 'permission_ref'] as $field) {
                 $this->assertNull($after[$field]);
             }
             foreach (['customer_email', 'updated_at', 'reminded_at'] as $field) {

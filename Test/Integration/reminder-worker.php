@@ -98,7 +98,7 @@ $builder = new class($onSend, $mode) extends TransportBuilder {
 };
 $data = new class extends ReminderData {
     public function __construct() {}
-    public function build(Quote $quote, string $consentId, array $context = []): array { return ['customer_name' => '']; }
+    public function build(Quote $quote, string $permissionRef, array $context = []): array { return ['customer_name' => '']; }
 };
 $emulation = new class extends Emulation {
     public function __construct() {}

@@ -71,7 +71,7 @@ class CartReminder implements NotificationTypeInterface
         $db = $this->resource->getConnection();
         $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at'],
             ['entity_id', 'is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'],
-            ['subscription_id', 'contact_id', 'captured_at', 'consent_id'])
+            ['subscription_id', 'contact_id', 'captured_at', 'permission_ref'])
             ->where('s.subscription_id = ?', (int)$reference));
         $id = $row ? (int)$row['entity_id'] : 0;
         $email = $row ? $this->recipients->resolve($id) : null;
@@ -85,7 +85,7 @@ class CartReminder implements NotificationTypeInterface
                 ['updated_at' => $row['updated_at']])) => 'reminder policy',
             $this->lifetime->isExpired((string)$row['updated_at'], (int)$row['store_id']) => 'quote expired',
             $activity > gmdate('Y-m-d H:i:s', time() - $this->config->getDelayMinutes((int)$row['store_id']) * 60) => 'cart recently updated',
-            !$this->consent->isValid((string)$row['consent_id']) => 'consent withdrawn / expired',
+            !$this->consent->isValid((string)$row['permission_ref']) => 'consent withdrawn / expired',
             !$this->matchesConsent($row) => 'consent purpose / website mismatch',
             !$this->config->isEnabled((int)$row['store_id']) => 'disabled',
             default => null,
@@ -122,11 +122,11 @@ class CartReminder implements NotificationTypeInterface
                 'q.customer_email <=> ?' => $row['customer_email'] ?? new Expression('NULL'),
                 's.contact_id <=> ?' => $row['contact_id'] ?? new Expression('NULL'),
                 's.captured_at = ?' => (string)$row['captured_at'],
-                's.consent_id = ?' => (string)$row['consent_id'],
+                's.permission_ref = ?' => (string)$row['permission_ref'],
                 $this->lifetime->validCondition('q.updated_at', (int)$row['store_id']),
                 'q.updated_at <= NOW() - INTERVAL ' . $delay . ' MINUTE',
                 's.captured_at <= NOW() - INTERVAL ' . $delay . ' MINUTE',
-                $this->guard->validCondition('s.consent_id'),
+                $this->guard->validCondition('s.permission_ref'),
             ]
         );
         $perHour = $this->config->getMaxPerHour();
@@ -171,7 +171,7 @@ class CartReminder implements NotificationTypeInterface
                 if (!$quote instanceof Quote) {
                     throw new \UnexpectedValueException('Cart repository must return a Magento quote for a reminder.');
                 }
-                $vars = $this->reminderData->build($quote, (string)$row['consent_id'],
+                $vars = $this->reminderData->build($quote, (string)$row['permission_ref'],
                     ['subscription_id' => (int)$row['subscription_id'], 'email' => $email]);
                 return new MessageContent($vars, $vars['customer_name'] ?? null,
                     $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId) ? $vars['optout_url'] : null);
@@ -224,7 +224,7 @@ class CartReminder implements NotificationTypeInterface
 
     private function matchesConsent(array $row): bool
     {
-        $consent = $this->consent->get((string)$row['consent_id']);
+        $consent = $this->consent->get((string)$row['permission_ref']);
         return $consent !== null && $this->scope->matches($consent, (int)$row['store_id']);
     }
 }

@@ -28,7 +28,7 @@ Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (featur
    - guest: typing a valid email in checkout, or entering checkout with an email Magento prefilled → `POST /V1/ck-notification/subscriptions` `{"type":"cart_reminder","reference":"<masked cart id>","email":"…"}` (`js/email-capture-mixin.js`), 1 s after the last change. Requests are serialized and rapid edits coalesce to the latest email. A save is deduplicated only after the server acknowledges it, including an identical successful retry;
    - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also removes the guest's subscription;
    - customer: opening checkout (or switching the consent on there) → `POST /V1/ck-notification/subscriptions/mine` `{"type":"cart_reminder","reference":"<quote id>"}` (`js/customer-consent.js`, Magento's session REST for storefront AJAX); the email comes from the account. A change of consent or browser restarts the delay; re-opening checkout with the same consent does not.
-   - Stored by Notification: the cart's subscription (guest contact or customer, consent id, `captured_at`) in one INSERT that also checks the consent is still valid and the cart is still the authorized one (active, same store, same guest or customer) – a request still on its way can't undo a withdrawal. Magento's quote is not written.
+   - Stored by Notification: the cart's subscription (guest contact or customer, the consent id as `permission_ref`, `captured_at`) in one INSERT that also checks the consent is still valid and the cart is still the authorized one (active, same store, same guest or customer) – a request still on its way can't undo a withdrawal. Magento's quote is not written.
 3. **Finder** (cron `commercekings_abandoned_cart_find`, every minute) publishes the carts that became due; the queue holds the backlog and the consumers set the pace (see *Flash sales* below). It selects active, nonempty carts with a subscription whose consent is valid, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_cart.queued_at`) and published to Notification's shared topic `commercekings.notification.send` as `cart_reminder|<subscription id>`. Recent recipients are skipped; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
 4. **Consumer** `commerceKingsNotificationSend` (`commercekings/module-notification`, shared by all notifications) hands the subscription to the `cart_reminder` type (`Model\Notification\CartReminder`) only while it still exists with a valid consent. The type re-checks the policy, store, consent, inactivity delay and quote expiry, then claims the cart atomically and sends in store emulation. Selection and claim share the policy's SQL condition. A failed send restores the prior reminder timestamp and clears the queue claim for retry. Duplicate messages cannot claim the same state twice.
 5. **Email** – the module ships a **neutral English default** (`view/frontend/email/reminder.html`, "Abandoned Cart Reminder"). Use your own: **Marketing > Email Templates > Add New Template**, load "Abandoned Cart Reminder", change text and design, select it in **Abandoned Cart > Email template**. Variables: `customer_name`, `items_html` (ready-made rows: picture, the store's predefined options only, qty × price), `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; the footer gets `cart_reminder_email="1"` for a label. Sender defaults to **General Contact** – use a no-reply address.
@@ -88,7 +88,7 @@ recipient claim; successful or interrupted handoffs retain it conservatively.
 
 Magento's `quote` table is not changed or written. Who subscribed a cart, with which consent, is its
 `commercekings/module-notification` subscription (`ck_notification_subscription`, type `cart_reminder`,
-reference = quote id): the guest contact (`ck_notification_contact`) or the customer, the consent id
+reference = quote id): the guest contact (`ck_notification_contact`) or the customer, the consent id (`permission_ref`)
 (the restore link works only in the browser that consent was given in) and `captured_at` (last change; identical retries preserve it).
 This module keeps only the send history in `ck_abandoned_cart` (one row per cart, created when it is first queued,
 deleted with the quote by Magento's cart cleanup):
@@ -174,11 +174,13 @@ own page or an external preference center:
 <preference for="CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface" type="Vendor\Module\Model\MyUnsubscribeLink"/>
 ```
 
-`UnsubscribeContext` has `consentId` and `storeId`, and `getAttribute($name)` for the rest: `quote_id`,
-`customer_id` (null for guests), `subscription_id` and `email`; an unknown name returns null, so attributes can be
-added without breaking implementations. Your link must be unguessable (signed or a random token, never a plain id
-or email), accept a one-click `POST` if Notification's *One-click unsubscribe* is on, and withdraw with
-`ConsentInterface::withdraw($consentId, 'email')` – that is what removes the subscription and stops reminders.
+`UnsubscribeContext` has `permissionRef` (the subscription's permission reference – the consent id with the consent
+bridge, '' without it) and `storeId`, and `getAttribute($name)` for the rest: `quote_id`, `customer_id` (null for
+guests), `subscription_id` and `email`; an unknown name returns null, so attributes can be added without breaking
+implementations. Your link must be unguessable (signed or a random token, never a plain id or email), accept a
+one-click `POST` if Notification's *One-click unsubscribe* is on, and revoke the subscription – with the consent
+bridge `ConsentInterface::withdraw($permissionRef, 'email')`, without it Notification's
+`SubscriptionRemovalInterface::remove($subscriptionId)` – that is what stops reminders.
 
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 

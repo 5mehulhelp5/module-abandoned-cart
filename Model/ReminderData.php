@@ -45,10 +45,10 @@ class ReminderData
     }
 
     /**
-     * @param string $consentId the consent of the cart's subscription (its unsubscribe link)
+     * @param string $permissionRef the permission reference of the cart's subscription (its unsubscribe link)
      * @param array<string, mixed> $context more for the unsubscribe link adapter (subscription_id, email)
      */
-    public function build(Quote $quote, string $consentId, array $context = []): array
+    public function build(Quote $quote, string $permissionRef, array $context = []): array
     {
         $this->url->setScope($quote->getStoreId());
         return [
@@ -58,7 +58,7 @@ class ReminderData
             'restore_url' => $this->restoreUrl($quote),
             'store_url' => $this->url->getUrl('', ['_nosid' => true]),
             'contact_url' => $this->url->getUrl('contact', ['_nosid' => true]),
-            'optout_url' => $this->unsubscribeLinks->getUrl(new UnsubscribeContext($consentId, (int)$quote->getStoreId(),
+            'optout_url' => $this->unsubscribeLinks->getUrl(new UnsubscribeContext($permissionRef, (int)$quote->getStoreId(),
                 $context + ['quote_id' => (int)$quote->getId(),
                     'customer_id' => $quote->getCustomerId() ? (int)$quote->getCustomerId() : null])),
         ];
