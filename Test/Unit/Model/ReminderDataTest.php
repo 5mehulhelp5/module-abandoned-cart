@@ -4,6 +4,9 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Test\Unit\Model;
 
 use CommerceKings\AbandonedCart\Model\LinkSignature;
+use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
+use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
+use CommerceKings\AbandonedCart\Model\ConsentUnsubscribeLink;
 use CommerceKings\Consent\Api\WithdrawalLinkInterface;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
@@ -22,6 +25,8 @@ use PHPUnit\Framework\TestCase;
 
 class ReminderDataTest extends TestCase
 {
+    private ?UnsubscribeLinkInterface $unsubscribe = null;
+
     use DbTestTrait;
 
     private array $urls = [];
@@ -46,18 +51,19 @@ class ReminderDataTest extends TestCase
         $escaper = $this->createStub(Escaper::class);
         $escaper->method('escapeHtml')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
         $escaper->method('escapeUrl')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
-        $optOut = $this->createStub(WithdrawalLinkInterface::class);
-        $optOut->method('getUrl')->willReturnCallback(fn ($id) => "https://shop/ckconsent/optout?c=$id&t=o");
+        $withdrawal = $this->createStub(WithdrawalLinkInterface::class);
+        $withdrawal->method('getUrl')->willReturnCallback(fn ($id) => "https://shop/ckconsent/optout?c=$id&t=o");
         $signature = $this->createStub(LinkSignature::class);
         $signature->method('sign')->willReturnCallback(fn ($purpose, $id) => "$purpose-$id");
-        return new ReminderData($image, $configuration, $price, $url, $escaper, $optOut, $signature);
+        return new ReminderData($image, $configuration, $price, $url, $escaper,
+            $this->unsubscribe ?? new ConsentUnsubscribeLink($withdrawal), $signature);
     }
 
     private function quote(array $items = [], ?string $firstname = 'Jane', ?string $billingName = null): Quote
     {
         $billing = $this->mockWith(Address::class, ['getFirstname' => $billingName]);
         return $this->mockWith(Quote::class, [
-            'getId' => 42, 'getStoreId' => 1, 'getCustomerFirstname' => $firstname, 'getCustomerEmail' => 'a@test.com',
+            'getId' => 42, 'getStoreId' => 1, 'getCustomerId' => null, 'getCustomerFirstname' => $firstname, 'getCustomerEmail' => 'a@test.com',
             'getBillingAddress' => $billing, 'getAllVisibleItems' => $items, 'getGrandTotal' => 2400.0,
         ]);
     }
@@ -182,5 +188,25 @@ class ReminderDataTest extends TestCase
         $html = $this->data()->build($this->quote(), 'cid-1')['items_html'];
         $this->assertStringStartsWith('<table', $html);
         $this->assertStringNotContainsString('<tr>', $html);
+    }
+
+    public function testACustomUnsubscribeLinkGetsTheWholeContext(): void
+    {
+        $seen = null;
+        $this->unsubscribe = new class($seen) implements UnsubscribeLinkInterface {
+            public function __construct(public ?UnsubscribeContext &$seen) {}
+            public function getUrl(UnsubscribeContext $context): string
+            {
+                $this->seen = $context;
+                return 'https://shop/preferences/' . $context->getAttribute('subscription_id');
+            }
+        };
+        $vars = $this->data()->build($this->quote(), 'cid-1', ['subscription_id' => 9, 'email' => 'a@test.com']);
+        $this->assertSame('https://shop/preferences/9', $vars['optout_url'], 'any link format');
+        $this->assertSame('cid-1', $seen->consentId);
+        $this->assertSame(9, $seen->getAttribute('subscription_id'));
+        $this->assertSame('a@test.com', $seen->getAttribute('email'));
+        $this->assertArrayHasKey('quote_id', (fn () => $this->attributes)->call($seen));
+        $this->assertNull($seen->getAttribute('not_there'), 'a missing attribute is null, never an error');
     }
 }

@@ -98,7 +98,7 @@ $builder = new class($onSend, $mode) extends TransportBuilder {
 };
 $data = new class extends ReminderData {
     public function __construct() {}
-    public function build(Quote $quote, string $consentId): array { return ['customer_name' => '']; }
+    public function build(Quote $quote, string $consentId, array $context = []): array { return ['customer_name' => '']; }
 };
 $emulation = new class extends Emulation {
     public function __construct() {}
@@ -119,7 +119,7 @@ if ($mode === 'finder') {
     $mailer = new Mailer($builder, $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
         $mailer, $config, $consents, $guard, new OncePerCart(), new NullLogger(),
-        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(\CommerceKings\Consent\Model\Config::class),
+        $om->get(QuoteScope::class), $lifetime, $recipients, $om->get(NotificationConfig::class),
         $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class), $om->get(\Magento\Framework\Lock\LockManagerInterface::class));
     $db = $resource->getConnection();
     foreach ($ids as $id) {

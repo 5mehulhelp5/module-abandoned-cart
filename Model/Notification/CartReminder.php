@@ -14,12 +14,12 @@ use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Api\Data\ReminderState;
 use CommerceKings\Consent\Api\ConsentGuardInterface;
 use CommerceKings\Consent\Api\ConsentInterface;
-use CommerceKings\Consent\Model\Config as ConsentConfig;
 use CommerceKings\Notification\Api\Data\Message;
 use CommerceKings\Notification\Api\Data\MessageContent;
 use CommerceKings\Notification\Api\MailerInterface;
 use CommerceKings\Notification\Api\NotificationTypeInterface;
 use CommerceKings\Notification\Exception\MessageSentException;
+use CommerceKings\Notification\Model\Config as NotificationConfig;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 use Magento\Framework\Lock\LockManagerInterface;
@@ -60,7 +60,7 @@ class CartReminder implements NotificationTypeInterface
         private readonly QuoteScope $scope,
         private readonly QuoteLifetime $lifetime,
         private readonly ReminderEmailResolverInterface $recipients,
-        private readonly ConsentConfig $consentConfig,
+        private readonly NotificationConfig $notificationConfig,
         private readonly CartTable $carts,
         private readonly LockManagerInterface $locks
     ) {
@@ -152,7 +152,7 @@ class CartReminder implements NotificationTypeInterface
             $claimed = $claim();
         }
         if (!$claimed) {
-            // another delivery won, or the cart changed meanwhile; free this message's reservation
+            // another delivery won, or the cart changed meanwhile; clear the mark this message read
             $this->release($id, $queuedAt);
             return;
         }
@@ -166,14 +166,15 @@ class CartReminder implements NotificationTypeInterface
             $this->config->getTemplate($storeId),
             $this->config->getIdentity($storeId),
             $email,
-            function () use ($id, $row): MessageContent {
+            function () use ($id, $row, $email, $storeId): MessageContent {
                 $quote = $this->cartRepository->get($id);
                 if (!$quote instanceof Quote) {
                     throw new \UnexpectedValueException('Cart repository must return a Magento quote for a reminder.');
                 }
-                $vars = $this->reminderData->build($quote, (string)$row['consent_id']);
+                $vars = $this->reminderData->build($quote, (string)$row['consent_id'],
+                    ['subscription_id' => (int)$row['subscription_id'], 'email' => $email]);
                 return new MessageContent($vars, $vars['customer_name'] ?? null,
-                    $this->consentConfig->isOneClickUnsubscribeEnabled() ? $vars['optout_url'] : null);
+                    $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId) ? $vars['optout_url'] : null);
             },
             true,
             // A replaced resolver may read an external recipient source. Recheck it after claiming too.

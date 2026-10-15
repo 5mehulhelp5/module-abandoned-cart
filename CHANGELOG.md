@@ -15,7 +15,7 @@ First release. Features:
   subscribe from checkout with the masked cart id and their email, customers their own cart through the session;
   `CartSubscription` authorizes the cart against the website and store, Notification handles email rules,
   consent and storage. Magento's quote and its checkout email are never written.
-- **Data:** send history and a random queue reservation token in `ck_abandoned_cart` (deleted with the quote).
+- **Data:** send history and the `queued_at` mark in `ck_abandoned_cart` (deleted with the quote).
   Who subscribed, with which consent and browser, is the cart's Notification subscription; guest
   addresses are shared Notification contacts, customers use their account email.
 - **Sending** through `commercekings/module-notification`: shared queue consumer
@@ -32,6 +32,8 @@ First release. Features:
   state and consent.
 - **Withdrawal:** Notification's handler, registered for `cart_reminder`, removes the cart's subscription
   while the send history stays, so opting in again cannot cause a second reminder.
+- **Unsubscribe link:** replaceable `UnsubscribeLinkInterface` with an `UnsubscribeContext` (consent id, store
+  and named attributes: cart, customer, subscription, recipient); the default is Consent's signed withdrawal link.
 - **Restore links:** signed with Magento's encryptor, confirmed by a form-key POST, bound to the browser
   and store, with locked carts and atomic merges that behave like Magento's sign-in merge (stock is enforced at checkout).
 - **Admin:** CommerceKings > Abandoned Cart, with read-only previews of quote lifetime and reminders per cart.

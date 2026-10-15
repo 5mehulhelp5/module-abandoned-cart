@@ -128,12 +128,12 @@ Email content restricts visitor-controlled values and uses the shop's catalog da
 
 - **No visitor text in the email.** Custom options are shown only for the store's predefined choices (`drop_down`, `radio`, `checkbox`, `multiple`); free text (such as an engraved message), file names and other types are left out. Product and configurable option names come from the catalog.
 - **Greeting** uses only the first word of the name, letters/`-`/`'` only, max 20 characters. The default template uses "Hi %name," when a valid name is available and omits the greeting otherwise.
-- Not done (yet): a per-IP rate limit on the guest subscribe endpoint (it belongs to `CommerceKings_Notification`).
+- The guest subscribe endpoint has no rate limit in code: add one in nginx or your proxy – see module-notification's README, *Rate limiting*.
 - The recorded consent shows what a browser sent; a scripted client can fake it, like with any cookie banner.
 
 ## Links in the email
 
-The restore link works for up to 7 days after sending, capped by Magento's configured quote lifetime from the cart's last update, and uses `?q={cart id}&t={signature}`. Its signature (`LinkSignature`) uses Magento's `EncryptorInterface::hash()` over purpose + cart id, retaining the existing 32-hex token format. Magento supplies HMAC-SHA256 and selects/decodes its current deployment key. The opt-out link comes from Consent's `WithdrawalLinkInterface`, uses `?c={consent id}&t={signature}`, and remains usable while that consent record is retained. Its separate HMAC binds the consent id and website. Neither signature includes the email, so changing a cart or account email does not invalidate it. Magento's masked cart id (the guest cart REST key) never appears in the email. Changing the deployment signing key invalidates existing links.
+The restore link works for up to 7 days after sending, capped by Magento's configured quote lifetime from the cart's last update, and uses `?q={cart id}&t={signature}`. Its signature (`LinkSignature`) uses Magento's `EncryptorInterface::hash()` over purpose + cart id, retaining the existing 32-hex token format. Magento supplies HMAC-SHA256 and selects/decodes its current deployment key. The opt-out link (by default – see *Custom unsubscribe link* below) comes from Consent's `WithdrawalLinkInterface`, uses `?c={consent id}&t={signature}`, and remains usable while that consent record is retained. Its separate HMAC binds the consent id and website. Neither signature includes the email, so changing a cart or account email does not invalidate it. Magento's masked cart id (the guest cart REST key) never appears in the email. Changing the deployment signing key invalidates existing links.
 
 Generation and verification use only Magento's native signer, with no legacy raw-key fallback.
 Older development links can stop working when their raw-key signatures differ from Magento's
@@ -161,6 +161,21 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 - already withdrawn → confirmation again, without withdrawing a later explicit consent. Deleting the original cart does not break the link; deleting the consent record, an invalid signature or another website → homepage;
 - confirmed in the owning browser → Consent's `js/withdrawal-banner.js` switches the mapped choice off only if that browser's current choice was withdrawn. GET never synchronizes preferences; an already-withdrawn choice can be applied explicitly with the form. Another browser sees a generic question, then redirects home after submitting. Other categories and later explicit choices stay; another device's cookie is untouched. Purposes sharing the same category follow it together;
 
+**Custom unsubscribe link** – `optout_url` (and the one-click header) comes from
+`CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface::getUrl(UnsubscribeContext $context)`. The default,
+`Model\ConsentUnsubscribeLink`, returns Consent's signed link above. Replace it with a DI preference to use your
+own page or an external preference center:
+
+```xml
+<preference for="CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface" type="Vendor\Module\Model\MyUnsubscribeLink"/>
+```
+
+`UnsubscribeContext` has `consentId` and `storeId`, and `getAttribute($name)` for the rest: `quote_id`,
+`customer_id` (null for guests), `subscription_id` and `email`; an unknown name returns null, so attributes can be
+added without breaking implementations. Your link must be unguessable (signed or a random token, never a plain id
+or email), accept a one-click `POST` if Notification's *One-click unsubscribe* is on, and withdraw with
+`ConsentInterface::withdraw($consentId, 'email')` – that is what removes the subscription and stops reminders.
+
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 
 `ordered / closed`, `empty`, `no email`, `reminder policy` (already reminded), `quote expired`, `cart recently updated`, `consent withdrawn / expired` (also: older banner/terms revision), `consent purpose / website mismatch`, `disabled`; after a send attempt also Notification's `recipient cooldown` and `recipient changed`. A subscription or cart that no longer exists logs `subscription N skipped (subscription or cart gone)`; Notification's consumer already skips withdrawn subscriptions (`CommerceKings_Notification: cart_reminder N skipped (no valid subscription)`). A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
@@ -171,7 +186,7 @@ current-key signatures. Use a fresh cart to generate a reminder when testing thi
 - **The restore link opens the cart as it is now**, not as it was in the email. Products the customer removed are not brought back (no snapshot); an emptied cart shows "This reminder link is no longer available. You can continue shopping with your current cart."
 - **Another device / cleared cookie / expired cookie → homepage.** The link only works in the browser that gave the consent (deliberate: nobody else sees the cart, email or address).
 - Visitors who answered the banner **before** the category existed are not asked again unless **Source revision** (Consent section) is raised; until then the category stays off for them.
-- **Scanner-safe opt-out:** GET/HEAD do not withdraw or change banner preferences; the visitor must explicitly submit the confirmation form. Consent's optional RFC 8058 Yes/No setting adds mail-client unsubscribe headers alongside the regular confirmation link. The header and visible link use the same signed URL and withdrawal cleanup. The sending provider must DKIM-sign both headers. Header insertion uses Magento's native Symfony mail API (verified on 2.4.9); an unsupported custom or legacy mail backend fails before sending when this option is enabled.
+- **Scanner-safe opt-out:** GET/HEAD do not withdraw or change banner preferences; the visitor must explicitly submit the confirmation form. Notification's optional *One-click unsubscribe* (RFC 8058, per website) adds mail-client unsubscribe headers alongside the regular confirmation link. The header and visible link use the same signed URL and withdrawal cleanup. The sending provider must DKIM-sign both headers. Header insertion uses Magento's native Symfony mail API (verified on 2.4.9); an unsupported custom or legacy mail backend fails before sending when this option is enabled.
 - **Delivery is not atomic with SMTP.** The reminder timestamp is claimed before handoff. A hard worker interruption after claiming can leave a cart marked reminded even if nothing was sent; it is not automatically retried. Caught send failures release the claim, but an SMTP exception may itself be ambiguous. Review transport/provider evidence before manually retrying an uncertain attempt. Once `sendMessage()` returns successfully, a later emulation cleanup error keeps the claim to prevent a duplicate. The timestamp is not proof of inbox delivery.
 - Guest carts are deleted by Magento's own `sales_clean_quotes` after "Quote Lifetime" (default 30 days). Their send history goes with them; Notification's daily cleanup then removes the cart's subscription (`CartSubscription::orphanCondition()`) and, after its grace period, the guest's address. The consent record stays in `CommerceKings_Consent` until its own cleanup.
 - An ordered cart keeps its email in `sales_order` (needed for the order, unrelated to this consent).

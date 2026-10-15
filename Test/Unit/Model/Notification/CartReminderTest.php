@@ -56,6 +56,12 @@ class CartReminderTest extends TestCase
     private bool $scopeMatches = true;
     private ?array $recipientSequence = null;
     private bool $oneClick = false;
+    /** Notification's "One-click unsubscribe" per store; null = $oneClick everywhere */
+    private ?array $oneClickStores = null;
+    /** the stores the setting was read for */
+    private array $oneClickAsked = [];
+    /** the arguments ReminderData::build() received */
+    private array $built = [];
     private bool $recipientClaimed = false;
     private array $releasedRecipients = [];
     private bool $headerSupport = true;
@@ -81,7 +87,10 @@ class CartReminderTest extends TestCase
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(fn () => $this->createStub($this->quoteModel ? Quote::class : CartInterface::class));
         $data = $this->createStub(ReminderData::class);
-        $data->method('build')->willReturn(['customer_name' => 'Jane', 'items_html' => '', 'optout_url' => $this->optoutUrl]);
+        $data->method('build')->willReturnCallback(function (...$args) {
+            $this->built = $args;
+            return ['customer_name' => 'Jane', 'items_html' => '', 'optout_url' => $this->optoutUrl];
+        });
         $this->emulation = $this->createMock(Emulation::class);
         $lifetime = $this->createStub(QuoteLifetime::class);
         $lifetime->method('isExpired')->willReturnCallback(fn () => $this->expired);
@@ -90,8 +99,12 @@ class CartReminderTest extends TestCase
         $this->nativeMessage = (new \Symfony\Component\Mime\Email())->from('shop@example.test')->to('guest@example.test')->text('Reminder');
         $message = $this->createStub(\Magento\Framework\Mail\EmailMessage::class);
         $message->method('getSymfonyMessage')->willReturn($this->nativeMessage);
-        $consentConfig = $this->createStub(\CommerceKings\Consent\Model\Config::class);
-        $consentConfig->method('isOneClickUnsubscribeEnabled')->willReturnCallback(fn () => $this->oneClick);
+        $notificationConfig = $this->createStub(NotificationConfig::class);
+        $notificationConfig->method('getCooldownDays')->willReturn(7);
+        $notificationConfig->method('isOneClickUnsubscribeEnabled')->willReturnCallback(function (int $storeId) {
+            $this->oneClickAsked[] = $storeId;
+            return $this->oneClickStores === null ? $this->oneClick : in_array($storeId, $this->oneClickStores, true);
+        });
         $transport = $this->createStub(TransportInterface::class);
         $transport->method('getMessage')->willReturnCallback(fn () => $this->headerSupport ? $message : null);
         $transport->method('sendMessage')->willReturnCallback(function () {
@@ -122,8 +135,6 @@ class CartReminderTest extends TestCase
             $this->releasedRecipients[] = [$email, $token];
             $this->recipientClaimed = false;
         });
-        $notificationConfig = $this->createStub(NotificationConfig::class);
-        $notificationConfig->method('getCooldownDays')->willReturn(7);
         $mailer = new Mailer($builder, $this->emulation, $cooldown, $notificationConfig);
         $locks = $this->createStub(\Magento\Framework\Lock\LockManagerInterface::class);
         $locks->method('lock')->willReturnCallback(function ($name, $timeout) {
@@ -134,10 +145,10 @@ class CartReminderTest extends TestCase
             $this->lockEvents[] = ['unlock', $name];
             return true;
         });
-        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $consentConfig, $this->carts(), $locks);
+        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $consent, $this->guard(), $this->policy ?? new OncePerCart(), $logger, $scope, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks);
     }
 
-    /** No claim, no email: only the cart's place under "Maximum pending reminders" is released for the finder. */
+    /** No claim, no email: only the cart's `queued_at` mark is cleared, so the finder can queue it again. */
     private function assertReleasedOnly(): void
     {
         $this->assertCount(1, $this->updates, 'no claim');
@@ -146,7 +157,7 @@ class CartReminderTest extends TestCase
         $this->assertSame(['quote_id = ?', 'queued_at = ?'],
             self::conditions($this->updates[0]['where']));
         $this->assertSame(42, $this->updates[0]['where']['quote_id = ?']);
-        $this->assertSame('2026-10-01 12:30:00', $this->updates[0]['where']['queued_at = ?'], 'only the reservation it read');
+        $this->assertSame('2026-10-01 12:30:00', $this->updates[0]['where']['queued_at = ?'], 'only the mark it read');
     }
 
     /** @dataProvider skipCases */
@@ -308,6 +319,14 @@ class CartReminderTest extends TestCase
         $this->assertSame(['CommerceKings_AbandonedCart: reminder sent for cart 42'], $this->logs);
     }
 
+    /** A replaced unsubscribe link receives the subscription and recipient, not only the consent id. */
+    public function testTheUnsubscribeContextGetsTheSubscriptionAndRecipient(): void
+    {
+        $this->consumer()->process('42');
+        $this->assertSame('cid-1', $this->built[1]);
+        $this->assertSame(['subscription_id' => 9, 'email' => 'a@test.com'], $this->built[2]);
+    }
+
     public function testCodexFinding1WithdrawalBetweenCheckAndClaimSendsNothing(): void
     {
         // the checks above passed, then the visitor withdrew: the claim's own consent check fails, 0 rows
@@ -395,6 +414,23 @@ class CartReminderTest extends TestCase
         $this->assertSame(1, substr_count($this->nativeMessage->toString(), 'List-Unsubscribe:'));
         $this->assertSame($originalVars, $this->mail['setTemplateVars']);
         $this->assertSame(2, $this->sentMessages);
+    }
+
+    /** The switch is Notification's, per website: each cart uses the setting of its own store. */
+    public function testOneClickFollowsNotificationsSettingForTheCartsStore(): void
+    {
+        $this->oneClickStores = [1];
+        $this->consumer(['store_id' => '2'] + self::ROW)->process('42');
+        $this->assertSame([2], $this->oneClickAsked, 'read for the cart\'s store, not the default');
+        $this->assertNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'off in store 2');
+        $this->assertSame(1, $this->sentMessages, 'the email still goes out, with its visible unsubscribe link');
+
+        $this->oneClickAsked = [];
+        $this->recipientClaimed = false;
+        $this->consumer()->process('42');
+        $this->assertSame([1], $this->oneClickAsked);
+        $this->assertSame('<' . $this->optoutUrl . '>', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe'),
+            'on in store 1: the header carries the same unsubscribe link as the email');
     }
 
     public function testInsecureOptoutCannotBeAdvertisedAsOneClick(): void

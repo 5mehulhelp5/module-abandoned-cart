@@ -257,7 +257,7 @@ class ReminderPolicyTest extends TestCase
             $data, $mailer, $this->config(), $consent, $this->guard(),
             $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->om->get(QuoteScope::class), $this->lifetime(),
             $this->om->get(ReminderEmailResolverInterface::class),
-            $this->createStub(\CommerceKings\Consent\Model\Config::class), $this->om->get(CartTable::class),
+            $this->notificationConfig(), $this->om->get(CartTable::class),
             $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class));
     }
 
@@ -645,7 +645,7 @@ class ReminderPolicyTest extends TestCase
 
     public function testAnOldSkippedDeliveryCannotReleaseANewerReservation(): void
     {
-        // review c77e0cb: release() did not check which reservation the worker owned
+        // review c77e0cb: release() did not check which mark the worker read
         $id = $this->quote();
         $this->assertSame(1, $this->finder()->execute());
         $db = $this->resource->getConnection();
@@ -655,7 +655,7 @@ class ReminderPolicyTest extends TestCase
         $original = (new \ReflectionProperty($consumer, 'recipients'))->getValue($consumer);
         $recipients = $this->createMock(ReminderEmailResolverInterface::class);
         $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original, $db) {
-            // meanwhile: the old reservation is released, the cart ages, and a new finder run queues it again
+            // meanwhile: the old mark is cleared, the cart ages, and a new finder run queues it again
             $db->update($this->table('ck_abandoned_cart'), ['queued_at' => null], ['quote_id = ?' => $quoteId]);
             $db->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s', time() - 120)], ['entity_id = ?' => $quoteId]);
             $this->assertSame(1, $this->finder()->execute());
@@ -663,12 +663,12 @@ class ReminderPolicyTest extends TestCase
         });
         // this worker still holds its older 'recently updated' snapshot and skips
         $this->withRecipients($consumer, $recipients)->process($this->subscriptionOf($id));
-        $this->assertNotNull($this->row($id)['queued_at'], 'the newer reservation stays pending');
+        $this->assertNotNull($this->row($id)['queued_at'], 'the newer mark stays');
     }
 
     public function testAnOldDuplicateAndASameSecondRetrySendOnce(): void
     {
-        // without reservation tokens a same-second retry and an old duplicate share the mark's value:
+        // without queue tokens a same-second retry and an old duplicate share the mark's value:
         // the worst case is one more message, never a second email and never a lost cart
         $id = $this->quote();
         $db = $this->resource->getConnection();
