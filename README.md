@@ -6,7 +6,7 @@ Install in a Magento project with `composer require commercekings/module-abandon
 release is published. Then enable its modules:
 
 ```sh
-bin/magento module:enable CommerceKings_Consent CommerceKings_AbandonedCart
+bin/magento module:enable CommerceKings_Core CommerceKings_Consent CommerceKings_AbandonedCart
 bin/magento setup:upgrade
 bin/magento cache:clean
 ```
@@ -17,7 +17,7 @@ See [compatibility and verification](COMPATIBILITY.md) and [changes](CHANGELOG.m
 
 Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts, a Magento message queue consumer sends the emails through RabbitMQ or Magento's database transport.
 
-Depends on **`CommerceKings_Consent` only** – not on any consent source or banner module.
+Depends on **`CommerceKings_Consent`** for consent and **`CommerceKings_Core`** for shared admin branding; no dependency on a consent source or banner module.
 
 Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (feature) and **→ Consent** (where consent comes from).
 
@@ -226,7 +226,7 @@ Other settings are hidden while **Enabled** is **No**.
 ## Deploy
 
 ```sh
-bin/magento module:enable CommerceKings_Consent CommerceKings_ConsentDefaults CommerceKings_ConsentVanilla CommerceKings_AbandonedCart
+bin/magento module:enable CommerceKings_Core CommerceKings_Consent CommerceKings_ConsentDefaults CommerceKings_ConsentVanilla CommerceKings_AbandonedCart
 bin/magento setup:upgrade   # feature tables and consent schema
 ```
 

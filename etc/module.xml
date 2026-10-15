@@ -3,6 +3,7 @@
         xsi:noNamespaceSchemaLocation="urn:magento:framework:Module/etc/module.xsd">
     <module name="CommerceKings_AbandonedCart">
         <sequence>
+            <module name="CommerceKings_Core"/>
             <module name="Magento_Config"/>
             <module name="Magento_Quote"/>
             <module name="Magento_Checkout"/>

@@ -14,6 +14,7 @@
         "magento/module-quote": "^101.2",
         "magento/module-checkout": "^100.4",
         "magento/module-message-queue": "^100.4",
+        "commercekings/module-core": "^0.1",
         "commercekings/module-consent": "^0.1",
         "magento/module-catalog": "^104.0",
         "magento/module-customer": "^103.0",
