@@ -2,24 +2,37 @@
 
 **Development status:** first-release feature scope frozen; polishing and verification remain before publication.
 
-Install in a Magento project with `composer require commercekings/module-abandoned-cart:^0.1` after the first
-release is published. Then enable its modules:
+Install in a Magento project after the first release is published, in one of two setups:
+
+| Setup | Packages | Tables | Reminders |
+|---|---|---|---|
+| **Consent** (banner) | `commercekings/module-abandoned-cart` + `commercekings/module-consent-notification` + a consent banner (e.g. `commercekings/module-consent-vanilla`) | `ck_notification_*`, `ck_abandoned_cart`, `ck_consent*` | only with consent for `cart_reminder`; signed restore link (bound to the consenting browser); Consent's unsubscribe page |
+| **Opt-out** | `commercekings/module-abandoned-cart` alone (an opt-out module adds the checkout notice, neutral templates and an unsubscribe page) | `ck_notification_*`, `ck_abandoned_cart` | every subscribed cart; the button opens the cart page (no restore or merge); no unsubscribe line until a link is supplied |
 
 ```sh
-bin/magento module:enable CommerceKings_Core CommerceKings_Consent CommerceKings_Notification CommerceKings_AbandonedCart
+# consent setup
+composer require commercekings/module-abandoned-cart:^0.1 commercekings/module-consent-notification:^0.1 commercekings/module-consent-vanilla:^0.1
+# opt-out setup
+composer require commercekings/module-abandoned-cart:^0.1
+
 bin/magento setup:upgrade
 bin/magento cache:clean
 ```
+
+Moving a shop from the consent setup to opt-out: `bin/magento module:uninstall` the bridge, banner and
+`CommerceKings_Consent` (Magento drops their tables), then `setup:upgrade`.
 
 Use the shop's normal DI compilation and static-content deployment process for production.
 For development/tests use source checkouts (`--prefer-source`); release archives omit `Test/`.
 See [compatibility and verification](COMPATIBILITY.md) and [changes](CHANGELOG.md).
 
-Sends **one** reminder email for a cart that was left untouched, **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`** – whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts; `CommerceKings_Notification`'s shared queue consumer sends the emails through RabbitMQ or Magento's database transport.
+Sends **one** reminder email for a cart that was left untouched – in the consent setup **only with consent for purpose `cart_reminder`** from **`CommerceKings_Consent`**, whatever consent source the shop chose there. Guests and logged-in customers follow the same rules. Cron finds the carts; `CommerceKings_Notification`'s shared queue consumer sends the emails through RabbitMQ or Magento's database transport.
 
 Talks only to **`CommerceKings_Notification`** for subscriptions (who asked, under which permission), the permission check and sending, and uses **`CommerceKings_Core`** for shared admin branding. Consent comes in through the consent bridge (`commercekings/module-consent-notification`): with it, a subscription needs a consent for `cart_reminder`; the purpose itself is declared in this module's `etc/di.xml`.
 
-Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (feature) and **→ Consent** (where consent comes from).
+Admin: **Stores → Configuration → CommerceKings → Abandoned Cart** (feature), **→ Notifications** (cooldown, one-click) and, in the consent setup, **→ Consent** (where consent comes from).
+
+The sections below describe the consent setup unless they say otherwise.
 
 ## Flow
 
@@ -247,11 +260,10 @@ Other settings are hidden while **Enabled** is **No**.
 ## Deploy
 
 ```sh
-bin/magento module:enable CommerceKings_Core CommerceKings_Consent CommerceKings_ConsentDefaults CommerceKings_ConsentVanilla CommerceKings_Notification CommerceKings_AbandonedCart
-bin/magento setup:upgrade   # feature tables and consent schema
+bin/magento setup:upgrade   # feature tables (and, in the consent setup, the consent schema)
 ```
 
-- Define the chosen adapter's categories/services in your site module and map one optional choice to `cart_reminder`. Select that source in Consent settings. The ConsentDefaults preset maps `cart_reminder` to Personalization automatically; sites with explicit categories must add that mapping themselves.
+- Consent setup: define the chosen adapter's categories/services in your site module and map one optional choice to `cart_reminder`. Select that source in Consent settings. The ConsentDefaults preset maps `cart_reminder` to Personalization automatically; sites with explicit categories must add that mapping themselves.
 - Check the selected sender in **Stores → Configuration → General → Store Email Addresses**.
 - Verify the sender domain's **SPF and DKIM** (and DMARC) for the no-reply address before launch – otherwise reminders land in spam.
 - After deploying new code, **restart the resident notification consumer** (see Queue transport).

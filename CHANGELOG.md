@@ -8,9 +8,11 @@ First release. Features:
   failures/refusals and dependency-loading errors. Recheck the cart, login and consent after asynchronous
   checkout dependencies load; a failed load leaves capture unstored without interrupting checkout.
 
-- **Consent-based reminders:** one reminder email per abandoned cart, only with a valid `cart_reminder`
-  consent from `commercekings/module-consent` (not withdrawn, expired or from an older revision). Consent is
-  checked in PHP and repeated inside every atomic SQL claim, so a withdrawal at the same moment wins.
+- **Two setups:** one reminder email per abandoned cart. With `commercekings/module-consent-notification`, only
+  with a valid `cart_reminder` consent from `commercekings/module-consent` (not withdrawn, expired or from an
+  older revision), checked in PHP and repeated inside every atomic SQL claim, so a withdrawal at the same moment
+  wins. Without it (opt-out) every subscribed cart, and no consent tables are installed; the module has no
+  dependency on `commercekings/module-consent`.
 - **Subscribe:** carts are `commercekings/module-notification` subscriptions (type `cart_reminder`). Guests
   subscribe from checkout with the masked cart id and their email, customers their own cart through the session;
   `CartSubscription` authorizes the cart against the website and store, Notification handles email rules,

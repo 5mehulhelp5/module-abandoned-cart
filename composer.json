@@ -1,6 +1,6 @@
 {
     "name": "commercekings/module-abandoned-cart",
-    "description": "Privacy-first abandoned cart reminder for Magento 2: consent per purpose (commercekings/module-consent), subscriptions and sending through commercekings/module-notification, signed restore links, opt-out.",
+    "description": "Privacy-first abandoned cart reminder for Magento 2: subscriptions, permission and sending through commercekings/module-notification - consent-based with commercekings/module-consent-notification, opt-out without it - and signed restore links.",
     "type": "magento2-module",
     "license": "MIT",
     "authors": [
@@ -14,12 +14,14 @@
         "magento/module-quote": "^101.2",
         "magento/module-checkout": "^100.4",
         "commercekings/module-core": "^0.1",
-        "commercekings/module-consent": "^0.1",
         "commercekings/module-notification": "^0.1",
         "magento/module-catalog": "^104.0",
         "magento/module-customer": "^103.0",
         "magento/module-config": "^101.2",
         "magento/module-backend": "^102.0"
+    },
+    "suggest": {
+        "commercekings/module-consent-notification": "Consent-based reminders (setup with a consent banner); leave it out for opt-out"
     },
     "autoload": {
         "files": [
