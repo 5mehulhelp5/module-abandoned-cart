@@ -33,6 +33,7 @@
             "browser_hash": true,
             "captured_at": true,
             "queued_at": true,
+            "queue_token": true,
             "reminded_at": true
         },
         "constraint": {

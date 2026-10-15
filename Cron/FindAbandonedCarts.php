@@ -16,6 +16,7 @@ use CommerceKings\Notification\Api\QueueInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 use Magento\Framework\Lock\LockManagerInterface;
+use Magento\Framework\Math\Random;
 use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
@@ -56,7 +57,8 @@ class FindAbandonedCarts
         private readonly ReminderEmailResolverInterface $recipients,
         private readonly CooldownInterface $cooldown,
         private readonly CartTable $carts,
-        private readonly LockManagerInterface $locks
+        private readonly LockManagerInterface $locks,
+        private readonly Random $random
     ) {
     }
 
@@ -82,7 +84,7 @@ class FindAbandonedCarts
         $db = $this->resource->getConnection();
         $released = $db->update(
             $this->carts->joined(),
-            ['c.queued_at' => null],
+            ['c.queued_at' => null, 'c.queue_token' => null],
             [
                 'c.queued_at < NOW() - INTERVAL ' . self::STALE_MINUTES . ' MINUTE',
                 $this->storeCondition(),
@@ -101,18 +103,17 @@ class FindAbandonedCarts
         }
         $published = 0;
         $deadline = microtime(true) + self::MAX_RUN_SECONDS;
-        while ($room - $published > 0 && microtime(true) < $deadline) {
-            $wanted = min(self::BATCH, $room - $published);
-            $due = $this->dueCarts($wanted, $deadline);
-            foreach ($due as $id => $subscriptionId) {
+        if ($room > 0) {
+            foreach ($this->dueCarts($deadline) as $id => $subscriptionId) {
                 if (microtime(true) >= $deadline) {
-                    break 2; // the next run continues; nothing was claimed for the rest
+                    break; // the next run continues; nothing was claimed for the rest
                 }
                 // claim it first: only the run that flips queued_at from NULL publishes
                 $this->carts->ensure($id);
                 $claimed = $db->update(
                     $this->carts->joined(),
-                    ['c.queued_at' => new Expression('NOW()')],
+                    ['c.queued_at' => new Expression('NOW()'),
+                        'c.queue_token' => $this->random->getRandomString(32, '0123456789abcdef')],
                     array_merge(['c.quote_id = ?' => $id, 's.subscription_id = ?' => $subscriptionId],
                         $this->eligibleConditions())
                 );
@@ -120,9 +121,9 @@ class FindAbandonedCarts
                     $this->queue->publish(CartReminder::CODE, (string)$subscriptionId);
                     $published++;
                 }
-            }
-            if (count($due) < $wanted || microtime(true) >= $deadline) {
-                break; // no more eligible carts, or out of time
+                if ($published >= $room) {
+                    break;
+                }
             }
         }
         if ($published) {
@@ -154,38 +155,44 @@ class FindAbandonedCarts
     }
 
     /**
-     * Up to $limit eligible carts, oldest first, excluding recipients still in cooldown; stops at the deadline.
+     * Yield eligible carts as they are resolved, so a slow scan retains progress before its deadline.
+     * The cursor follows activity and cart id: claiming removes rows from the selection, so offsets would skip carts.
      *
-     * @return array<int, int> quote id => subscription id
+     * @return \Generator<int, int> quote id => subscription id
      */
-    private function dueCarts(int $limit, float $deadline): array
+    private function dueCarts(float $deadline): \Generator
     {
         $db = $this->resource->getConnection();
-        $select = $this->carts->select([], ['entity_id'], ['subscription_id']);
+        $select = $this->carts->select([], ['entity_id', 'updated_at'], ['subscription_id']);
         foreach ($this->eligibleConditions() as $condition) {
             $select->where($condition);
         }
         $select->order(['q.updated_at ASC', 'q.entity_id ASC']);
-        $due = [];
-        $offset = 0;
-        // Read pages before claiming, so carts without a resolvable email cannot block later carts.
+        $updatedAt = null;
+        $lastId = 0;
         do {
-            $rows = $db->fetchPairs((clone $select)->limit(self::BATCH, $offset));
-            foreach ($rows as $id => $subscriptionId) {
+            if (microtime(true) >= $deadline) {
+                return;
+            }
+            $page = clone $select;
+            if ($updatedAt !== null) {
+                $page->where($db->quoteInto('q.updated_at > ?', $updatedAt) . ' OR ('
+                    . $db->quoteInto('q.updated_at = ?', $updatedAt)
+                    . $db->quoteInto(' AND q.entity_id > ?)', $lastId));
+            }
+            $rows = $db->fetchAll($page->limit(self::BATCH, 0));
+            foreach ($rows as $row) {
                 if (microtime(true) >= $deadline) {
-                    return [];
+                    return;
                 }
-                $email = $this->recipients->resolve((int)$id);
+                $updatedAt = (string)$row['updated_at'];
+                $lastId = (int)$row['entity_id'];
+                $email = $this->recipients->resolve($lastId);
                 if ($email !== null && !$this->cooldown->isRecent($email)) {
-                    $due[(int)$id] = (int)$subscriptionId;
-                    if (count($due) === $limit) {
-                        return $due;
-                    }
+                    yield $lastId => (int)$row['subscription_id'];
                 }
             }
-            $offset += self::BATCH;
         } while (count($rows) === self::BATCH);
-        return $due;
     }
 
     private function eligibleConditions(): array

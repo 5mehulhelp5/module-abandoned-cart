@@ -159,7 +159,7 @@ class ReminderPolicyTest extends TestCase
             ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
                 ['subscription_id', 'contact_id', 'consent_id', 'browser_hash', 'captured_at'])
-            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id', ['queued_at', 'reminded_at'])
+            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id', ['queued_at', 'reminded_at', 'queue_token'])
             ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email'])
             ->where('q.entity_id = ?', $id));
     }
@@ -233,7 +233,8 @@ class ReminderPolicyTest extends TestCase
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
             $this->policy ?? new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
             $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class),
-            $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class));
+            $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class),
+            $this->om->get(\Magento\Framework\Math\Random::class));
     }
 
     private function consumer(): CartReminder
@@ -262,6 +263,17 @@ class ReminderPolicyTest extends TestCase
             $this->om->get(ReminderEmailResolverInterface::class),
             $this->createStub(\CommerceKings\Consent\Model\Config::class), $this->om->get(CartTable::class),
             $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class));
+    }
+
+    private function withRecipients(CartReminder $consumer, ReminderEmailResolverInterface $recipients): CartReminder
+    {
+        $class = new \ReflectionClass($consumer);
+        $arguments = [];
+        foreach ($class->getConstructor()->getParameters() as $parameter) {
+            $arguments[] = $parameter->getName() === 'recipients' ? $recipients
+                : $class->getProperty($parameter->getName())->getValue($consumer);
+        }
+        return $class->newInstanceArgs($arguments);
     }
 
     public function testFinderUsesEachQuotesStoreLifetimeRatherThanTheOldSevenDaySetting(): void
@@ -618,15 +630,90 @@ class ReminderPolicyTest extends TestCase
             $this->assertSame(1, $this->finder()->execute());
             return $original->resolve($quoteId);
         });
-        $class = new \ReflectionClass($consumer);
-        $arguments = [];
-        foreach ($class->getConstructor()->getParameters() as $parameter) {
-            $arguments[] = $parameter->getName() === 'recipients' ? $recipients
-                : $class->getProperty($parameter->getName())->getValue($consumer);
-        }
         // this worker still holds its older 'recently updated' snapshot and skips
-        $class->newInstanceArgs($arguments)->process($this->subscriptionOf($id));
+        $this->withRecipients($consumer, $recipients)->process($this->subscriptionOf($id));
         $this->assertNotNull($this->row($id)['queued_at'], 'the newer reservation stays pending');
+    }
+
+    public function testSameSecondRetryIsNotReleasedByAnOldDuplicate(): void
+    {
+        $id = $this->quote();
+        $db = $this->resource->getConnection();
+        $db->query('SET timestamp = ' . time());
+        try {
+            $this->assertSame(1, $this->finder()->execute());
+            $old = $this->row($id);
+            // A claims delivery. Duplicate B reads that state and will skip it as already reminded.
+            $this->state($id, ['reminded_at' => $old['queued_at']]);
+            $consumer = $this->consumer();
+            $original = (new \ReflectionProperty($consumer, 'recipients'))->getValue($consumer);
+            $recipients = $this->createMock(ReminderEmailResolverInterface::class);
+            $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original, $old) {
+                // A fails before SMTP handoff. The next finder queues its retry in this same second.
+                $this->state($quoteId, ['reminded_at' => null, 'queued_at' => null, 'queue_token' => null]);
+                $this->assertSame(1, $this->finder()->execute());
+                $current = $this->row($quoteId);
+                $this->assertSame($old['queued_at'], $current['queued_at']);
+                $this->assertNotSame($old['queue_token'], $current['queue_token']);
+                return $original->resolve($quoteId);
+            });
+            $this->withRecipients($consumer, $recipients)->process($this->subscriptionOf($id));
+            $retry = $this->row($id);
+            $this->assertNotNull($retry['queued_at'], 'the old duplicate must leave the new reservation alone');
+            $this->assertNotNull($retry['queue_token']);
+            $this->assertSame(0, $this->sent);
+            $this->consumer()->process($this->subscriptionOf($id));
+            $this->assertSame(1, $this->sent, 'the replacement remains usable');
+        } finally {
+            $db->query('SET timestamp = 0');
+        }
+    }
+
+    public function testAWorkerCannotClaimAReplacementReservation(): void
+    {
+        $id = $this->quote();
+        $this->assertSame(1, $this->finder()->execute());
+        $old = $this->row($id);
+        $consumer = $this->consumer();
+        $original = (new \ReflectionProperty($consumer, 'recipients'))->getValue($consumer);
+        $recipients = $this->createMock(ReminderEmailResolverInterface::class);
+        $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original, $old) {
+            $this->state($quoteId, ['queued_at' => null, 'queue_token' => null]);
+            $this->assertSame(1, $this->finder()->execute());
+            $this->assertNotSame($old['queue_token'], $this->row($quoteId)['queue_token']);
+            return $original->resolve($quoteId);
+        });
+        $this->withRecipients($consumer, $recipients)->process($this->subscriptionOf($id));
+        $this->assertSame(0, $this->sent, 'its obsolete snapshot must lose the delivery claim');
+        $this->assertNotNull($this->row($id)['queued_at']);
+        $this->assertNotNull($this->row($id)['queue_token']);
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(1, $this->sent);
+    }
+
+    public function testTokenlessQueuedRowsFromBeforeTheUpgradeCanStillSend(): void
+    {
+        $id = $this->quote();
+        $this->assertSame(1, $this->finder()->execute());
+        $this->state($id, ['queue_token' => null]);
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(1, $this->sent);
+        $this->assertNotNull($this->row($id)['reminded_at']);
+        $this->assertSame(0, $this->finder()->execute());
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(1, $this->sent, 'a legacy duplicate cannot send twice');
+    }
+
+    public function testStreamingFinderDoesNotSkipCartsWhenClaimingRemovesEarlierRows(): void
+    {
+        $this->maxPending = 201;
+        $ids = array_map(fn () => $this->quote(), range(1, 201));
+        $this->assertSame(201, $this->finder()->execute());
+        $this->assertEqualsCanonicalizing($ids, $this->published);
+        $this->assertCount(201, array_unique($this->published));
+        $tokens = array_map(fn ($id) => $this->row($id)['queue_token'], $ids);
+        $this->assertCount(201, array_unique($tokens));
+        $this->assertSame(0, $this->finder()->execute(), 'the pending cap is now full');
     }
 
     public function testASecondFinderExitsWhileOneHoldsTheLock(): void

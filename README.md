@@ -97,6 +97,7 @@ deleted with the quote by Magento's cart cleanup):
 |---|---|
 | `quote_id` | the cart (`quote.entity_id`, foreign key, `ON DELETE CASCADE`) |
 | `queued_at` | queued by the finder (claim) |
+| `queue_token` | random reservation token; distinguishes retries queued in the same second |
 | `reminded_at` | email sent – one reminder per cart |
 
 Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. A guest's address is stored once as a Notification contact; the module keeps no email history, and Notification removes contacts nothing uses any more. Magento's `quote.customer_email` and `quote.updated_at` are never touched. The reminder delay uses the later of cart activity (`quote.updated_at`) and subscription activity (`captured_at`, guests and customers); quote expiry still uses Magento's cart timestamp. A withdrawal deletes the subscription but keeps `queued_at`/`reminded_at`, so opting in again never causes a second reminder. Every claim is one UPDATE over `ck_abandoned_cart` joined to `quote` and the subscription (`Model\CartTable::joined()`), so cart, consent and send history are still checked in the same statement.
@@ -245,6 +246,10 @@ in pages of 200 for at most 30 seconds. A cart is pending while it is queued, no
 place – a worker releases only the reservation it read, never a newer one. Only one finder fills at a time
 (Magento's lock `commercekings_abandoned_cart_finder`), across cron overlaps, manual runs and servers. The 30-second
 budget is checked for every candidate and before every claim.
+Eligible carts are published as they are resolved, so reaching the deadline keeps earlier progress. Pages use
+the cart's activity time and id as a cursor, so claiming carts does not skip later rows. Each reservation has a
+random token; delivery claims, releases and failed-send recovery compare it before changing state. Existing
+queued rows without a token remain usable after `setup:upgrade`; queue message references are unchanged.
 
 - **More consumers send faster with no other change**: they drain the queue sooner, so the next run refills more.
   Measured in the sandbox (developer mode): ~190 emails a minute per consumer, ~1,230 with eight; production renders

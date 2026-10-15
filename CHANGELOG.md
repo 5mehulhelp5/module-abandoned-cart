@@ -15,8 +15,8 @@ First release. Features:
   subscribe from checkout with the masked cart id and their email, customers their own cart through the session;
   `CartSubscription` authorizes the cart against the website and store, Notification handles email rules,
   consent and storage. Magento's quote and its checkout email are never written.
-- **Data:** only the send history per cart in `ck_abandoned_cart` (queue and reminder times; deleted with the
-  quote). Who subscribed, with which consent and browser, is the cart's Notification subscription; guest
+- **Data:** send history and a random queue reservation token in `ck_abandoned_cart` (deleted with the quote).
+  Who subscribed, with which consent and browser, is the cart's Notification subscription; guest
   addresses are shared Notification contacts, customers use their account email.
 - **Sending** through `commercekings/module-notification`: shared queue consumer
   `commerceKingsNotificationSend` (RabbitMQ or Magento's database queue), optional recipient cooldown
@@ -25,7 +25,8 @@ First release. Features:
 - **Flash sales:** the finder runs every minute and tops the queue up to *Maximum pending reminders* (default 2,000,
   one finder at a time), so throughput follows the number of consumers; *Maximum reminders per hour* is enforced
   when sending, so it also holds when a backlog drains after an outage. Skipped reminders release only their own
-  reservation at once.
+  reservation at once, including retries queued in the same second. Candidates are published while scanning;
+  reaching the time budget preserves earlier progress, and cursor pagination avoids skipping carts after claims.
 - **Delivery policy:** replaceable `ReminderPolicyInterface` (default one reminder per cart) with typed state
   and SQL contexts (`ReminderQuery::quoteId()` and the send-history columns `queued_at`/`reminded_at`); Magento's quote lifetime per store; finder and delivery recheck delay, expiry, cart
   state and consent. Stale queue claims are released and queued again.

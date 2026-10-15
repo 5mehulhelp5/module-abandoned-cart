@@ -75,7 +75,7 @@ class FindAbandonedCartsTest extends TestCase
         $cooldown = $this->createStub(CooldownInterface::class);
         $cooldown->method('isRecent')->willReturnCallback(fn () => $this->recent);
         return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue,
-            $this->policy ?? new OncePerCart(), $lifetime, $stores, $logger, $recipients, $cooldown, $this->carts(), $locks);
+            $this->policy ?? new OncePerCart(), $lifetime, $stores, $logger, $recipients, $cooldown, $this->carts(), $locks, new \Magento\Framework\Math\Random());
     }
 
     public function testDisabledStoresDoNothing(): void
@@ -84,10 +84,11 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertSame([], $this->updates);
     }
 
-    /** quote id => subscription id, as the finder's select returns them */
+    /** Candidate rows in the order returned by the finder */
     private static function due(array $ids): array
     {
-        return array_combine($ids, array_map(fn ($id) => (string)($id + 1000), $ids));
+        return array_map(fn ($id) => ['entity_id' => $id, 'subscription_id' => (string)($id + 1000),
+            'updated_at' => '2026-10-01 00:00:00'], $ids);
     }
 
     public function testSelectionUsesConsentPolicyAndEachStoresLifetimeAndDelay(): void
@@ -110,11 +111,14 @@ class FindAbandonedCartsTest extends TestCase
 
     public function testEverySelectedCartIsQueuedWithItsSubscriptionWithoutAddressGrouping(): void
     {
-        $this->fetchPairsResults = [self::due([10, 11, 12])];
+        $this->fetchAllResults = [self::due([10, 11, 12])];
         $this->assertSame(3, $this->finder()->execute());
         $this->assertSame(['1010', '1011', '1012'], array_column($this->published, 1));
         $this->assertSame(3, count(array_filter($this->queries, fn ($query) => str_contains($query[0], 'INSERT IGNORE'))),
             'the send history row exists before its claim');
+        $tokens = array_column(array_column(array_slice($this->updates, 1), 'data'), 'c.queue_token');
+        $this->assertCount(3, array_unique($tokens), 'each reservation receives a distinct token');
+        foreach ($tokens as $token) { $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/D', $token); }
     }
 
     public function testAlternativePolicyIsUsedInSelectionAndQueueClaims(): void
@@ -122,7 +126,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->policy = $this->createStub(ReminderPolicyInterface::class);
         $this->policy->method('dueCondition')->willReturnCallback(fn (ReminderQuery $query) =>
             'CUSTOM(' . $query->column('reminded_at') . ',' . $query->storeId . ')');
-        $this->fetchPairsResults = [self::due([10])];
+        $this->fetchAllResults = [self::due([10])];
         $this->assertSame(1, $this->finder()->execute());
         $this->assertStringContainsString('CUSTOM(c.reminded_at,1)', end($this->selectWhere)[0]);
         $this->assertStringContainsString('CUSTOM(c.reminded_at,1)', implode(' ', self::conditions($this->updates[1]['where'])));
@@ -133,7 +137,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->finder()->execute();
         $release = $this->updates[0];
         $this->assertSame(self::joined(), $release['table']);
-        $this->assertSame(['c.queued_at' => null], $release['data'], 'Magento\'s quote row is not written');
+        $this->assertSame(['c.queued_at' => null, 'c.queue_token' => null], $release['data'], 'Magento\'s quote row is not written');
         $conditions = self::conditions($release['where']);
         $this->assertContains('c.queued_at < NOW() - INTERVAL 60 MINUTE', $conditions);
         $this->assertStringContainsString('c.reminded_at IS NULL', implode(' ', $conditions));
@@ -141,13 +145,13 @@ class FindAbandonedCartsTest extends TestCase
 
     public function testOnlyWonAtomicClaimsArePublished(): void
     {
-        $this->fetchPairsResults = [self::due([10, 11, 12])];
+        $this->fetchAllResults = [self::due([10, 11, 12])];
         $this->updateResults = [0, 1, 0, 1];
         $this->assertSame(2, $this->finder()->execute());
         $this->assertSame([[CartReminder::CODE, '1010'], [CartReminder::CODE, '1012']], $this->published);
         $claim = $this->updates[1];
         $this->assertSame(self::joined(), $claim['table']);
-        $this->assertSame(['c.queued_at'], array_keys($claim['data']));
+        $this->assertSame(['c.queued_at', 'c.queue_token'], array_keys($claim['data']));
         $this->assertSame('NOW()', (string)$claim['data']['c.queued_at']);
         $this->assertSame(10, $claim['where']['c.quote_id = ?']);
         $this->assertSame(1010, $claim['where']['s.subscription_id = ?'], 'the selected subscription, not a newer one');
@@ -160,7 +164,7 @@ class FindAbandonedCartsTest extends TestCase
     public function testRecentRecipientsAreNotQueued(): void
     {
         $this->recent = true;
-        $this->fetchPairsResults = [self::due([10, 11])];
+        $this->fetchAllResults = [self::due([10, 11])];
         $this->assertSame(0, $this->finder()->execute());
         $this->assertSame([], $this->published);
     }
@@ -168,7 +172,7 @@ class FindAbandonedCartsTest extends TestCase
     public function testPublishFailurePropagatesAndKeepsTheQueueClaimForStaleRecovery(): void
     {
         $this->publishFails = true;
-        $this->fetchPairsResults = [self::due([10, 11])];
+        $this->fetchAllResults = [self::due([10, 11])];
         try {
             $this->finder()->execute();
             $this->fail('A failed publish must not be reported as queued successfully.');
@@ -177,7 +181,7 @@ class FindAbandonedCartsTest extends TestCase
         }
         $this->assertSame([], $this->published);
         $this->assertCount(2, $this->updates, 'Only stale recovery and the first queue claim ran.');
-        $this->assertSame(['c.queued_at'], array_keys($this->updates[1]['data']));
+        $this->assertSame(['c.queued_at', 'c.queue_token'], array_keys($this->updates[1]['data']));
         $this->assertSame(10, $this->updates[1]['where']['c.quote_id = ?']);
         $this->assertSame('NOW()', (string)$this->updates[1]['data']['c.queued_at']);
     }
@@ -191,16 +195,17 @@ class FindAbandonedCartsTest extends TestCase
     public function testUnresolvedRecipientsDoNotBlockTheNextCandidatePage(): void
     {
         $this->unresolved = range(1, 200);
-        $this->fetchPairsResults = [self::due(range(1, 200)), self::due([201])];
+        $this->fetchAllResults = [self::due(range(1, 200)), self::due([201])];
         $this->assertSame(1, $this->finder()->execute());
         $this->assertSame([[CartReminder::CODE, '1201']], $this->published);
-        $this->assertSame([[200, 0], [200, 200]], $this->limits);
+        $this->assertSame([[200, 0], [200, 0]], $this->limits);
+        $this->assertStringContainsString("q.entity_id > '200'", end($this->selectWhere)[0]);
     }
 
     public function testOnlyOneFinderFillsAtATimeAndAlwaysUnlocks(): void
     {
         $this->lockFree = false;
-        $this->fetchPairsResults = [self::due([10])];
+        $this->fetchAllResults = [self::due([10])];
         $this->assertSame(0, $this->finder()->execute());
         $this->assertSame([], $this->updates, 'not even stale recovery runs');
         $this->assertSame([['lock', 'commercekings_abandoned_cart_finder', 0]], $this->lockEvents, 'no waiting for the lock');
@@ -220,7 +225,7 @@ class FindAbandonedCartsTest extends TestCase
     {
         $this->maxPending = 2000;
         $this->fetchOneResults = [1990];
-        $this->fetchPairsResults = [self::due(range(1, 30))];
+        $this->fetchAllResults = [self::due(range(1, 30))];
         $this->assertSame(10, $this->finder()->execute());
         $this->assertSame(range(1001, 1010), array_map('intval', array_column($this->published, 1)));
         $this->assertSame([[200, 0]], $this->limits, 'one page read');
@@ -230,7 +235,7 @@ class FindAbandonedCartsTest extends TestCase
     public function testFullQueuePublishesNothing(): void
     {
         $this->fetchOneResults = [2000];
-        $this->fetchPairsResults = [self::due([10])];
+        $this->fetchAllResults = [self::due([10])];
         $this->assertSame(0, $this->finder()->execute());
         $this->assertSame([], $this->limits, 'no candidate is even read');
         $this->assertCount(1, $this->updates, 'stale recovery still runs');
@@ -251,16 +256,16 @@ class FindAbandonedCartsTest extends TestCase
     {
         $this->maxPending = 450;
         $this->fetchOneResults = [0];
-        $this->fetchPairsResults = [self::due(range(1, 200)), self::due(range(201, 400)), self::due(range(401, 450))];
+        $this->fetchAllResults = [self::due(range(1, 200)), self::due(range(201, 400)), self::due(range(401, 450))];
         $this->assertSame(450, $this->finder()->execute());
-        $this->assertSame([[200, 0], [200, 0], [200, 0]], $this->limits, 'pages of 200; queued carts drop out of the next page');
+        $this->assertSame([[200, 0], [200, 0], [200, 0]], $this->limits, 'pages of 200; the cursor follows the last scanned cart');
     }
 
     public function testHourlyBrakeCountsSentAndPendingReminders(): void
     {
         $this->perHour = 100;
         $this->fetchOneResults = [30, 60]; // pending, then sent in the last hour
-        $this->fetchPairsResults = [self::due(range(1, 50))];
+        $this->fetchAllResults = [self::due(range(1, 50))];
         $this->assertSame(10, $this->finder()->execute());
         $this->perHour = 100;
         $this->fetchOneResults = [40, 60];

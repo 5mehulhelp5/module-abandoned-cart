@@ -69,7 +69,7 @@ class CartReminder implements NotificationTypeInterface
     public function process(string $reference): void
     {
         $db = $this->resource->getConnection();
-        $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at'],
+        $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at', 'queue_token'],
             ['entity_id', 'is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'],
             ['subscription_id', 'contact_id', 'captured_at', 'consent_id'])
             ->where('s.subscription_id = ?', (int)$reference));
@@ -91,8 +91,9 @@ class CartReminder implements NotificationTypeInterface
             default => null,
         };
         $queuedAt = $row ? $row['queued_at'] : null;
+        $queueToken = $row ? $row['queue_token'] : null;
         if ($skip !== null) {
-            $this->release($id, $queuedAt);
+            $this->release($id, $queuedAt, $queueToken);
             $this->logger->info($id ? sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $skip)
                 : sprintf('CommerceKings_AbandonedCart: subscription %d skipped (%s)', (int)$reference, $skip));
             return;
@@ -109,6 +110,8 @@ class CartReminder implements NotificationTypeInterface
             [
                 'c.quote_id = ?' => $id,
                 's.subscription_id = ?' => (int)$row['subscription_id'],
+                'c.queued_at <=> ?' => $queuedAt ?? new Expression('NULL'),
+                'c.queue_token <=> ?' => $queueToken ?? new Expression('NULL'),
                 'q.store_id = ?' => (int)$row['store_id'],
                 $this->policy->dueCondition(new ReminderQuery((int)$row['store_id'], 'c', 'q')),
                 // Compare the state that was checked too, so parallel consumers cannot claim it twice.
@@ -131,7 +134,7 @@ class CartReminder implements NotificationTypeInterface
         if ($perHour > 0) {
             // the provider's hourly limit holds when a delayed backlog drains: count and claim one at a time
             if (!$this->locks->lock(self::HOURLY_LOCK, 10)) {
-                $this->release($id, $queuedAt);
+                $this->release($id, $queuedAt, $queueToken);
                 $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (hourly limit busy)', $id));
                 return;
             }
@@ -142,7 +145,7 @@ class CartReminder implements NotificationTypeInterface
                 $this->locks->unlock(self::HOURLY_LOCK);
             }
             if ($full) {
-                $this->release($id, $queuedAt);
+                $this->release($id, $queuedAt, $queueToken);
                 $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (hourly limit)', $id));
                 return;
             }
@@ -151,12 +154,14 @@ class CartReminder implements NotificationTypeInterface
         }
         if (!$claimed) {
             // another delivery won, or the cart changed meanwhile; free this message's reservation
-            $this->release($id, $queuedAt);
+            $this->release($id, $queuedAt, $queueToken);
             return;
         }
         $storeId = (int)$row['store_id'];
-        $restore = fn () => $db->update($this->carts->name(), ['reminded_at' => $row['reminded_at'], 'queued_at' => null],
-            ['quote_id = ?' => $id]);
+        $restore = fn () => $db->update($this->carts->name(),
+            ['reminded_at' => $row['reminded_at'], 'queued_at' => null, 'queue_token' => null],
+            ['quote_id = ?' => $id, 'queued_at <=> ?' => $queuedAt ?? new Expression('NULL'),
+                'queue_token <=> ?' => $queueToken ?? new Expression('NULL')]);
         $message = new Message(
             $storeId,
             $this->config->getTemplate($storeId),
@@ -197,15 +202,17 @@ class CartReminder implements NotificationTypeInterface
 
     /**
      * The cart no longer waits for this message: free its place under "Maximum pending reminders" so the finder can
-     * refill it. Only the reservation this worker read is released - a newer one belongs to a newer message - and a
+     * refill it. The token distinguishes reservations even when they were queued in the same second, and a
      * cart reminded since it was queued is left alone: that delivery won.
      */
-    private function release(int $id, ?string $queuedAt): void
+    private function release(int $id, ?string $queuedAt, ?string $queueToken): void
     {
         if ($id && $queuedAt !== null) {
-            $this->resource->getConnection()->update($this->carts->name(), ['queued_at' => null], [
+            $this->resource->getConnection()->update($this->carts->name(), ['queued_at' => null, 'queue_token' => null], [
                 'quote_id = ?' => $id,
                 'queued_at = ?' => $queuedAt,
+                // Existing queued rows can have no token until the first post-upgrade reservation.
+                'queue_token <=> ?' => $queueToken ?? new Expression('NULL'),
                 'reminded_at IS NULL OR reminded_at < queued_at',
             ]);
         }

@@ -69,23 +69,29 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Cron {
             $locks->method('lock')->willReturn(true);
             return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue, new OncePerCart(), $lifetime,
                 $stores, $this->createStub(LoggerInterface::class), $recipients, $this->createStub(CooldownInterface::class),
-                $this->carts(), $locks);
+                $this->carts(), $locks, new \Magento\Framework\Math\Random());
         }
 
-        public function testAScanThatUsesUpTheBudgetPublishesNothing(): void
+        private static function page(array $ids): array
+        {
+            return array_map(fn ($id) => ['entity_id' => $id, 'subscription_id' => (string)($id + 1000),
+                'updated_at' => '2026-10-01 00:00:00'], $ids);
+        }
+
+        public function testSlowScanningKeepsEarlierProgressBeforeTheDeadline(): void
         {
             $GLOBALS['ckFinderClock'] = 100.0;
             $this->jumps = [3 => 131.0]; // the scan of three candidates takes past the 30 s budget
-            $this->fetchPairsResults = [[10 => '1010', 11 => '1011', 12 => '1012']];
-            $this->assertSame(0, $this->finder()->execute());
-            $this->assertSame([], $this->published);
-            $this->assertCount(1, $this->updates, 'only stale recovery ran, no claim');
+            $this->fetchAllResults = [self::page([10, 11, 12])];
+            $this->assertSame(2, $this->finder()->execute());
+            $this->assertSame(['1010', '1011'], $this->published);
+            $this->assertCount(3, $this->updates, 'stale recovery and two claims; the late result is left for the next run');
         }
 
         public function testPublishingStopsAtTheDeadlineMidPage(): void
         {
             $GLOBALS['ckFinderClock'] = 100.0;
-            $this->fetchPairsResults = [[10 => '1010', 11 => '1011', 12 => '1012']];
+            $this->fetchAllResults = [self::page([10, 11, 12])];
             $this->afterPublish = function () { $GLOBALS['ckFinderClock'] = 131.0; }; // the first publish is slow
             $this->assertSame(1, $this->finder()->execute(), 'one claim, then the budget is over');
             $this->assertSame(['1010'], $this->published);
@@ -95,8 +101,43 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Cron {
         public function testWithinTheBudgetTheWholePageIsPublished(): void
         {
             $GLOBALS['ckFinderClock'] = 100.0;
-            $this->fetchPairsResults = [[10 => '1010', 11 => '1011', 12 => '1012']];
+            $this->fetchAllResults = [self::page([10, 11, 12])];
             $this->assertSame(3, $this->finder()->execute());
+        }
+
+        public function testAnIndividualLookupCannotPublishAfterExhaustingTheBudget(): void
+        {
+            $GLOBALS['ckFinderClock'] = 100.0;
+            $this->jumps = [1 => 131.0];
+            $this->fetchAllResults = [self::page([10, 11, 12])];
+            $this->assertSame(0, $this->finder()->execute());
+            $this->assertSame([], $this->published);
+            $this->assertSame(1, $this->resolved);
+            $this->assertCount(1, $this->updates, 'only stale recovery ran');
+        }
+
+        public function testRepeatedSlowRunsPublishBeforeStartingAnotherLookup(): void
+        {
+            $this->jumps = [1 => 120.0, 2 => 140.0, 3 => 120.0, 4 => 140.0];
+            $this->fetchAllResults = [self::page([10, 11, 12]), self::page([11, 12])];
+            $finder = $this->finder();
+            foreach (range(1, 2) as $run) {
+                $GLOBALS['ckFinderClock'] = 100.0;
+                $this->assertSame(1, $finder->execute(), 'the late lookup does not discard the earlier publication');
+            }
+            $this->assertSame(['1010', '1011'], $this->published);
+        }
+
+        public function testExpiredBudgetDoesNotFetchAnotherPage(): void
+        {
+            $GLOBALS['ckFinderClock'] = 100.0;
+            $this->fetchAllResults = [self::page(range(1, 200)), self::page([201])];
+            $this->afterPublish = function () {
+                if (count($this->published) === 200) { $GLOBALS['ckFinderClock'] = 131.0; }
+            };
+            $this->assertSame(200, $this->finder()->execute());
+            $this->assertSame([[200, 0]], $this->limits);
+            $this->assertSame(200, $this->resolved);
         }
     }
 }

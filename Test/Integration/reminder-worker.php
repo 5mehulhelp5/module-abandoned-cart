@@ -116,7 +116,7 @@ while (!is_file($barrier . '.go')) {
 if ($mode === 'finder') {
     (new FindAbandonedCarts($config, $resource, $guard, $queue, new OncePerCart(), $lifetime,
         $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class), $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class),
-        $om->get(\Magento\Framework\Lock\LockManagerInterface::class)))->execute();
+        $om->get(\Magento\Framework\Lock\LockManagerInterface::class), $om->get(\Magento\Framework\Math\Random::class)))->execute();
 } else {
     $mailer = new Mailer($builder, $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,

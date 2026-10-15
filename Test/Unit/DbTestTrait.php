@@ -29,6 +29,7 @@ trait DbTestTrait
     private array $fetchColResults = [];
     /** queued fetchPairs() results, one per call; [] when none left */
     private array $fetchPairsResults = [];
+    private array $fetchAllResults = [];
     /** limit() calls of selects: [count, offset] */
     private array $limits = [];
     /** raw query() calls: [sql, bind]; queued rowCount() results, default 1 */
@@ -66,7 +67,7 @@ trait DbTestTrait
         }
         $db->method('fetchAll')->willReturnCallback(function () {
             $this->transactionEvents[] = 'lock';
-            return [];
+            return $this->fetchAllResults ? array_shift($this->fetchAllResults) : [];
         });
         $db->method('update')->willReturnCallback(function ($table, array $data, $where = '') {
             // a joined table (CartTable::joined()) is an expression: record its SQL text
