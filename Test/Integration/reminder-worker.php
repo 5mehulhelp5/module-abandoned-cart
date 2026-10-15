@@ -42,7 +42,6 @@ $config = new class($storeId) extends Config {
     public function __construct(private int $storeId) {}
     public function isEnabled(?int $storeId = null): bool { return $storeId === $this->storeId; }
     public function getDelayMinutes(?int $storeId = null): int { return 1; }
-    public function getMaxPending(): int { return 2000; }
     public function getMaxPerHour(): int { return 0; }
     public function getTemplate(int $storeId): string { return 'fixture'; }
     public function getIdentity(int $storeId): string { return 'general'; }
@@ -115,8 +114,7 @@ while (!is_file($barrier . '.go')) {
 }
 if ($mode === 'finder') {
     (new FindAbandonedCarts($config, $resource, $guard, $queue, new OncePerCart(), $lifetime,
-        $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class), $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class),
-        $om->get(\Magento\Framework\Lock\LockManagerInterface::class), $om->get(\Magento\Framework\Math\Random::class)))->execute();
+        $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class), $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class)))->execute();
 } else {
     $mailer = new Mailer($builder, $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,

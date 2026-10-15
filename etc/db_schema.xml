@@ -6,7 +6,6 @@
     <table name="ck_abandoned_cart" resource="checkout" engine="innodb" comment="CK abandoned cart: send history per cart">
         <column xsi:type="int" name="quote_id" unsigned="true" nullable="false" comment="Cart (quote) ID"/>
         <column xsi:type="timestamp" name="queued_at" on_update="false" nullable="true" comment="Reminder queued"/>
-        <column xsi:type="varchar" name="queue_token" length="32" nullable="true" comment="Queue reservation token"/>
         <column xsi:type="timestamp" name="reminded_at" on_update="false" nullable="true" comment="Reminder sent"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="quote_id"/>

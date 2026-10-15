@@ -22,14 +22,6 @@
                         <field id="enabled">1</field>
                     </depends>
                 </field>
-                <field id="max_pending" translate="label comment" type="text" sortOrder="22" showInDefault="1">
-                    <label>Maximum pending reminders</label>
-                    <comment>Carts queued but not sent yet. The finder tops the queue up to this every minute, so more consumers send faster without other changes. 2000 suits most shops.</comment>
-                    <validate>required-entry validate-digits validate-greater-than-zero</validate>
-                    <depends>
-                        <field id="enabled">1</field>
-                    </depends>
-                </field>
                 <field id="max_per_hour" translate="label comment" type="text" sortOrder="24" showInDefault="1">
                     <label>Maximum reminders per hour</label>
                     <comment>Set to your email provider's sending limit. 0 = no limit. Carts over the limit wait for the next hour; none are lost.</comment>

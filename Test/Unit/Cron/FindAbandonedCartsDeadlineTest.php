@@ -18,7 +18,6 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Cron {
     use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
     use CommerceKings\Notification\Api\CooldownInterface;
     use CommerceKings\Notification\Api\QueueInterface;
-    use Magento\Framework\Lock\LockManagerInterface;
     use Magento\Store\Api\Data\StoreInterface;
     use Magento\Store\Model\StoreManagerInterface;
     use PHPUnit\Framework\TestCase;
@@ -46,7 +45,6 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Cron {
             $config = $this->createStub(Config::class);
             $config->method('isEnabled')->willReturn(true);
             $config->method('getDelayMinutes')->willReturn(60);
-            $config->method('getMaxPending')->willReturn(2000);
             $config->method('getMaxPerHour')->willReturn(0);
             $store = $this->createStub(StoreInterface::class);
             $store->method('getId')->willReturn(1);
@@ -65,11 +63,9 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Cron {
                 if (isset($this->jumps[$this->resolved])) { $GLOBALS['ckFinderClock'] = $this->jumps[$this->resolved]; }
                 return 'fixture@example.test';
             });
-            $locks = $this->createStub(LockManagerInterface::class);
-            $locks->method('lock')->willReturn(true);
             return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue, new OncePerCart(), $lifetime,
                 $stores, $this->createStub(LoggerInterface::class), $recipients, $this->createStub(CooldownInterface::class),
-                $this->carts(), $locks, new \Magento\Framework\Math\Random());
+                $this->carts());
         }
 
         private static function page(array $ids): array

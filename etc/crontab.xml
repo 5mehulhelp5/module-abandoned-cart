@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/crontab.xsd">
     <group id="default">
-        <!-- every minute: tops the queue up to "Maximum pending reminders"; the consumers send -->
+        <!-- every minute: publishes the carts that became due; the queue holds the backlog, the consumers send -->
         <job name="commercekings_abandoned_cart_find" instance="CommerceKings\AbandonedCart\Cron\FindAbandonedCarts" method="execute">
             <schedule>* * * * *</schedule>
         </job>

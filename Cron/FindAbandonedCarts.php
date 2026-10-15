@@ -15,35 +15,31 @@ use CommerceKings\Notification\Api\CooldownInterface;
 use CommerceKings\Notification\Api\QueueInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
-use Magento\Framework\Lock\LockManagerInterface;
-use Magento\Framework\Math\Random;
 use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * Every minute: keeps up to "Maximum pending reminders" carts queued - carts that have items and a subscription with a
- * valid consent, were not ordered, have been untouched for the configured delay, are unexpired under Magento's quote
- * lifetime and are eligible under the reminder policy - one message per cart (its CommerceKings_Notification
- * subscription id) to Notification's queue. Each run only fills what the consumers sent since the last one, so the
- * number of consumers sets the pace. "Maximum reminders per hour" brakes it for the mail provider.
+ * Every minute: carts that have items and a subscription with a valid consent, were not ordered, have been untouched
+ * for the configured delay, are unexpired under Magento's quote lifetime and are eligible under the reminder policy
+ * -> one message per cart (its CommerceKings_Notification subscription id) to Notification's queue. The queue holds
+ * the backlog and the consumers set the pace; a run publishes for at most MAX_RUN_SECONDS and the next one continues.
  *
- * One finder at a time: a second run while one fills (overlapping cron, a manual run, another server) exits.
- * The cart is marked "queued" first, so no run publishes it twice.
+ * The cart is marked "queued" in the same statement that checks it is still due, so no run - also not two at once -
+ * publishes it twice; the reminder clears the mark when it skips, so a cart can be found again later.
+ * A failed publish clears the mark at once and the exception reaches cron: the next run publishes again. If the
+ * broker had accepted the message after all, the copy is harmless - the reminder's own claim sends once.
+ * Safety net: a cart still marked after STUCK_HOURS without a reminder (a consumer crashed holding its message) is
+ * found again.
  *
- * Stale claims: a cart queued more than STALE_MINUTES ago but never reminded (publish failed, the message was lost,
- * or the consumers were stopped) is released first, so this same run queues it again. The pending limit counts carts,
- * not broker messages: while consumers are stopped, a released cart's first message may still wait in the broker. A
- * duplicate message is harmless - the consumer's own claim lets only one delivery send.
- *
- * Recipient cooldown suppresses recent addresses. Store settings and policy
- * conditions are repeated in the atomic queue claim so a stale selection cannot authorize delivery.
+ * "Maximum reminders per hour": a run only publishes what still fits in the hour (sent plus queued); the reminder
+ * checks it again when sending. Recipient cooldown suppresses recent addresses. Store settings and policy
+ * conditions are repeated in the queue claim so a stale selection cannot authorize delivery.
  */
 class FindAbandonedCarts
 {
     private const BATCH = 200;
-    private const STALE_MINUTES = 60;
+    private const STUCK_HOURS = 24;
     private const MAX_RUN_SECONDS = 30;
-    private const LOCK = 'commercekings_abandoned_cart_finder';
 
     public function __construct(
         private readonly Config $config,
@@ -56,9 +52,7 @@ class FindAbandonedCarts
         private readonly LoggerInterface $logger,
         private readonly ReminderEmailResolverInterface $recipients,
         private readonly CooldownInterface $cooldown,
-        private readonly CartTable $carts,
-        private readonly LockManagerInterface $locks,
-        private readonly Random $random
+        private readonly CartTable $carts
     ) {
     }
 
@@ -67,91 +61,64 @@ class FindAbandonedCarts
         if ($this->storeCondition() === '0 = 1') {
             return 0;
         }
-        // counting free room and filling it must not overlap, or two runs fill the same room
-        if (!$this->locks->lock(self::LOCK, 0)) {
-            $this->logger->info('CommerceKings_AbandonedCart: another finder is running');
-            return 0;
-        }
-        try {
-            return $this->fill();
-        } finally {
-            $this->locks->unlock(self::LOCK);
-        }
-    }
-
-    private function fill(): int
-    {
         $db = $this->resource->getConnection();
-        $released = $db->update(
-            $this->carts->joined(),
-            ['c.queued_at' => null, 'c.queue_token' => null],
-            [
-                'c.queued_at < NOW() - INTERVAL ' . self::STALE_MINUTES . ' MINUTE',
-                $this->storeCondition(),
-                'q.is_active = ?' => 1,
-            ]
-        );
-        if ($released) {
-            $this->logger->warning(sprintf('CommerceKings_AbandonedCart: released %d stale claim(s)', $released));
+        $stuck = $db->update($this->carts->name(), ['queued_at' => null], [
+            'queued_at < NOW() - INTERVAL ' . self::STUCK_HOURS . ' HOUR',
+            'reminded_at IS NULL OR reminded_at < queued_at',
+        ]);
+        if ($stuck) {
+            $this->logger->warning(sprintf('CommerceKings_AbandonedCart: %d cart(s) waited over %d hours, queued again',
+                $stuck, self::STUCK_HOURS));
         }
-
-        $pending = $this->pending();
-        $room = $this->config->getMaxPending() - $pending;
+        $room = PHP_INT_MAX;
         $perHour = $this->config->getMaxPerHour();
         if ($perHour > 0) {
-            $room = min($room, $perHour - $pending - $this->sentLastHour());
+            $room = $perHour - $this->sentOrQueuedLastHour();
+            if ($room <= 0) {
+                return 0;
+            }
         }
         $published = 0;
         $deadline = microtime(true) + self::MAX_RUN_SECONDS;
-        if ($room > 0) {
-            foreach ($this->dueCarts($deadline) as $id => $subscriptionId) {
-                if (microtime(true) >= $deadline) {
-                    break; // the next run continues; nothing was claimed for the rest
-                }
-                // claim it first: only the run that flips queued_at from NULL publishes
-                $this->carts->ensure($id);
-                $claimed = $db->update(
-                    $this->carts->joined(),
-                    ['c.queued_at' => new Expression('NOW()'),
-                        'c.queue_token' => $this->random->getRandomString(32, '0123456789abcdef')],
-                    array_merge(['c.quote_id = ?' => $id, 's.subscription_id = ?' => $subscriptionId],
-                        $this->eligibleConditions())
-                );
-                if ($claimed) {
-                    $this->queue->publish(CartReminder::CODE, (string)$subscriptionId);
-                    $published++;
-                }
-                if ($published >= $room) {
-                    break;
-                }
+        foreach ($this->dueCarts($deadline) as $id => $subscriptionId) {
+            if (microtime(true) >= $deadline) {
+                break; // the next run continues; nothing was claimed for the rest
+            }
+            // claim it first: only the run that flips queued_at from NULL publishes
+            $this->carts->ensure($id);
+            $claimed = $db->update(
+                $this->carts->joined(),
+                ['c.queued_at' => new Expression('NOW()')],
+                array_merge(['c.quote_id = ?' => $id, 's.subscription_id = ?' => $subscriptionId],
+                    $this->eligibleConditions())
+            );
+            if (!$claimed) {
+                continue;
+            }
+            try {
+                $this->queue->publish(CartReminder::CODE, (string)$subscriptionId);
+            } catch (\Throwable $error) {
+                $db->update($this->carts->name(), ['queued_at' => null],
+                    ['quote_id = ?' => $id, 'reminded_at IS NULL OR reminded_at < queued_at']);
+                throw $error;
+            }
+            if (++$published >= $room) {
+                break;
             }
         }
         if ($published) {
-            $this->logger->info(sprintf('CommerceKings_AbandonedCart: queued %d cart reminder(s), %d were pending',
-                $published, $pending));
+            $this->logger->info(sprintf('CommerceKings_AbandonedCart: queued %d cart reminder(s)', $published));
         }
         return $published;
     }
 
-    /**
-     * Carts queued and not sent since, within the stale window, whose subscription still has a valid consent:
-     * sent, failed, skipped and withdrawn carts do not count.
-     */
-    private function pending(): int
-    {
-        $db = $this->resource->getConnection();
-        return (int)$db->fetchOne($this->carts->select([new Expression('COUNT(*)')])
-            ->where('c.queued_at IS NOT NULL')
-            ->where('c.reminded_at IS NULL OR c.reminded_at < c.queued_at')
-            ->where('c.queued_at >= NOW() - INTERVAL ' . self::STALE_MINUTES . ' MINUTE')
-            ->where($this->guard->validCondition('s.consent_id')));
-    }
-
-    private function sentLastHour(): int
+    /** Reminders sent in the last hour plus carts queued and not sent since. */
+    private function sentOrQueuedLastHour(): int
     {
         $db = $this->resource->getConnection();
         return (int)$db->fetchOne($db->select()->from($this->carts->name(), new Expression('COUNT(*)'))
-            ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'));
+            ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'
+                . ' OR (queued_at IS NOT NULL AND (reminded_at IS NULL OR reminded_at < queued_at))'));
     }
 
     /**

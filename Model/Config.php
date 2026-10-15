@@ -31,16 +31,7 @@ class Config
         return max(1, (int)$this->scopeConfig->getValue(self::PREFIX . 'delay_minutes', ScopeInterface::SCOPE_STORE, $storeId));
     }
 
-    /**
-     * Global: the finder keeps at most this many carts queued but not yet sent; consumers that drain faster get
-     * refilled more often, so throughput follows the number of consumers.
-     */
-    public function getMaxPending(): int
-    {
-        return max(1, (int)$this->scopeConfig->getValue(self::PREFIX . 'max_pending'));
-    }
-
-    /** Global brake for the mail provider: reminders sent plus pending in the last hour; 0 = no limit. */
+    /** Global brake for the mail provider: reminders per hour across all stores; 0 = no limit. */
     public function getMaxPerHour(): int
     {
         return max(0, (int)$this->scopeConfig->getValue(self::PREFIX . 'max_per_hour'));
