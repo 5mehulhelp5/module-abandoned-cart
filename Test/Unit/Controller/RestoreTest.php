@@ -7,7 +7,7 @@ use CommerceKings\AbandonedCart\Controller\Cart\Restore;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Model\CartRestore;
 use CommerceKings\AbandonedCart\Model\RestoreAccess;
-use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
+use CommerceKings\Notification\Api\SubscriberInterface;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Customer\Model\Session as CustomerSession;
@@ -87,8 +87,8 @@ class RestoreTest extends TestCase
         $signature = $this->createStub(LinkSignature::class);
         $signature->method('isValid')->willReturnCallback(fn ($purpose, $id, $t) => $purpose === 'restore' && $id === 42 && $t === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
         // the consent's browser is the cart's 'browser'; this visitor's browser is $browserHash
-        $permission = $this->createStub(SubscriptionPermissionInterface::class);
-        $permission->method('isCurrentVisitor')->willReturnCallback(fn ($ref) => $ref === 'consent'
+        $subscriber = $this->createStub(SubscriberInterface::class);
+        $subscriber->method('isCurrentVisitor')->willReturnCallback(fn ($ref) => $ref === 'consent'
             && $cart['browser'] !== null && $browserHash !== null && $cart['browser'] === $browserHash);
         $store = $this->createStub(StoreInterface::class);
         $store->method('getId')->willReturn(1);
@@ -104,7 +104,7 @@ class RestoreTest extends TestCase
         $subscriptions->method('find')->willReturnCallback(fn ($type, $id) => $type === 'cart_reminder'
             && $id === $cart['id'] && $cart['browser'] !== null ? [new \CommerceKings\Notification\Api\Data\Subscription(
                 7, $type, $id, 1, null, null, 'consent', '2026-10-01 12:00:00')] : []);
-        $access = new RestoreAccess($signature, $permission, $stores, $lifetime, $carts, $subscriptions);
+        $access = new RestoreAccess($signature, $subscriber, $stores, $lifetime, $carts, $subscriptions);
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(function () use ($quote, $cartExists, $quoteModel) {
             $this->lookups++;

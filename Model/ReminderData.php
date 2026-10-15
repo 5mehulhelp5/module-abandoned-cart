@@ -5,7 +5,7 @@ namespace CommerceKings\AbandonedCart\Model;
 
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
-use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
+use CommerceKings\Notification\Api\SubscriberInterface;
 use Magento\Catalog\Helper\Image as ImageHelper;
 use Magento\Catalog\Helper\Product\Configuration as ProductConfiguration;
 use Magento\Framework\Escaper;
@@ -40,7 +40,7 @@ class ReminderData
         private readonly Escaper $escaper,
         private readonly UnsubscribeLinkInterface $unsubscribeLinks,
         private readonly LinkSignature $signature,
-        private readonly SubscriptionPermissionInterface $permission
+        private readonly SubscriberInterface $subscriber
     ) {
     }
 
@@ -65,12 +65,12 @@ class ReminderData
     }
 
     /**
-     * The signed restore link only when the permission can tell who subscribed (RestoreAccess hands the cart to
+     * The signed restore link only when the subscriber can be identified (RestoreAccess hands the cart to
      * that visitor only); otherwise Magento's cart page - the visitor's own session or account cart.
      */
     private function restoreUrl(Quote $quote): string
     {
-        if (!$this->permission->identifiesVisitor()) {
+        if (!$this->subscriber->identifiesVisitor()) {
             return $this->url->getUrl('checkout/cart', ['_nosid' => true]);
         }
         return $this->url->getUrl('cartreminder/cart/restore', [

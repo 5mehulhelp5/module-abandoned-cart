@@ -10,7 +10,6 @@ use CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\Notification\Api\CooldownInterface;
 use CommerceKings\Notification\Api\Data\Permission;
-use CommerceKings\Notification\Api\Data\Subscription;
 use CommerceKings\Notification\Api\Data\Target;
 use CommerceKings\Notification\Api\QueueInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
@@ -50,10 +49,7 @@ $config = new class($storeId) extends Config {
 $guard = new class implements SubscriptionPermissionInterface {
     public function check(SubscriptionTypeInterface $type, Target $target): Permission { return Permission::refused(); }
     public function validCondition(string $referenceColumn): string { return '1 = 1'; }
-    public function identifiesVisitor(): bool { return false; }
-    public function isCurrentVisitor(string $reference): bool { return false; }
     public function isValidFor(string $reference, string $purpose, int $storeId): bool { return $reference === 'fixture-consent'; }
-    public function getUnsubscribeUrl(Subscription $subscription): ?string { return null; }
 };
 $resource = $om->get(ResourceConnection::class);
 $lifetime = new QuoteLifetime($om->get(ScopeConfigInterface::class));

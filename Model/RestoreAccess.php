@@ -4,22 +4,22 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Model;
 
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
-use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
+use CommerceKings\Notification\Api\SubscriberInterface;
 use CommerceKings\Notification\Api\SubscriptionRepositoryInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Store\Model\StoreManagerInterface;
 
 /**
  * Restore authorization is checked again against locked, freshly loaded carts on POST. The link works only for
- * the visitor who gave the subscription's permission (Notification's permission must be able to tell - with
+ * the visitor who gave the subscription's permission (Notification's SubscriberInterface must be able to tell - with
  * the consent bridge: the browser the consent was given in); a withdrawal deletes the subscription, and with it
- * the restore. When the permission cannot identify visitors, reminders link to the cart page instead.
+ * the restore. When the subscriber cannot be identified, reminders link to the cart page instead.
  */
 class RestoreAccess
 {
     public function __construct(
         private readonly LinkSignature $signature,
-        private readonly SubscriptionPermissionInterface $permission,
+        private readonly SubscriberInterface $subscriber,
         private readonly StoreManagerInterface $stores,
         private readonly QuoteLifetime $lifetime,
         private readonly CartTable $carts,
@@ -39,7 +39,7 @@ class RestoreAccess
         return $subscription !== null
             && (int)$quote->getStoreId() === (int)$this->stores->getStore()->getId()
             && $this->isSigned((int)$quote->getId(), $token)
-            && $this->permission->isCurrentVisitor($subscription->permissionRef);
+            && $this->subscriber->isCurrentVisitor($subscription->permissionRef);
     }
 
     public function isAvailable(Quote $quote): bool

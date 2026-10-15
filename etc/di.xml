@@ -2,9 +2,9 @@
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
     <preference for="CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface" type="CommerceKings\AbandonedCart\Model\ReminderEmailResolver"/>
-    <!-- the unsubscribe link in reminders; replace for any link format (default: the permission's link - with the
+    <!-- the unsubscribe link in reminders; replace for any link format (default: the subscriber's link - with the
          consent bridge Consent's signed page; none without a permission module) -->
-    <preference for="CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface" type="CommerceKings\AbandonedCart\Model\PermissionUnsubscribeLink"/>
+    <preference for="CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface" type="CommerceKings\AbandonedCart\Model\SubscriberUnsubscribeLink"/>
     <preference for="CommerceKings\AbandonedCart\Api\ReminderPolicyInterface" type="CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart"/>
     <!-- sending: CommerceKings_Notification's shared queue consumer hands the cart's subscription id to this type -->
     <type name="CommerceKings\Notification\Model\TypePool">

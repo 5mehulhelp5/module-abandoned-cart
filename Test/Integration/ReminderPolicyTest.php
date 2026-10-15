@@ -493,7 +493,7 @@ class ReminderPolicyTest extends TestCase
         $id = $this->quote(2, 3 * 86400);
         $this->state($id, ['reminded_at' => gmdate('Y-m-d H:i:s')]);
         $access = new RestoreAccess($this->om->get(LinkSignature::class),
-            $this->createStub(\CommerceKings\Notification\Api\SubscriptionPermissionInterface::class), $this->stores, $this->lifetime(),
+            $this->createStub(\CommerceKings\Notification\Api\SubscriberInterface::class), $this->stores, $this->lifetime(),
             $this->om->get(CartTable::class), $this->om->get(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class));
         $quote = $this->om->get(CartRepositoryInterfaceFactory::class)->create()->get($id);
         $this->assertFalse($access->isAvailable($quote));

@@ -6,7 +6,7 @@ namespace CommerceKings\AbandonedCart\Test\Integration;
 use CommerceKings\AbandonedCart\Model\CartRestore;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Model\RestoreAccess;
-use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
+use CommerceKings\Notification\Api\SubscriberInterface;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\CatalogInventory\Api\StockRegistryInterface;
 use Magento\Framework\App\Bootstrap;
@@ -91,9 +91,9 @@ class CartRestoreTest extends TestCase
     private function access(string $hash = self::HASH): RestoreAccess
     {
         // the fixture consent was given in browser self::HASH; this visitor's browser is $hash
-        $permission = $this->createStub(SubscriptionPermissionInterface::class);
-        $permission->method('isCurrentVisitor')->willReturnCallback(fn ($ref) => $ref === 'fixture-consent' && $hash === self::HASH);
-        return new RestoreAccess($this->om->get(LinkSignature::class), $permission, $this->stores,
+        $subscriber = $this->createStub(SubscriberInterface::class);
+        $subscriber->method('isCurrentVisitor')->willReturnCallback(fn ($ref) => $ref === 'fixture-consent' && $hash === self::HASH);
+        return new RestoreAccess($this->om->get(LinkSignature::class), $subscriber, $this->stores,
             $this->om->get(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class), $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class),
             $this->om->get(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class));
     }

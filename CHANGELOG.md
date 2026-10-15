@@ -36,12 +36,13 @@ First release. Features:
   while the send history stays, so opting in again cannot cause a second reminder.
 - **Unsubscribe link:** replaceable `UnsubscribeLinkInterface` with an `UnsubscribeContext` (permission reference, store
   and named attributes: cart, customer, subscription, recipient); the default is Consent's signed withdrawal link.
-- **Only Notification:** consent checks (SQL guard, send-time recheck for purpose and website), the default
-  unsubscribe link and the storefront check (`CommerceKings_Notification/js/permission`) go through Notification's
-  permission; the consent bridge answers them with Consent. The form-key check is the module's own `Controller\RejectsMalformedFormKeys`.
-- **Restore without a browser in Notification:** the restore link asks Notification's permission whether the
-  current visitor gave the subscription's permission (Consent: the consent's browser); a permission that cannot tell
-  makes `restore_url` the cart page.
+- **Only Notification:** consent checks (SQL guard, send-time recheck for purpose and website) and the storefront
+  check (`CommerceKings_Notification/js/permission`) go through Notification's permission; the restore link and the
+  default unsubscribe link (`SubscriberUnsubscribeLink`) through Notification's `SubscriberInterface`; the consent
+  bridge answers both with Consent. The form-key check is the module's own `Controller\RejectsMalformedFormKeys`.
+- **Restore without a browser in Notification:** the restore link asks Notification's subscriber whether the
+  current visitor gave the subscription's permission (Consent: the consent's browser); a subscriber that cannot be
+  recognized makes `restore_url` the cart page.
 - **Restore links:** signed with Magento's encryptor, confirmed by a form-key POST, bound to the browser
   and store, with locked carts and atomic merges that behave like Magento's sign-in merge (stock is enforced at checkout).
 - **Admin:** CommerceKings > Abandoned Cart, with read-only previews of quote lifetime and reminders per cart.

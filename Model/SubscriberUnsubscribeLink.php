@@ -5,24 +5,24 @@ namespace CommerceKings\AbandonedCart\Model;
 
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
-use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
+use CommerceKings\Notification\Api\SubscriberInterface;
 use CommerceKings\Notification\Api\SubscriptionRepositoryInterface;
 
 /**
- * Default: the link of the subscription's permission (Notification's SubscriptionPermissionInterface) - with the
- * consent bridge Consent's signed withdrawal page and one-click handling; '' when the permission has none.
+ * Default: the subscriber's unsubscribe link (Notification's SubscriberInterface) - with the consent bridge Consent's
+ * signed withdrawal page and one-click handling; '' when there is none.
  */
-class PermissionUnsubscribeLink implements UnsubscribeLinkInterface
+class SubscriberUnsubscribeLink implements UnsubscribeLinkInterface
 {
     public function __construct(
         private readonly SubscriptionRepositoryInterface $subscriptions,
-        private readonly SubscriptionPermissionInterface $permission
+        private readonly SubscriberInterface $subscriber
     ) {
     }
 
     public function getUrl(UnsubscribeContext $context): string
     {
         $subscription = $this->subscriptions->get((int)$context->getAttribute('subscription_id'));
-        return $subscription === null ? '' : (string)$this->permission->getUnsubscribeUrl($subscription);
+        return $subscription === null ? '' : (string)$this->subscriber->getUnsubscribeUrl($subscription);
     }
 }

@@ -161,7 +161,7 @@ Restore steps:
 
 - invalid/forged signature or changed quote id → homepage before any quote lookup;
 - link generation requires a nonempty string deployment `crypt/key`; missing, blank or invalid keys stop generation and signature validation rejects safely;
-- the visitor must be the one who gave the subscription's permission – Notification's `SubscriptionPermissionInterface::isCurrentVisitor()`; with Consent: the browser id (cookie `ck_consent_browser`) must match the browser the consent was given in – and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
+- the visitor must be the one who gave the subscription's permission – Notification's `SubscriberInterface::isCurrentVisitor()`; with Consent: the browser id (cookie `ck_consent_browser`) must match the browser the consent was given in – and the current store must match the cart's store, else → homepage. Checked before availability, so a stranger cannot tell whether a cart was ordered;
 - cart ordered/closed, emptied or expired under Magento's quote lifetime, or the link is older than 7 days (`Config::RESTORE_LINK_DAYS`, from `reminded_at`) → notice "This reminder link is no longer available. You can continue shopping with your current cart." (owner only);
 - customer cart → cart page if logged in as that customer, otherwise login page with "Sign in to continue shopping – your cart is waiting for you.";
 - guest cart → **GET shows a confirmation page without merging or replacing the session cart**. If it is already the session cart, the visitor goes straight to the cart page;
@@ -180,7 +180,7 @@ Restore steps:
 
 **Custom unsubscribe link** – `optout_url` (and the one-click header) comes from
 `CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface::getUrl(UnsubscribeContext $context)`. The default,
-`Model\PermissionUnsubscribeLink`, returns the subscription's permission link (`SubscriptionPermissionInterface::getUnsubscribeUrl()`): Consent's signed link above with the consent bridge, none without it – the email then leaves the unsubscribe line out and sends no one-click header. Replace it with a DI preference to use your
+`Model\SubscriberUnsubscribeLink`, returns the subscriber's link (Notification's `SubscriberInterface::getUnsubscribeUrl()`): Consent's signed link above with the consent bridge, none without it – the email then leaves the unsubscribe line out and sends no one-click header. Replace it with a DI preference to use your
 own page or an external preference center:
 
 ```xml

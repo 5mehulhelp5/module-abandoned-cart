@@ -6,9 +6,9 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Model;
 use CommerceKings\AbandonedCart\Model\LinkSignature;
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
-use CommerceKings\AbandonedCart\Model\PermissionUnsubscribeLink;
+use CommerceKings\AbandonedCart\Model\SubscriberUnsubscribeLink;
 use CommerceKings\Notification\Api\Data\Subscription;
-use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
+use CommerceKings\Notification\Api\SubscriberInterface;
 use CommerceKings\Notification\Api\SubscriptionRepositoryInterface;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
@@ -59,16 +59,16 @@ class ReminderDataTest extends TestCase
         $escaper->method('escapeUrl')->willReturnCallback(fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES));
         $signature = $this->createStub(LinkSignature::class);
         $signature->method('sign')->willReturnCallback(fn ($purpose, $id) => "$purpose-$id");
-        $permission = $this->createStub(SubscriptionPermissionInterface::class);
-        $permission->method('identifiesVisitor')->willReturnCallback(fn () => $this->identifiesVisitor);
+        $subscriber = $this->createStub(SubscriberInterface::class);
+        $subscriber->method('identifiesVisitor')->willReturnCallback(fn () => $this->identifiesVisitor);
         // the default link asks the permission; the subscription's reference is the consent id cid-1
-        $permission->method('getUnsubscribeUrl')->willReturnCallback(fn (Subscription $subscription) => $this->hasLink
+        $subscriber->method('getUnsubscribeUrl')->willReturnCallback(fn (Subscription $subscription) => $this->hasLink
             ? 'https://shop/ckconsent/optout?c=' . $subscription->permissionRef . '&t=o' : null);
         $subscriptions = $this->createStub(SubscriptionRepositoryInterface::class);
         $subscriptions->method('get')->willReturnCallback(fn ($id) => new Subscription((int)$id, 'cart_reminder', 42, 1, 5, null,
             'cid-1', '2026-01-01 00:00:00'));
         return new ReminderData($image, $configuration, $price, $url, $escaper,
-            $this->unsubscribe ?? new PermissionUnsubscribeLink($subscriptions, $permission), $signature, $permission);
+            $this->unsubscribe ?? new SubscriberUnsubscribeLink($subscriptions, $subscriber), $signature, $subscriber);
     }
 
     private function quote(array $items = [], ?string $firstname = 'Jane', ?string $billingName = null): Quote
