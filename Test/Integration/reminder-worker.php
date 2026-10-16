@@ -50,6 +50,7 @@ $guard = new class implements SubscriptionPermissionInterface {
     public function check(SubscriptionTypeInterface $type, Target $target): Permission { return Permission::refused(); }
     public function validCondition(string $referenceColumn): string { return '1 = 1'; }
     public function isValidFor(string $reference, string $purpose, int $storeId): bool { return $reference === 'fixture-consent'; }
+    public function isOptOut(): bool { return false; }
 };
 $resource = $om->get(ResourceConnection::class);
 $lifetime = new QuoteLifetime($om->get(ScopeConfigInterface::class));

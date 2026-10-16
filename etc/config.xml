@@ -10,6 +10,10 @@
                 <template>commercekings_abandoned_cart_general_template</template>
                 <identity>general</identity>
             </general>
+            <notice>
+                <show>auto</show>
+                <text>If you leave your cart, we may email you one reminder about it.</text>
+            </notice>
         </commercekings_abandoned_cart>
     </default>
 </config>

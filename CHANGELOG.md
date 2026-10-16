@@ -4,6 +4,9 @@
 
 First release. Features:
 
+- **Opt-out without an extra module:** installed alone, abandoned cart runs opt-out. The checkout notice under the
+  guest email field moved in from the retired `module-abandoned-cart-optout`, with *Show notice* (Automatic / Yes /
+  No, website) and *Notice text* (store view) under *Checkout notice*. One neutral email template for both setups.
 - Use Magento's native customer-data section invalidation for cart recovery; remove controller-owned cookie writes.
 - Load a fresh quote repository for each delivery attempt so retries in a resident consumer use current cart content.
   Cover retry freshness with native SQL and customer-data behavior with Magento's actual frontend modules.

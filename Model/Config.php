@@ -13,6 +13,9 @@ class Config
     /** What reminders are for (SubscriptionTypeInterface::getPurpose()); with the consent bridge the Consent purpose declared in etc/di.xml. */
     public const PURPOSE = 'cart_reminder';
 
+    /** The checkout notice's settings (show, text), read through Notification's OptOutNoticeInterface. */
+    public const NOTICE_GROUP = 'commercekings_abandoned_cart/notice';
+
     /** The restore link in a reminder works this many days after it was sent. */
     public const RESTORE_LINK_DAYS = 7;
 

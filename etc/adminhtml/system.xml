@@ -8,8 +8,7 @@
             <resource>CommerceKings_AbandonedCart::config</resource>
             <group id="general" translate="label comment" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
                 <label>Cart reminders</label>
-                <fieldset_css>commercekings-config-section</fieldset_css>
-                <comment>Send one reminder per cart, with consent.</comment>
+                <comment>Send one reminder per cart.</comment>
                 <field id="enabled" translate="label" type="select" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Enabled</label>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
@@ -58,6 +57,22 @@
                     <source_model>Magento\Config\Model\Config\Source\Email\Identity</source_model>
                     <depends>
                         <field id="enabled">1</field>
+                    </depends>
+                </field>
+            </group>
+            <group id="notice" translate="label comment" sortOrder="20" showInDefault="1" showInWebsite="1" showInStore="1">
+                <label>Checkout notice</label>
+                <fieldset_css>commercekings-config-section</fieldset_css>
+                <comment>A short note under the guest email field in checkout.</comment>
+                <field id="show" translate="label comment" type="select" sortOrder="10" showInDefault="1" showInWebsite="1">
+                    <label>Show notice</label>
+                    <source_model>CommerceKings\Notification\Model\Config\Source\NoticeMode</source_model>
+                    <comment>Automatic shows it without the consent bridge and hides it with consent.</comment>
+                </field>
+                <field id="text" translate="label" type="textarea" sortOrder="20" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Notice text</label>
+                    <depends>
+                        <field id="show" separator=",">auto,1</field>
                     </depends>
                 </field>
             </group>

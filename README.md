@@ -7,28 +7,28 @@ customers alike. Cron finds the carts; `CommerceKings_Notification`'s queue cons
 
 ## With or without consent
 
-This module needs only `commercekings/module-notification`. Whether a shopper must consent first is decided by
-what you install next to it:
+This module needs only `commercekings/module-notification`. Installed alone it runs **opt-out**; add the consent
+bridge for **opt-in**:
 
-- **With consent** – add the bridge `commercekings/module-consent-notification` and a banner (e.g.
-  `commercekings/module-consent-vanilla`). The bridge connects Notification to the consent core: a cart is
-  subscribed only with a consent for `cart_reminder`, withdrawing it removes the subscription, the email's button
-  restores the saved cart (only in the browser that consented) and the email has Consent's unsubscribe link.
-- **Without consent (opt-out)** – add `commercekings/module-abandoned-cart-optout` instead. Every shopper who enters
-  an email in checkout is subscribed; it adds a checkout notice and a neutral email template. The button opens the
-  cart page, and there is no unsubscribe link until you add your own page. No consent tables are installed.
+- **Opt-out (this module alone)** – every shopper who enters an email in checkout is subscribed, and a short notice
+  under the email field tells them. The button opens the cart page; the email has no unsubscribe link until you add
+  your own page. No consent tables.
+- **Opt-in (with consent)** – add the bridge `commercekings/module-consent-notification` and a banner (e.g.
+  `commercekings/module-consent-vanilla`). A cart is subscribed only with a consent for `cart_reminder`,
+  withdrawing it removes the subscription, the button restores the saved cart (only in the browser that consented)
+  and the email has Consent's unsubscribe link. The checkout notice is off by default.
 
 ```sh
-# with consent
+# opt-out
+composer require commercekings/module-abandoned-cart:^0.1
+# opt-in
 composer require commercekings/module-abandoned-cart:^0.1 commercekings/module-consent-notification:^0.1 commercekings/module-consent-vanilla:^0.1
-# without consent
-composer require commercekings/module-abandoned-cart:^0.1 commercekings/module-abandoned-cart-optout:^0.1
 
 bin/magento setup:upgrade
 ```
 
-The two cannot be installed together. To switch a shop from consent to opt-out, `bin/magento module:uninstall` the
-bridge, the banner and `CommerceKings_Consent`, then require the opt-out module.
+To move a shop from opt-in to opt-out, `bin/magento module:uninstall` the bridge, the banner and
+`CommerceKings_Consent`.
 
 ## Flash sale load test
 
@@ -46,8 +46,10 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 | Enabled (store) | No |
 | Inactivity delay (minutes) | 180 |
 | Maximum reminders per hour | 0 = no limit – set your email provider's limit |
-| Email template (store) | Abandoned Cart Reminder (opt-out module: its neutral template) |
+| Email template (store) | Abandoned Cart Reminder – neutral, for both setups |
 | Sender (store) | General Contact – use a no-reply address |
+| Show notice | Automatic – Yes without consent, No with consent |
+| Notice text (store) | If you leave your cart, we may email you one reminder about it. |
 
 Carts expire with Magento's *Quote Lifetime* (normally 30 days). The recipient cooldown (7 days per address) and
 one-click unsubscribe headers are under **CommerceKings > Notifications**.

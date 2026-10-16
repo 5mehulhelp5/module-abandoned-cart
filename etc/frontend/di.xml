@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!-- the reminder notice under the guest email field (Notification's opt-out notice) -->
+    <type name="Magento\Checkout\Block\Onepage">
+        <arguments>
+            <argument name="layoutProcessors" xsi:type="array">
+                <item name="cartreminderNotice" xsi:type="object">CommerceKings\AbandonedCart\Block\Checkout\NoticeLayoutProcessor</item>
+            </argument>
+        </arguments>
+    </type>
+</config>
