@@ -1,6 +1,6 @@
 <a href="https://commercekings.net"><img align="right" src="https://img.shields.io/badge/Built%20by-CommerceKings-F26322?labelColor=1F1F1F" alt="Built by CommerceKings – expert Magento engineering"></a>
 
-# Abandoned cart reminder
+# Flash-Sale-Ready Abandoned Cart
 
 Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · RabbitMQ or MySQL queue
 
@@ -8,7 +8,7 @@ Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · Ra
 
 <sub>Expert Magento engineering. New store, maintenance, custom development, high-performance hosting or more sales? [Talk to us](https://commercekings.net).</sub>
 
-**Recover lost sales automatically – a well-timed email for every abandoned cart, without slowing your store down.**
+**Everyday reliable, never slows your store.** A well-timed email for every abandoned cart.
 
 - **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
   minute, every cart exactly once (see *Where it shines* below).
