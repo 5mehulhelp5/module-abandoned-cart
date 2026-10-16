@@ -2,11 +2,11 @@
 
 # Flash-Sale-Ready Abandoned Cart
 
+<sub>Expert Magento engineering. New store, maintenance, custom development, high-performance hosting or more sales? [Talk to us](https://commercekings.net).</sub>
+
 Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · RabbitMQ or MySQL queue
 
 [![License](https://badgen.net/github/license/commercekings/module-abandoned-cart)](LICENSE) [![Release](https://badgen.net/github/release/commercekings/module-abandoned-cart)](https://github.com/commercekings/module-abandoned-cart/releases) [![Checks](https://badgen.net/github/checks/commercekings/module-abandoned-cart/main?label=checks)](https://github.com/commercekings/module-abandoned-cart/actions)
-
-<sub>Expert Magento engineering. New store, maintenance, custom development, high-performance hosting or more sales? [Talk to us](https://commercekings.net).</sub>
 
 **Everyday reliable, never slows your store.** A well-timed email for every abandoned cart.
 
