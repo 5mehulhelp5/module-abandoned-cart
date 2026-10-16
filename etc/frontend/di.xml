@@ -8,4 +8,12 @@
             </argument>
         </arguments>
     </type>
+    <!-- restore links keep the shopper's store view and currency in the page cache -->
+    <type name="CommerceKings\Core\Observer\KeepVaryCookie">
+        <arguments>
+            <argument name="routes" xsi:type="array">
+                <item name="cartreminder" xsi:type="string">cartreminder</item>
+            </argument>
+        </arguments>
+    </type>
 </config>

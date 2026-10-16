@@ -56,6 +56,8 @@ First release. Features:
   recognized makes `restore_url` the cart page.
 - **Restore links:** signed with Magento's encryptor, confirmed by a form-key POST, bound to the browser
   and store, with locked carts and atomic merges that behave like Magento's sign-in merge (stock is enforced at checkout).
+  They leave the `X-Magento-Vary` cookie as the last page set it, so the shopper keeps their store view and currency
+  in the page cache.
 - **Admin:** CommerceKings > Abandoned Cart, with read-only previews of quote lifetime and reminders per cart.
 - English defaults, PHP 8.1–8.5, PHPStan level 5, unit, SQL integration and JavaScript tests, CI and
   source/distribution packaging.
