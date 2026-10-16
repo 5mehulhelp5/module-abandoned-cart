@@ -73,6 +73,8 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 **Recommended**
 
 - Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000`, so long-running workers recycle.
+- To scale, run more consumers in parallel. Number of consumers = email provider's limit per second ÷ emails one
+  consumer sends per second.
 - Rate-limit the guest subscribe endpoint in nginx or your proxy
   ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)).
 
