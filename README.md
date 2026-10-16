@@ -69,12 +69,15 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 ## Before going live
 
 - Set *Maximum reminders per hour* to your email provider's limit.
-- If you turn on the optional *One-click unsubscribe* (opt-in): send from a no-reply address whose domain
-  DKIM-signs the unsubscribe headers.
-- Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000` and restart it after each deployment
-  ([queue setup](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#queue-transport)).
+
+**Recommended**
+
+- Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000`, so long-running workers recycle.
 - Rate-limit the guest subscribe endpoint in nginx or your proxy
   ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)).
+
+**Note:** If you turn on the optional *One-click unsubscribe*, send from a no-reply address whose domain DKIM-signs
+the unsubscribe headers, as [RFC 8058](https://www.rfc-editor.org/rfc/rfc8058) requires.
 
 ## Extending
 
