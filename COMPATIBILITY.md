@@ -31,7 +31,7 @@ The workflow does not install Magento or run runtime tests. Latest results are a
 [GitHub Actions](https://github.com/commercekings/module-abandoned-cart/actions).
 
 For runtime tests, install the source checkout in a compatible Magento development project
-and follow the README. Distribution archives omit `Test/`; source checkouts retain it.
+and run the suites in `Test/`. Distribution archives omit `Test/`; source checkouts retain it.
 Keep package constraints and the verified matrix aligned before each release.
 
 Supported Magento service/version combinations are listed in
