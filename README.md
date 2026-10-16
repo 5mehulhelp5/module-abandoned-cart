@@ -1,7 +1,15 @@
 # Abandoned cart reminder
 
-Sends **one** reminder email for a cart a shopper left in checkout, after a delay you set – for guests and
-customers alike. Cron finds the carts; `CommerceKings_Notification`'s queue consumer sends the emails.
+**Win back abandoned carts – with consent or without, built for flash-sale traffic.**
+
+Guests and customers · opt-in or opt-out · Luma and Hyvä (Luma checkout) · RabbitMQ or MySQL queue · one-click unsubscribe · signed restore links
+
+**Win back abandoned carts – guests included.** One friendly reminder to the email typed at checkout, no account
+needed. Works on Luma and Hyvä, opt-out or opt-in with a cookie banner – opt-ins and withdrawals can optionally be
+recorded on the server with the wording the shopper saw, as evidence.
+
+Sends **one** reminder email for a cart a shopper left in checkout, after a delay you set. Cron finds the carts;
+`CommerceKings_Notification`'s queue consumer sends the emails.
 
 ## With or without consent
 
@@ -78,13 +86,21 @@ within minutes. In a load test on a local sandbox (Magento 2.4.9 in production m
 12 consumers sent 13,333 reminder emails a minute – every cart exactly once, no email after a withdrawal, no
 deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 50 requests a second, with zero errors.
 
+## Themes
+
+| Storefront | Status |
+|---|---|
+| Luma, Magento's checkout | supported |
+| Hyvä with Hyvä's Luma checkout fallback | supported |
+| Hyvä Checkout | not supported yet – no guest email is captured, so no reminder is sent |
+
+Cron, queue and emails work with any theme. The consent banner works on Luma and Hyvä.
+
 ## Limitations
 
 - One reminder per cart; follow-ups need another reminder policy. The restore link shows the cart as it is now and
   works for 7 days.
 - A worker killed mid-send can leave a cart marked as reminded without an email – it is never sent twice.
-- Checkout capture needs Magento's Luma checkout (also as Hyvä's Luma checkout fallback); Hyvä Checkout is not
-  supported yet. Cron, queue and emails work with any theme.
 
 ## More
 

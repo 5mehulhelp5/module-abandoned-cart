@@ -14,7 +14,9 @@ the JavaScript lifecycle, and native Vanilla consent choices, guest checkout cap
 reminder delivery, confirmed restore/merge and unsubscribe in a browser. Quote integration
 tests use Magento demo data and cover rollback, a merged quantity above stock and concurrent restores.
 Reminder SQL regressions also cover same-address cooldown and parallel recipient claims, store-specific quote lifetime, late delivery and restore expiry.
-Endpoint regressions also cover website isolation, strict form keys, malformed input, HEAD safety and link replay. Its database is MariaDB 11.8. These checks do not certify other themes, third-party
+Endpoint regressions also cover website isolation, strict form keys, malformed input, HEAD safety and link replay. Its database is MariaDB 11.8. Hyvä: the storefront parts run in Hyvä shops that use Hyvä's Luma checkout fallback (the checkout page is
+Magento's own); a real Hyvä sandbox check is in progress. Hyvä Checkout (Magewire) is not supported: it does not
+capture the guest email. These checks do not certify other themes, third-party
 tracking scripts, checkout customizations or Adobe Commerce-specific features.
 
 The sandbox provides 30 isolated browser scenarios for native SQL (`Magento_MysqlMq`, connection
