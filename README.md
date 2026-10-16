@@ -11,8 +11,7 @@ bridge for **opt-in**:
 - **Opt-out (this module alone)** – every shopper who enters an email in checkout is subscribed, and a short notice
   under the email field tells them. The button opens the cart page; the email has no unsubscribe link until you add
   your own page. No consent tables.
-- **Opt-in (with consent)** – add the bridge `commercekings/module-consent-notification` and a banner (e.g.
-  `commercekings/module-consent-vanilla`). A cart is subscribed only with a consent for `cart_reminder`,
+- **Opt-in (with consent)** – add `commercekings/consent-optin` (the consent bridge and the cookie banner). A cart is subscribed only with a consent for `cart_reminder`,
   withdrawing it removes the subscription, the button restores the saved cart (only in the browser that consented)
   and the email has Consent's unsubscribe link. The checkout notice is off by default.
 
@@ -26,12 +25,12 @@ bin/magento setup:upgrade
 Opt-in:
 
 ```sh
-composer require commercekings/module-abandoned-cart:^0.1 commercekings/module-consent-notification:^0.1 commercekings/module-consent-vanilla:^0.1
+composer require commercekings/module-abandoned-cart:^0.1 commercekings/consent-optin:^0.1
 bin/magento setup:upgrade
 ```
 
 To move a shop from opt-in to opt-out, `bin/magento module:uninstall` the bridge, the banner and
-`CommerceKings_Consent`.
+`CommerceKings_Consent`, then `composer remove commercekings/consent-optin`.
 
 ## Settings
 
