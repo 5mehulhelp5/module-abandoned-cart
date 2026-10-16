@@ -4,27 +4,24 @@ Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · Ra
 
 **Recover lost sales automatically – a well-timed email for every abandoned cart, without slowing your store down.**
 
-- **Built for traffic.** Checkout only saves the email; sending runs in the background. 13,000+ emails a minute in
-  our flash-sale test – every cart exactly once.
+- **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
+  minute, every cart exactly once (see the flash sale load test below).
 - **Your rules.** Opt-in with a cookie banner or opt-out with a checkout notice. Set the delay, hourly limit,
   template, sender and notice text – or plug in your own reminder schedule.
 - **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
   one.
 - **Respectful by design.** A recipient cooldown, and no email after a shopper says no.
 
-Sends **one** reminder email for a cart a shopper left in checkout, after a delay you set. Cron finds the carts;
-`CommerceKings_Notification`'s queue consumer sends the emails.
-
 ## With or without consent
 
-This module needs only `commercekings/module-notification`. Installed alone it runs **opt-out**; add the consent
-bridge for **opt-in**:
+This module needs only `commercekings/module-notification`. Installed alone it runs **opt-out**; add
+`commercekings/privacy-bundle` for **opt-in**:
 
 - **Opt-out (this module alone)** – every shopper who enters an email in checkout is subscribed, and a short notice
   under the email field tells them. The button opens the cart page; the email has no unsubscribe link until you add
   your own page. No consent tables.
-- **Opt-in (with consent)** – add `commercekings/privacy-bundle` (the consent bridge and the cookie banner). A cart is subscribed only with a consent for `cart_reminder`,
-  withdrawing it removes the subscription, the button restores the saved cart (only in the browser that consented)
+- **Opt-in (with the privacy bundle: the consent bridge and the cookie banner)** – a cart is subscribed only with a
+  consent for `cart_reminder`, withdrawing it removes the subscription, the button restores the saved cart (only in the browser that consented)
   and the email has Consent's unsubscribe link. The checkout notice is off by default.
 
 Opt-out:
