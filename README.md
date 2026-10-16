@@ -1,8 +1,16 @@
 # Abandoned cart reminder
 
-**Recover lost sales automatically – a well-timed email per abandoned cart, sent in the background so checkout stays fast.**
+Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · RabbitMQ or MySQL queue
 
-Guests and customers · opt-in or opt-out · fine-tune it to your store: delay, hourly limit, email template, sender and checkout notice (template, sender and notice text per store view) · cron never sends: a short run queues due carts, queue consumers send · one reminder per cart, or your own schedule through an extendable reminder policy · signed restore link that merges into the shopper's current cart · one-click unsubscribe · no duplicate emails, even under load (13,000+ emails a minute in our flash-sale test) · RabbitMQ or MySQL queue · Luma and Hyvä (Luma checkout)
+**Recover lost sales automatically – a well-timed email for every abandoned cart, without slowing your store down.**
+
+- **Built for traffic.** Checkout only saves the email; sending runs in the background. 13,000+ emails a minute in
+  our flash-sale test – every cart exactly once.
+- **Your rules.** Opt-in with a cookie banner or opt-out with a checkout notice. Set the delay, hourly limit,
+  template, sender and notice text – or plug in your own reminder schedule.
+- **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
+  one.
+- **Respectful by design.** A recipient cooldown, and no email after a shopper says no.
 
 Sends **one** reminder email for a cart a shopper left in checkout, after a delay you set. Cron finds the carts;
 `CommerceKings_Notification`'s queue consumer sends the emails.
@@ -87,7 +95,7 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 | Storefront | Status |
 |---|---|
 | Luma, Magento's checkout | supported |
-| Hyvä with Hyvä's Luma checkout fallback | supported |
+| Hyvä with Hyvä's Luma checkout fallback | supported (verification in progress) |
 | Hyvä Checkout | not supported yet – no guest email is captured, so no reminder is sent |
 
 Cron, queue and emails work with any theme. The consent banner works on Luma and Hyvä.
