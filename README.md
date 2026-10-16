@@ -49,7 +49,7 @@ To move a shop from opt-in to opt-out, uninstall the **consent bridge**, the **c
 | Inactivity delay (minutes) | 180 |
 | Maximum reminders per hour | 0 = no limit – set your email provider's limit |
 | Email template (store) | Abandoned Cart Reminder – neutral, for both setups |
-| Sender (store) | General Contact – use a no-reply address |
+| Sender (store) | General Contact |
 | Show notice | Automatic – Yes without consent, No with consent |
 | Notice text (store) | If you leave your cart, we may email you one reminder about it. |
 
@@ -62,7 +62,9 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 
 ## Before going live
 
-- A no-reply sender with **SPF, DKIM and DMARC**, and *Maximum reminders per hour* at your provider's limit.
+- Set *Maximum reminders per hour* to your email provider's limit.
+- With *One-click unsubscribe* on (opt-in): send from a no-reply address whose domain DKIM-signs the unsubscribe
+  headers.
 - Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000` and restart it after each deployment
   ([queue setup](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#queue-transport)).
 - Rate-limit the guest subscribe endpoint in nginx or your proxy
@@ -84,16 +86,6 @@ Where it shines: a flash sale leaves thousands of carts abandoned at once, and e
 within minutes. In a load test on a local sandbox (Magento 2.4.9 in production mode, 14 CPUs / 8 GB, RabbitMQ),
 12 consumers sent 13,333 reminder emails a minute – every cart exactly once, no email after a withdrawal, no
 deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 50 requests a second, with zero errors.
-
-## Themes
-
-| Storefront | Status |
-|---|---|
-| Luma, Magento's checkout | supported |
-| Hyvä with Hyvä's Luma checkout fallback | supported (verification in progress) |
-| Hyvä Checkout | not supported yet – no guest email is captured, so no reminder is sent |
-
-Cron, queue and emails work with any theme. The consent banner works on Luma and Hyvä.
 
 ## Limitations
 
