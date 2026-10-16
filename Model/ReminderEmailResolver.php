@@ -7,7 +7,10 @@ use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 
-/** Guests use their subscribed email (Notification contact); customer carts use Magento's checkout email. */
+/** Guests use their subscribed email (Notification contact); customer carts use Magento's checkout email.
+ * Customers: quote.customer_email - Magento updates it when the account email changes (verified on 2.4.9), so it
+ * matches Notification's SubscriptionRepository::getEmail() without loading the customer.
+ */
 class ReminderEmailResolver implements ReminderEmailResolverInterface
 {
     public function __construct(private readonly ResourceConnection $resource, private readonly CartTable $carts)
