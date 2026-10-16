@@ -78,11 +78,12 @@ The fixture selects transport only inside its CLI processes; it keeps the shop's
 default and shared queues unchanged. SQL runs verify native acknowledgement/rejection states
 and remove their own queue, message and status rows during cleanup.
 
-## Flash sale tests
+## Flash sale load test
 
-Local sandbox, Magento 2.4.9 in production mode, 14 CPUs / 8 GB, RabbitMQ: 12 consumers sent 13,333 reminder emails
-a minute, every cart exactly once, with no email after a withdrawal and no deadlocks. Checkout subscribe and
-unsubscribe held p95 under 80 ms at 50 requests a second, with zero errors.
+Where it shines: a flash sale leaves thousands of carts abandoned at once, and every shopper gets one reminder
+within minutes. In a load test on a local sandbox (Magento 2.4.9 in production mode, 14 CPUs / 8 GB, RabbitMQ),
+12 consumers sent 13,333 reminder emails a minute – every cart exactly once, no email after a withdrawal, no
+deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 50 requests a second, with zero errors.
 
 ## Test cases
 
