@@ -47,6 +47,7 @@ class CartRestoreTest extends TestCase
 
     protected function tearDown(): void
     {
+        $this->restoreScenarioProduct();
         if ($this->quoteIds) {
             $this->resource->getConnection()->delete($this->resource->getTableName('ck_notification_subscription'),
                 ['type = ?' => 'cart_reminder', 'reference_id IN (?)' => $this->quoteIds]);
@@ -116,6 +117,77 @@ class CartRestoreTest extends TestCase
         $items = array_map('floatval', $items);
         ksort($items);
         return $items;
+    }
+
+    /** Restore scenarios change one product nothing else in the sandbox uses, and put it back. */
+    private const SCENARIO_SKU = '24-UG06';
+
+    private array $restoreProduct = [];
+
+    /** Sets stock (qty, in stock) of SCENARIO_SKU for one test; tearDown puts the original back. */
+    private function stock(float $qty, bool $inStock = true): void
+    {
+        $registry = $this->om->get(StockRegistryInterface::class);
+        $item = $registry->getStockItemBySku(self::SCENARIO_SKU);
+        $this->restoreProduct['stock'] ??= [(float)$item->getQty(), (bool)$item->getIsInStock()];
+        $item->setQty($qty)->setIsInStock($inStock);
+        $registry->updateStockItemBySku(self::SCENARIO_SKU, $item);
+    }
+
+    /** Sets a store-view attribute of SCENARIO_SKU (price, status) and reindexes its price; tearDown restores it. */
+    private function attribute(string $code, mixed $value): void
+    {
+        $product = $this->om->get(ProductRepositoryInterface::class)->get(self::SCENARIO_SKU, false, 0, true);
+        $this->restoreProduct['attributes'][$code] ??= $product->getData($code);
+        $this->om->get(\Magento\Catalog\Model\ResourceModel\Product\Action::class)
+            ->updateAttributes([(int)$product->getId()], [$code => $value], 0);
+        $this->om->get(\Magento\Catalog\Model\Indexer\Product\Price\Processor::class)->reindexRow((int)$product->getId());
+    }
+
+    private function restoreScenarioProduct(): void
+    {
+        if (isset($this->restoreProduct['attributes'])) {
+            $product = $this->om->get(ProductRepositoryInterface::class)->get(self::SCENARIO_SKU, false, 0, true);
+            $this->om->get(\Magento\Catalog\Model\ResourceModel\Product\Action::class)
+                ->updateAttributes([(int)$product->getId()], $this->restoreProduct['attributes'], 0);
+            $this->om->get(\Magento\Catalog\Model\Indexer\Product\Price\Processor::class)->reindexRow((int)$product->getId());
+        }
+        if (isset($this->restoreProduct['stock'])) {
+            [$qty, $inStock] = $this->restoreProduct['stock'];
+            $registry = $this->om->get(StockRegistryInterface::class);
+            $item = $registry->getStockItemBySku(self::SCENARIO_SKU)->setQty($qty)->setIsInStock($inStock);
+            $registry->updateStockItemBySku(self::SCENARIO_SKU, $item);
+        }
+        $this->restoreProduct = [];
+    }
+
+    /** Magento's own view of a cart after reloading: item errors as the shopper sees them. */
+    private function errors(Quote $quote): array
+    {
+        $reloaded = $this->om->get(CartRepositoryInterfaceFactory::class)->create()->get((int)$quote->getId());
+        $reloaded->collectTotals();
+        $errors = [];
+        foreach ($reloaded->getAllVisibleItems() as $item) {
+            if ($item->getHasError()) { $errors[$item->getSku()] = (string)$item->getMessage(); }
+        }
+        return $errors;
+    }
+
+    /** Places a guest order the way checkout does (flat rate, check/money order); returns the order id. */
+    private function placeOrder(Quote $quote): int
+    {
+        $quote = $this->om->get(CartRepositoryInterfaceFactory::class)->create()->get((int)$quote->getId());
+        $address = ['firstname' => 'Restore', 'lastname' => 'Scenario', 'street' => 'Main 1', 'city' => 'Austin',
+            'country_id' => 'US', 'region_id' => 57, 'postcode' => '78701', 'telephone' => '5550100',
+            'email' => 'scenario@example.test'];
+        $quote->setCustomerEmail('scenario@example.test')->setCustomerIsGuest(true)->setCheckoutMethod('guest');
+        $quote->getBillingAddress()->addData($address);
+        $quote->getShippingAddress()->addData($address)->setCollectShippingRates(true)->collectShippingRates()
+            ->setShippingMethod('flatrate_flatrate');
+        $quote->getPayment()->importData(['method' => 'checkmo']);
+        $quote->collectTotals();
+        $this->om->get(CartRepositoryInterface::class)->save($quote);
+        return (int)$this->om->get(\Magento\Quote\Api\CartManagementInterface::class)->placeOrder((int)$quote->getId());
     }
 
     public function testRealMergeKeepsCurrentProductsAndEmailAndConsumesTheSourceOnce(): void
@@ -291,6 +363,139 @@ class CartRestoreTest extends TestCase
             $this->assertSame(1, (int)$this->resource->getConnection()->fetchOne('SELECT COUNT(*) FROM '
                 . $this->resource->getTableName('quote_item') . ' WHERE quote_id = ? AND parent_item_id = ?',
                 [(int)$current->getId(), (int)$parent['item_id']]));
+        }
+    }
+
+    /**
+     * Restore scenarios 1 and 2 (flash sale, last unit): a cart reserves nothing, so two shoppers can restore the last
+     * unit - one adopting, one merging. Magento's checkout then sells it once: when it is sold, the other cart shows the
+     * stock error and its order is refused. No oversell.
+     */
+    public function testTheLastUnitCanBeRestoredTwiceButIsSoldOnce(): void
+    {
+        $this->stock(1);
+        $adopter = $this->source([[self::SCENARIO_SKU, 1, []]]);
+        $merger = $this->source([[self::SCENARIO_SKU, 1, []]]);
+        $own = $this->quote([['24-UG03', 1, []]], 'own@example.test');
+        $empty = $this->om->get(QuoteFactory::class)->create()->setStore($this->stores->getStore());
+        $adopted = $this->service()->execute((int)$adopter->getId(), $empty, $this->token($adopter), 0);
+        $merged = $this->service()->execute((int)$merger->getId(), $own, $this->token($merger), 0);
+        $this->assertSame([self::SCENARIO_SKU => 1.0], $this->quantities($adopted), 'restoring reserves no stock');
+        $this->assertSame(['24-UG03' => 1.0, self::SCENARIO_SKU => 1.0], $this->quantities($merged));
+        $this->assertSame([], $this->errors($adopted));
+        $this->stock(0, false);   // the first shopper bought it
+        $this->assertArrayHasKey(self::SCENARIO_SKU, $this->errors($merged), 'the cart shows the stock error');
+        $orderId = 0;
+        try {
+            $orderId = $this->placeOrder($merged);
+            $this->fail('the sold-out unit must not be sold twice');
+        } catch (LocalizedException $error) {
+            $this->assertMatchesRegularExpression('/quantit|stock|not available|salable/i', $error->getMessage(),
+                'refused for stock, not for anything else');
+        } finally {
+            $this->assertSame(0, $orderId, 'no order created');
+        }
+    }
+
+    /** Control for the scenario above: with stock, the same checkout places the order (then removed again). */
+    public function testTheScenarioCheckoutPlacesAnOrderWhenInStock(): void
+    {
+        $this->stock(5);
+        $source = $this->source([[self::SCENARIO_SKU, 1, []]]);
+        $empty = $this->om->get(QuoteFactory::class)->create()->setStore($this->stores->getStore());
+        $adopted = $this->service()->execute((int)$source->getId(), $empty, $this->token($source), 0);
+        $orderId = $this->placeOrder($adopted);
+        try {
+            $this->assertGreaterThan(0, $orderId);
+        } finally {
+            $this->deleteOrder($orderId);
+        }
+    }
+
+    /** Removes a test order and its stock reservations (sandbox only). */
+    private function deleteOrder(int $orderId): void
+    {
+        $orders = $this->om->get(\Magento\Sales\Api\OrderRepositoryInterface::class);
+        $order = $orders->get($orderId);
+        // MSI records the placed order by its increment id ("object_id" is empty at that point)
+        $this->resource->getConnection()->delete($this->resource->getTableName('inventory_reservation'),
+            ['metadata LIKE ?' => '%"object_increment_id":"' . $order->getIncrementId() . '"%']);
+        $registry = $this->om->get(\Magento\Framework\Registry::class);
+        $registry->register('isSecureArea', true, true);
+        try {
+            $orders->delete($order);
+        } finally {
+            $registry->unregister('isSecureArea');
+        }
+    }
+
+    /** Scenario 3: sold out between the email and the click - both adopt and merge restore, Magento flags the item. */
+    public function testASoldOutProductIsRestoredWithMagentosCartError(): void
+    {
+        $adopter = $this->source([[self::SCENARIO_SKU, 1, []]]);
+        $merger = $this->source([[self::SCENARIO_SKU, 1, []]]);
+        $own = $this->quote([['24-UG03', 1, []]], 'own@example.test');
+        $this->stock(0, false);
+        $empty = $this->om->get(QuoteFactory::class)->create()->setStore($this->stores->getStore());
+        $adopted = $this->service()->execute((int)$adopter->getId(), $empty, $this->token($adopter), 0);
+        $merged = $this->service()->execute((int)$merger->getId(), $own, $this->token($merger), 0);
+        $this->assertArrayHasKey(self::SCENARIO_SKU, $this->errors($adopted));
+        $this->assertSame(['24-UG03' => 1.0, self::SCENARIO_SKU => 1.0], $this->quantities($merged), 'nothing lost');
+        $this->assertSame([self::SCENARIO_SKU], array_keys($this->errors($merged)), 'only the sold-out item is flagged');
+    }
+
+    /** Scenario 6: the price changed after the email - the restored cart costs today's price. */
+    public function testARestoredCartCostsTodaysPrice(): void
+    {
+        $source = $this->source([[self::SCENARIO_SKU, 2, []]]);
+        $own = $this->quote([['24-UG03', 1, []]], 'own@example.test');
+        $old = (float)$this->resource->getConnection()->fetchOne('SELECT price FROM '
+            . $this->resource->getTableName('quote_item') . ' WHERE quote_id = ? AND sku = ?', [(int)$source->getId(), self::SCENARIO_SKU]);
+        $new = round($old + 7.5, 2);
+        $this->attribute('price', $new);
+        $merged = $this->service()->execute((int)$source->getId(), $own, $this->token($source), 0);
+        $price = (float)$this->resource->getConnection()->fetchOne('SELECT price FROM '
+            . $this->resource->getTableName('quote_item') . ' WHERE quote_id = ? AND sku = ?', [(int)$merged->getId(), self::SCENARIO_SKU]);
+        $this->assertSame($new, $price, 'not the price in the email');
+    }
+
+    /** Scenario 7: a product disabled after the email - restore completes, Magento handles the item, no exception. */
+    public function testADisabledProductDoesNotBreakTheRestore(): void
+    {
+        $source = $this->source([[self::SCENARIO_SKU, 1, []], ['24-MB05', 1, []]]);
+        $own = $this->quote([['24-UG03', 1, []]], 'own@example.test');
+        $this->attribute('status', \Magento\Catalog\Model\Product\Attribute\Source\Status::STATUS_DISABLED);
+        $merged = $this->service()->execute((int)$source->getId(), $own, $this->token($source), 0);
+        $quantities = $this->quantities($merged);
+        $this->assertSame(1.0, $quantities['24-UG03'] ?? null, 'the shopper\'s own product stays');
+        $this->assertSame(1.0, $quantities['24-MB05'] ?? null, 'available products are merged');
+        $this->assertTrue(!isset($quantities[self::SCENARIO_SKU]) || isset($this->errors($merged)[self::SCENARIO_SKU]),
+            'the disabled product is dropped or flagged by Magento, never sold silently');
+        $this->assertSame(0, (int)$this->resource->getConnection()->fetchOne('SELECT is_active FROM '
+            . $this->resource->getTableName('quote') . ' WHERE entity_id = ?', [(int)$source->getId()]), 'consumed once');
+    }
+
+    /** Scenario 8: the shopper's current cart keeps its own coupon; the saved cart's coupon is not carried over. */
+    public function testTheCurrentCartsCouponIsKept(): void
+    {
+        $rule = $this->om->get(\Magento\SalesRule\Model\RuleFactory::class)->create();
+        $code = 'CKRESTORE' . strtoupper(bin2hex(random_bytes(3)));
+        $rule->setName('CK restore scenario')->setIsActive(1)->setWebsiteIds([(int)$this->stores->getStore()->getWebsiteId()])
+            ->setCustomerGroupIds([0, 1])->setCouponType(\Magento\SalesRule\Model\Rule::COUPON_TYPE_SPECIFIC)
+            ->setCouponCode($code)->setSimpleAction('by_percent')->setDiscountAmount(10)->setStopRulesProcessing(0);
+        $rule->save();
+        try {
+            $source = $this->source([[self::SCENARIO_SKU, 1, []]]);
+            $own = $this->quote([['24-UG03', 1, []]], 'own@example.test');
+            $own->setCouponCode($code)->collectTotals();
+            $this->om->get(CartRepositoryInterface::class)->save($own);
+            $this->assertSame($code, (string)$own->getCouponCode(), 'fixture: the coupon applies');
+            $merged = $this->service()->execute((int)$source->getId(), $own, $this->token($source), 0);
+            $this->assertSame($code, (string)$this->resource->getConnection()->fetchOne('SELECT coupon_code FROM '
+                . $this->resource->getTableName('quote') . ' WHERE entity_id = ?', [(int)$merged->getId()]));
+            $this->assertSame(['24-UG03' => 1.0, self::SCENARIO_SKU => 1.0], $this->quantities($merged));
+        } finally {
+            $this->om->get(\Magento\SalesRule\Api\RuleRepositoryInterface::class)->deleteById((int)$rule->getId());
         }
     }
 }

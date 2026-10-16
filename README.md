@@ -361,6 +361,11 @@ MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/aut
 ```
 
 Covered with real quotes: matching quantities, distinct configurable variants, current contact details, source closure, repeated and concurrent requests, ownership, a merged quantity above stock (merged with Magento's cart error) and rollback after a destination save followed by a source-save failure. The concurrency test launches two PHP workers that begin with cached destination quotes.
+Flash-sale scenarios with real stock (MSI), price, status and coupons – on one product the test sets and restores:
+the last unit restored by two shoppers (adopt and merge) and then sold once – the second checkout is refused for stock,
+no oversell; a product sold out before the click (restored with Magento's cart error, nothing lost); a price change
+(today's price, not the email's); a disabled product (restore completes, the item is dropped or flagged); the
+current cart's coupon kept. A control places a real guest order with stock and removes it and its reservation.
 
 The development sandbox also has `tools/abandoned-cart-browser-check.cjs` for native checkout, actual REST capture, consent withdrawal, an injected HTTP 503, local reminder delivery, confirmed restore/merge and unsubscribe. It runs the production finder, Magento's native publisher and consumer, and a run-specific queue using either `amqp` or `db`. The 30 browser scenarios also cover dedicated recipient updates, authenticated checkout, same-address cooldown and deferred carts, variant images, expiry, queued withdrawal and a failed send followed by successful retry. Cron scheduling is checked separately.
 
