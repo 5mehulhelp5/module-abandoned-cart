@@ -22,7 +22,8 @@
             </argument>
         </arguments>
     </type>
-    <!-- the consent purpose this feature uses (CommerceKings_Consent) - any consent source can grant it -->
+    <!-- the consent purpose this feature uses (CommerceKings_Consent) - any consent source can grant it; active only
+         with the consent bridge, so without it (opt-out) the banner shows no reminder switch -->
     <type name="CommerceKings\Consent\Model\PurposePool">
         <arguments>
             <argument name="purposes" xsi:type="array">
@@ -30,6 +31,9 @@
                     <item name="label" xsi:type="string">Abandoned cart reminder</item>
                     <!-- raise when what the visitor agrees to changes: older consents stop counting -->
                     <item name="terms_revision" xsi:type="string">1</item>
+                    <item name="active_if" xsi:type="array">
+                        <item name="consent_bridge" xsi:type="string">commercekings_consent_notification/general/enabled</item>
+                    </item>
                 </item>
             </argument>
         </arguments>

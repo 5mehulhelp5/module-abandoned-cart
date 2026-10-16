@@ -4,6 +4,8 @@
 
 First release. Features:
 
+- The `cart_reminder` consent purpose is active only with the consent bridge, so a banner in the opt-out setup shows
+  no reminder switch.
 - **Opt-out without an extra module:** installed alone, abandoned cart runs opt-out. The checkout notice under the
   guest email field moved in from the retired `module-abandoned-cart-optout`, with *Show notice* (Automatic / Yes /
   No, website) and *Notice text* (store view) under *Checkout notice*. One neutral email template for both setups.
