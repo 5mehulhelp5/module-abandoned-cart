@@ -2,7 +2,7 @@
 
 # Flash-Sale-Ready Abandoned Cart
 
-<sub>Expert Magento engineering. New store, maintenance, custom development, high-performance hosting or more sales? [Talk to us](https://commercekings.net).</sub>
+<sub>Expert Magento engineering. Ready to sell more? [Talk to us](https://commercekings.net)</sub>
 
 Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · RabbitMQ or MySQL queue
 
