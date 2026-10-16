@@ -2,6 +2,8 @@
 
 Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · RabbitMQ or MySQL queue
 
+<sub>Built by [CommerceKings](https://commercekings.net) – expert Magento engineering. New store, maintenance, custom development or more sales? [Talk to us](https://commercekings.net).</sub>
+
 **Recover lost sales automatically – a well-timed email for every abandoned cart, without slowing your store down.**
 
 - **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
