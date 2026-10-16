@@ -7,6 +7,8 @@ use CommerceKings\AbandonedCart\Model\CartRestore;
 use CommerceKings\AbandonedCart\Model\RestoreAccess;
 use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Customer\Model\Session as CustomerSession;
+use Magento\Framework\App\Action\Action;
+use Magento\Framework\App\Action\Context;
 use Magento\Framework\App\Action\HttpGetActionInterface;
 use Magento\Framework\App\Action\HttpPostActionInterface;
 use Magento\Framework\App\CsrfAwareActionInterface;
@@ -16,29 +18,32 @@ use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Controller\Result\RedirectFactory;
 use Magento\Framework\Data\Form\FormKey\Validator;
 use Magento\Framework\Exception\LocalizedException;
-use Magento\Framework\Message\ManagerInterface;
 use Magento\Framework\View\Result\PageFactory;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Quote;
 use Psr\Log\LoggerInterface;
 
-/** GET validates the reminder link and shows a confirmation; only a form-key POST changes carts. */
-class Restore implements HttpGetActionInterface, HttpPostActionInterface, CsrfAwareActionInterface
+/**
+ * GET validates the reminder link and shows a confirmation; only a form-key POST changes carts.
+ * Extends Action so Magento sets the store and currency context (X-Magento-Vary).
+ */
+class Restore extends Action implements HttpGetActionInterface, HttpPostActionInterface, CsrfAwareActionInterface
 {
     use RejectsMalformedFormKeys;
     public function __construct(
+        Context $context,
         private readonly Http $request,
         private readonly RedirectFactory $redirectFactory,
         private readonly RestoreAccess $access,
         private readonly CartRepositoryInterface $cartRepository,
         private readonly CheckoutSession $checkoutSession,
         private readonly CustomerSession $customerSession,
-        private readonly ManagerInterface $messageManager,
         private readonly PageFactory $pageFactory,
         private readonly Validator $formKeyValidator,
         private readonly CartRestore $restore,
         private readonly LoggerInterface $logger
     ) {
+        parent::__construct($context);
     }
 
     public function execute(): ResultInterface

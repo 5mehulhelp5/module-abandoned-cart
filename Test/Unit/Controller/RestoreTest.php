@@ -27,6 +27,7 @@ use Magento\Quote\Model\Quote;
 use Magento\Store\Api\Data\StoreInterface;
 use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
+use Magento\Framework\App\Action\Context;
 use PHPUnit\Framework\TestCase;
 
 class RestoreTest extends TestCase
@@ -146,7 +147,9 @@ class RestoreTest extends TestCase
         $logger = $this->createStub(LoggerInterface::class);
         $logger->method('error')->willReturnCallback(function ($message) { $this->errors[] = $message; });
 
-        $this->result = (new Restore($request, $redirectFactory, $access, $repo, $checkout, $customer, $messages,
+        $context = $this->createStub(Context::class);
+        $context->method('getMessageManager')->willReturn($messages);
+        $this->result = (new Restore($context, $request, $redirectFactory, $access, $repo, $checkout, $customer,
             $pages, $validator, $restore, $logger))->execute();
         return $quote;
     }
