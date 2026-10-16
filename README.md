@@ -6,40 +6,38 @@ Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · Ra
 
 - **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
   minute, every cart exactly once (see the flash sale load test below).
-- **Your rules.** Opt-in with a cookie banner or opt-out with a checkout notice. Set the delay, hourly limit,
+- **Your rules.** Opt-in with a cookie banner, or opt-out with an optional checkout notice. Set the delay, hourly limit,
   template, sender and notice text – or plug in your own reminder schedule.
 - **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
   one.
 - **Respectful by design.** A recipient cooldown, and no email after a shopper says no.
 
-## With or without consent
+## Installation
 
-This module needs only `commercekings/module-notification`. Installed alone it runs **opt-out**; add
-`commercekings/privacy-bundle` for **opt-in**:
-
-- **Opt-out (this module alone)** – every shopper who enters an email in checkout is subscribed, and a short notice
-  under the email field tells them. The button opens the cart page; the email has no unsubscribe link until you add
-  your own page. No consent tables.
-- **Opt-in (with the privacy bundle: the consent bridge and the cookie banner)** – a cart is subscribed only with a
-  consent for `cart_reminder`, withdrawing it removes the subscription, the button restores the saved cart (only in the browser that consented)
-  and the email has Consent's unsubscribe link. The checkout notice is off by default.
-
-Opt-out:
+**Opt-out** – a reminder for every shopper who enters an email in checkout:
 
 ```sh
 composer require commercekings/module-abandoned-cart:^0.1
 bin/magento setup:upgrade
 ```
 
-Opt-in:
+**Opt-in** – reminders only with consent, with the cookie banner:
 
 ```sh
 composer require commercekings/module-abandoned-cart:^0.1 commercekings/privacy-bundle:^0.1
 bin/magento setup:upgrade
 ```
 
-To move a shop from opt-in to opt-out, `bin/magento module:uninstall` the bridge, the banner and
-`CommerceKings_Consent`, then `composer remove commercekings/privacy-bundle`.
+| | Opt-out | Opt-in |
+|---|---|---|
+| Who gets a reminder | every shopper who entered an email | only with consent for `cart_reminder` |
+| Checkout notice | on, optional | off |
+| Email button | opens the cart page | restores the saved cart, only in the browser that consented |
+| Unsubscribe link | none until you add your own page | signed link and one-click headers |
+| Consent tables | none | created |
+
+To move a shop from opt-in to opt-out, uninstall the **consent bridge**, the **cookie banner** and **Consent** with
+`bin/magento module:uninstall`, then `composer remove commercekings/privacy-bundle`.
 
 ## Settings
 
