@@ -1,8 +1,8 @@
 # Abandoned cart reminder
 
-**Win back abandoned carts – with consent or without, built for flash-sale traffic.**
+**Recover lost sales automatically – a well-timed email per abandoned cart, sent in the background so checkout stays fast.**
 
-Guests and customers · opt-in or opt-out · Luma and Hyvä (Luma checkout) · RabbitMQ or MySQL queue · one-click unsubscribe · signed restore links
+Guests and customers · opt-in or opt-out · one reminder per cart, or your own schedule through an extendable reminder policy · signed restore link that merges into the shopper's current cart · one-click unsubscribe · hourly send limit for your email provider · no duplicate emails, even under load (13,000+ emails a minute in our flash-sale test) · RabbitMQ or MySQL queue · Luma and Hyvä (Luma checkout)
 
 **Win back abandoned carts – guests included.** One friendly reminder to the email typed at checkout, no account
 needed. Works on Luma and Hyvä, opt-out or opt-in with a cookie banner – opt-ins and withdrawals can optionally be
