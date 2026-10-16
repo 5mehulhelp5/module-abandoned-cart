@@ -34,6 +34,7 @@ use CommerceKings\Notification\Model\Mailer;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\CartRepositoryInterfaceFactory;
+use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\QuoteFactory;
 use Magento\Store\Model\App\Emulation;
 use Magento\Store\Model\StoreManagerInterface;
@@ -234,7 +235,7 @@ class ReminderPolicyTest extends TestCase
             $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class));
     }
 
-    private function consumer(?callable $send = null, int $cooldownDays = 7): CartReminder
+    private function consumer(?callable $send = null, int $cooldownDays = 7, ?ReminderData $data = null): CartReminder
     {
         $transport = $this->createStub(TransportInterface::class);
         $transport->method('sendMessage')->willReturnCallback(function () use ($send) {
@@ -247,10 +248,12 @@ class ReminderPolicyTest extends TestCase
             $builder->method($method)->willReturnSelf();
         }
         $builder->method('getTransport')->willReturn($transport);
-        $data = $this->createStub(ReminderData::class);
-        $data->method('build')->willReturn(['customer_name' => '']);
+        if ($data === null) {
+            $data = $this->createStub(ReminderData::class);
+            $data->method('build')->willReturn(['customer_name' => '']);
+        }
         $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->cooldown(), $this->notificationConfig($cooldownDays));
-        return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class)->create(),
+        return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class),
             $data, $mailer, $this->config(), $this->guard(),
             $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->lifetime(),
             $this->om->get(ReminderEmailResolverInterface::class),
@@ -368,6 +371,33 @@ class ReminderPolicyTest extends TestCase
         $this->consumer()->process($this->subscriptionOf($id));
         $this->assertSame(1, $this->sent);
         $this->assertSame(2, (int)$this->row($id)['delivery_version'], 'retry owns a new version');
+    }
+
+    public function testFailedSendRetryBuildsEmailFromTheCurrentQuote(): void
+    {
+        $id = $this->quote();
+        $db = $this->resource->getConnection();
+        $activity = gmdate('Y-m-d H:i:s', time() - 120);
+        $db->update($this->table('quote'), ['grand_total' => 11, 'updated_at' => $activity], ['entity_id = ?' => $id]);
+        $totals = [];
+        $data = $this->createStub(ReminderData::class);
+        $data->method('build')->willReturnCallback(function (Quote $quote) use (&$totals): array {
+            $totals[] = (float)$quote->getGrandTotal();
+            return ['customer_name' => ''];
+        });
+        $consumer = $this->consumer(data: $data);
+        $this->sendFails = true;
+        try {
+            $consumer->process($this->subscriptionOf($id));
+            $this->fail('Expected the fixture transport to fail.');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('Fixture SMTP failure', $error->getMessage());
+        }
+        $db->update($this->table('quote'), ['grand_total' => 99, 'updated_at' => $activity], ['entity_id = ?' => $id]);
+        $this->sendFails = false;
+        $consumer->process($this->subscriptionOf($id));
+        $this->assertSame([11.0, 99.0], $totals, 'the same long-running consumer must reload the quote for a retry');
+        $this->assertSame(1, $this->sent);
     }
 
     /** @return array<string, array{bool}> */

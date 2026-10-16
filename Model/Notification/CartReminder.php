@@ -21,7 +21,7 @@ use CommerceKings\Notification\Model\Config as NotificationConfig;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 use Magento\Framework\Lock\LockManagerInterface;
-use Magento\Quote\Api\CartRepositoryInterface;
+use Magento\Quote\Api\CartRepositoryInterfaceFactory;
 use Magento\Quote\Model\Quote;
 use Psr\Log\LoggerInterface;
 
@@ -48,7 +48,7 @@ class CartReminder implements NotificationTypeInterface
 
     public function __construct(
         private readonly ResourceConnection $resource,
-        private readonly CartRepositoryInterface $cartRepository,
+        private readonly CartRepositoryInterfaceFactory $repositories,
         private readonly ReminderData $reminderData,
         private readonly MailerInterface $mailer,
         private readonly Config $config,
@@ -167,7 +167,8 @@ class CartReminder implements NotificationTypeInterface
             $this->config->getIdentity($storeId),
             $email,
             function () use ($id, $row, $email, $storeId): MessageContent {
-                $quote = $this->cartRepository->get($id);
+                // Consumers live across messages; a repository's cached quote must not survive a delivery attempt.
+                $quote = $this->repositories->create()->get($id);
                 if (!$quote instanceof Quote) {
                     throw new \UnexpectedValueException('Cart repository must return a Magento quote for a reminder.');
                 }

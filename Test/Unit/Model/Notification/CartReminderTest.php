@@ -19,6 +19,7 @@ use CommerceKings\Notification\Model\Mailer;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Framework\Mail\TransportInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
+use Magento\Quote\Api\CartRepositoryInterfaceFactory;
 use Magento\Quote\Api\Data\CartInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Store\Model\App\Emulation;
@@ -63,6 +64,8 @@ class CartReminderTest extends TestCase
     private array $oneClickAsked = [];
     /** the arguments ReminderData::build() received */
     private array $built = [];
+    private array $quotesBuilt = [];
+    private ?CartRepositoryInterfaceFactory $repositoryFactory = null;
     private bool $recipientClaimed = false;
     private array $releasedRecipients = [];
     private bool $headerSupport = true;
@@ -88,9 +91,15 @@ class CartReminderTest extends TestCase
         $logger->method('info')->willReturnCallback(function ($msg) { $this->logs[] = $msg; });
         $repo = $this->createStub(CartRepositoryInterface::class);
         $repo->method('get')->willReturnCallback(fn () => $this->createStub($this->quoteModel ? Quote::class : CartInterface::class));
+        $repositories = $this->repositoryFactory;
+        if ($repositories === null) {
+            $repositories = $this->createStub(CartRepositoryInterfaceFactory::class);
+            $repositories->method('create')->willReturn($repo);
+        }
         $data = $this->createStub(ReminderData::class);
         $data->method('build')->willReturnCallback(function (...$args) {
             $this->built = $args;
+            $this->quotesBuilt[] = $args[0];
             return ['customer_name' => 'Jane', 'items_html' => '', 'optout_url' => $this->optoutUrl];
         });
         $this->emulation = $this->createMock(Emulation::class);
@@ -147,7 +156,7 @@ class CartReminderTest extends TestCase
             $this->lockEvents[] = ['unlock', $name];
             return true;
         });
-        return new CartReminder($this->resource(), $repo, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks);
+        return new CartReminder($this->resource(), $repositories, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks);
     }
 
     /** No claim, no email: only the cart's `queued_at` mark is cleared, so the finder can queue it again. */
@@ -218,6 +227,33 @@ class CartReminderTest extends TestCase
         $this->assertSame([['a@test.com', 'claim-token']], $this->releasedRecipients);
         $this->sendFails = false;
         $consumer->process('42');
+        $this->assertSame(1, $this->sentMessages);
+    }
+
+    public function testRetryCreatesANewRepositoryInsteadOfReusingTheFailedAttemptsQuote(): void
+    {
+        $oldQuote = $this->createStub(Quote::class);
+        $currentQuote = $this->createStub(Quote::class);
+        $repositories = [];
+        foreach ([$oldQuote, $currentQuote] as $quote) {
+            $repository = $this->createMock(CartRepositoryInterface::class);
+            $repository->expects($this->once())->method('get')->with(42)->willReturn($quote);
+            $repositories[] = $repository;
+        }
+        $this->repositoryFactory = $this->createMock(CartRepositoryInterfaceFactory::class);
+        $this->repositoryFactory->expects($this->exactly(2))->method('create')
+            ->willReturnOnConsecutiveCalls(...$repositories);
+        $consumer = $this->consumer();
+        $this->sendFails = true;
+        try {
+            $consumer->process('42');
+            $this->fail('Expected the first transport attempt to fail.');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('SMTP down', $error->getMessage());
+        }
+        $this->sendFails = false;
+        $consumer->process('42');
+        $this->assertSame([$oldQuote, $currentQuote], $this->quotesBuilt);
         $this->assertSame(1, $this->sentMessages);
     }
 

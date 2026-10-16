@@ -16,11 +16,6 @@ use Magento\Framework\Controller\Result\Redirect;
 use Magento\Framework\Controller\Result\RedirectFactory;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\Message\ManagerInterface;
-use Magento\Framework\Serialize\Serializer\Json;
-use Magento\Framework\Session\Config\ConfigInterface as SessionConfigInterface;
-use Magento\Framework\Stdlib\Cookie\CookieMetadataFactory;
-use Magento\Framework\Stdlib\Cookie\PublicCookieMetadata;
-use Magento\Framework\Stdlib\CookieManagerInterface;
 use Magento\Framework\Data\Form\FormKey\Validator;
 use Magento\Framework\View\Result\Page;
 use Magento\Framework\View\Result\PageFactory;
@@ -43,13 +38,9 @@ class RestoreTest extends TestCase
     private array $messages = [];
     private array $saved = [];
     private array $replaced = [];
-    private array $cookies = [];
     private array $restores = [];
     private array $errors = [];
     private mixed $result = null;
-    private mixed $sectionCookie = '{"cart":100,"customer":200}';
-    private int $cookieLifetime = 7200;
-    private ?PublicCookieMetadata $cookieMetadata = null;
 
     /**
      * @param array $cart       saved cart: active, items, customer, ref
@@ -135,20 +126,6 @@ class RestoreTest extends TestCase
         foreach (['addNoticeMessage', 'addSuccessMessage', 'addErrorMessage'] as $method) {
             $messages->method($method)->willReturnCallback(function ($m) use ($messages) { $this->messages[] = (string)$m; return $messages; });
         }
-        $cookieManager = $this->createStub(CookieManagerInterface::class);
-        $cookieManager->method('getCookie')->willReturnCallback(fn ($name) => $name === 'section_data_ids' ? $this->sectionCookie : null);
-        $cookieManager->method('setPublicCookie')->willReturnCallback(function ($name, $value, $metadata) {
-            $this->cookies[$name] = $value;
-            $this->cookieMetadata = $metadata;
-        });
-        $metadata = new PublicCookieMetadata();
-        $metadataFactory = $this->createStub(CookieMetadataFactory::class);
-        $metadataFactory->method('createPublicCookieMetadata')->willReturn($metadata);
-        $sessionConfig = $this->createStub(SessionConfigInterface::class);
-        $sessionConfig->method('getCookieLifetime')->willReturn($this->cookieLifetime);
-        $sessionConfig->method('getCookiePath')->willReturn('/shop/');
-        $sessionConfig->method('getCookieDomain')->willReturn('.example.test');
-
         $title = $this->createStub(Title::class);
         $pageConfig = $this->createStub(PageConfig::class);
         $pageConfig->method('getTitle')->willReturn($title);
@@ -170,7 +147,7 @@ class RestoreTest extends TestCase
         $logger->method('error')->willReturnCallback(function ($message) { $this->errors[] = $message; });
 
         $this->result = (new Restore($request, $redirectFactory, $access, $repo, $checkout, $customer, $messages,
-            $cookieManager, $metadataFactory, $pages, $validator, $restore, $logger, new Json(), $sessionConfig))->execute();
+            $pages, $validator, $restore, $logger))->execute();
         return $quote;
     }
 
@@ -192,7 +169,6 @@ class RestoreTest extends TestCase
         $this->assertSame([], $this->replaced);
         $this->assertSame([], $this->saved);
         $this->assertSame([], $this->messages);
-        $this->assertSame([], $this->cookies);
     }
 
     public static function forgedRequests(): array
@@ -220,7 +196,6 @@ class RestoreTest extends TestCase
         $this->assertSame([], $this->messages);
         $this->assertSame([], $this->replaced);
         $this->assertSame([], $this->saved);
-        $this->assertSame([], $this->cookies);
     }
 
     public function testGetOnlyShowsConfirmationAndDoesNotTouchTheCurrentCart(): void
@@ -229,7 +204,6 @@ class RestoreTest extends TestCase
         $this->assertInstanceOf(Page::class, $this->result);
         $this->assertSame([], $this->restores);
         $this->assertSame([], $this->replaced);
-        $this->assertSame([], $this->cookies);
     }
 
     public function testInvalidFormKeyDoesNotRestore(): void
@@ -253,7 +227,6 @@ class RestoreTest extends TestCase
         $this->restore(restoreError: new \RuntimeException('second save failed'));
         $this->assertSame('checkout/cart', $this->path);
         $this->assertSame([], $this->replaced);
-        $this->assertSame([], $this->cookies);
         $this->assertSame(['We could not restore your saved cart. Please try again.'], $this->messages);
         $this->assertCount(1, $this->errors);
     }
@@ -266,7 +239,6 @@ class RestoreTest extends TestCase
         $this->assertSame('', $this->path);
         $this->assertSame([], $this->messages, 'no hint whether the cart was ordered');
         $this->assertSame([], $this->replaced);
-        $this->assertSame([], $this->cookies);
     }
 
     public static function otherBrowsers(): array
@@ -347,20 +319,16 @@ class RestoreTest extends TestCase
         $this->restore([], 'bh-owner', ['id' => 42, 'items' => 2]);
         $this->assertSame('checkout/cart', $this->path);
         $this->assertSame([], $this->replaced);
-        $this->assertSame([], $this->cookies);
     }
 
     /** @dataProvider lostCart */
     #[\PHPUnit\Framework\Attributes\DataProvider('lostCart')]
-    public function testGuestLostCartIsRestoredAndMiniCartRefreshed(?array $current): void
+    public function testGuestLostCartIsRestored(?array $current): void
     {
         $quote = $this->restore([], 'bh-owner', $current);
         $this->assertSame('checkout/cart', $this->path);
         $this->assertCount(1, $this->replaced);
         $this->assertSame($current['id'] ?? (int)$quote->getId(), (int)$this->replaced[0]->getId());
-        $ids = json_decode($this->cookies['section_data_ids'], true);
-        $this->assertGreaterThan(100, $ids['cart']);
-        $this->assertSame(200, $ids['customer'], 'other sections untouched');
     }
 
     public static function lostCart(): array
@@ -370,53 +338,11 @@ class RestoreTest extends TestCase
 
     public function testGuestWithOtherItemsIsMerged(): void
     {
-        $this->sectionCookie = null;
         $quote = $this->restore([], 'bh-owner', ['id' => 7, 'items' => 1]);
         $this->assertSame('checkout/cart', $this->path);
         $this->assertSame([[42, 7, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 0]], $this->restores);
         $this->assertSame(7, (int)$this->replaced[0]->getId());
         $this->assertSame(['Your saved cart has been restored.'], $this->messages);
-        $this->assertArrayHasKey('cart', json_decode($this->cookies['section_data_ids'], true));
-    }
-
-    public function testMiniCartCookieUsesMagentoLifetimeAndCustomerDataScope(): void
-    {
-        $this->restore();
-        $this->assertSame(7200, $this->cookieMetadata->getDuration());
-        $this->assertSame('/', $this->cookieMetadata->getPath(), 'matches Magento customer-data even with a different session path');
-        $this->assertSame('.example.test', $this->cookieMetadata->getDomain());
-        $this->assertTrue($this->cookieMetadata->getSecure());
-        $this->assertFalse($this->cookieMetadata->getHttpOnly(), 'customer-data must read the cookie');
-    }
-
-    public function testZeroMagentoLifetimeCreatesSessionCookie(): void
-    {
-        $this->cookieLifetime = 0;
-        $this->restore();
-        $this->assertNull($this->cookieMetadata->getDuration(), 'setDuration(0) would expire immediately');
-        $this->assertSame('checkout/cart', $this->path);
-        $this->assertCount(1, $this->replaced);
-    }
-
-    /** @dataProvider invalidSectionCookies */
-    #[\PHPUnit\Framework\Attributes\DataProvider('invalidSectionCookies')]
-    public function testMalformedOrScalarSectionCookieDoesNotBreakRestore(mixed $cookie): void
-    {
-        $this->sectionCookie = $cookie;
-        $this->restore();
-        $this->assertSame('checkout/cart', $this->path);
-        $this->assertCount(1, $this->replaced);
-        $ids = json_decode($this->cookies['section_data_ids'], true, 512, JSON_THROW_ON_ERROR);
-        $this->assertSame(['cart'], array_keys($ids));
-        $this->assertIsInt($ids['cart']);
-        $this->assertSame([], $this->errors);
-    }
-
-    public static function invalidSectionCookies(): array
-    {
-        return ['missing' => [null], 'array cookie' => [['cart' => 100]], 'broken JSON' => ['{broken'], 'JSON null' => ['null'],
-            'scalar' => ['42'], 'invalid UTF-8' => ["{\"cart\":\"\xFF\"}"],
-            'non-finite section value' => ['{"customer":1e400}']];
     }
 
     /** @dataProvider malformedRequests */

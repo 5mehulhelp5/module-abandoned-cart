@@ -109,7 +109,7 @@ if ($mode === 'finder') {
         $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class), $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class)))->execute();
 } else {
     $mailer = new Mailer($builder, $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
-    $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class)->create(), $data,
+    $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class), $data,
         $mailer, $config, $guard, new OncePerCart(), new NullLogger(),
         $lifetime, $recipients, $om->get(NotificationConfig::class),
         $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class), $om->get(\Magento\Framework\Lock\LockManagerInterface::class));

@@ -174,8 +174,7 @@ Restore steps:
 - guest with no existing cart → the saved cart becomes the session cart. An existing cart, including an empty one or a logged-in customer's cart, keeps its identity and receives the saved products through `Quote::merge`;
 - a merge keeps the destination's contact details, account, addresses and coupon. Matching product configurations have their quantities added; distinct configurations remain separate. Totals and shipping rates are recalculated. Like Magento's own merge when a guest signs in, unavailable products and quantities above stock do not refuse the merge: they show as cart errors and checkout refuses the order until the shopper fixes them;
 - both carts are saved in one database transaction. Only after it commits does the session switch and the saved cart become closed. A failed save rolls back both carts; a repeated or concurrent restore cannot add the closed source twice. Success: "Your saved cart has been restored.";
-- after restore/merge the customer-data `cart` section is marked stale (`section_data_ids` cookie), so the mini cart shows the right count.
-- that customer-data cookie uses Magento's configured cookie lifetime and domain (zero lifetime creates a session cookie). Its path stays `/`, matching Magento's customer-data JavaScript even when the session cookie has a narrower path.
+- the restore POST is registered in `etc/frontend/sections.xml` for the customer-data `cart` section. Magento invalidates it on submission and reloads it after the redirect, so the mini cart shows the current count. Magento owns its customer-data cookies and storage.
 
 **Opt-out** `/ckconsent/optout` – Consent owns the signed link and explicit confirmation:
 
@@ -325,7 +324,7 @@ From the Magento root, with the package installed:
 
 ```sh
 vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Unit
-node --test vendor/commercekings/module-abandoned-cart/Test/JavaScript/*.test.cjs
+MAGENTO_ROOT="$PWD" node --test vendor/commercekings/module-abandoned-cart/Test/JavaScript/*.test.cjs
 ```
 
 The reminder policy SQL regressions (no demo products or actual email delivery required):
@@ -338,9 +337,15 @@ vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
 They verify recipient cooldown, same-address concurrency, expiry, owned release, failed-send retry, duplicate claims, store-specific lifetime,
 late queue delivery, read-only admin scope and restore expiry before physical quote deletion.
 
-`Test/Unit` uses `DbTestTrait`, a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, cart subscription authorization (guest masked id, customer's own quote, the repeated cart condition), reminder policy, quote lifetime, finder (subscription ids, guarded queue claim), consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, email data (signed links, options, escaping), restore (every branch incl. other browser, merge, mini cart cookie). Email rules, consent, subscription storage and withdrawal are tested in Notification; shared withdrawal links, confirmation and preference sync in Consent.
+`Test/Unit` uses `DbTestTrait`, a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, cart subscription authorization (guest masked id, customer's own quote, the repeated cart condition), reminder policy, quote lifetime, finder (subscription ids, guarded queue claim), consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, fresh quote loading on retries, email data (signed links, options, escaping), and restore (every branch incl. other browser and merge). Email rules, consent, subscription storage and withdrawal are tested in Notification; shared withdrawal links, confirmation and preference sync in Consent.
 
-JavaScript tests exercise the guest capture coordinator and Magento email-field mixin: acknowledgements, retries, rapid edits, withdrawal during a pending request, consent changes, offline recovery and component cleanup. `customer-consent.js` does not have an isolated unit test. Consent tests its shared withdrawal banner sync separately.
+JavaScript tests exercise guest capture, the Magento email-field mixin and customer checkout subscription:
+acknowledgements, retries, rapid edits, withdrawal during a pending request, consent changes, offline recovery
+and component cleanup. Consent tests its shared withdrawal banner sync separately.
+
+Customer-data regressions use Magento's real XML converter and frontend JavaScript to verify form/AJAX
+invalidation, reload after redirect, unchanged GET confirmation, preserved customer data and store base paths.
+Set `MAGENTO_ROOT` for these tests; no running storefront or database is needed.
 
 The quote integration tests require a **development database with Magento demo data** (SKUs `24-MB01`, `24-MB04`, `24-MB05` and configurable `MH01`). They create committed quote fixtures, test real Magento saves and remove the fixtures afterward. Use a disposable development database; do not run them against a production shop.
 

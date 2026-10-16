@@ -4,6 +4,10 @@
 
 First release. Features:
 
+- Use Magento's native customer-data section invalidation for cart recovery; remove controller-owned cookie writes.
+- Load a fresh quote repository for each delivery attempt so retries in a resident consumer use current cart content.
+  Cover retry freshness with native SQL and customer-data behavior with Magento's actual frontend modules.
+
 - Cover failed and uncertain queue publishes through stale-claim recovery, and customer checkout request
   failures/refusals and dependency-loading errors. Recheck the cart, login and consent after asynchronous
   checkout dependencies load; a failed load leaves capture unstored without interrupting checkout.
