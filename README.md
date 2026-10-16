@@ -1,7 +1,5 @@
 # Abandoned cart reminder
 
-**Development status:** first-release feature scope frozen; polishing and verification remain before publication.
-
 Sends **one** reminder email for a cart a shopper left in checkout, after a delay you set – for guests and
 customers alike. Cron finds the carts; `CommerceKings_Notification`'s queue consumer sends the emails.
 
@@ -68,8 +66,11 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 
 ## Extending
 
-DI preferences: `Api\ReminderPolicyInterface` (when to send; default once per cart), `Api\UnsubscribeLinkInterface`
-(your own unsubscribe page) and `Api\ReminderEmailResolverInterface` (where the recipient comes from).
+Replace any of these with a DI preference (namespace CommerceKings\AbandonedCart\Api):
+
+- ReminderPolicyInterface: when to send (default: once per cart)
+- UnsubscribeLinkInterface: your own unsubscribe page
+- ReminderEmailResolverInterface: where the recipient comes from
 
 ## Limitations
 
