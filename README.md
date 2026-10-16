@@ -5,7 +5,7 @@ Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · Ra
 **Recover lost sales automatically – a well-timed email for every abandoned cart, without slowing your store down.**
 
 - **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
-  minute, every cart exactly once (see the flash sale load test below).
+  minute, every cart exactly once (see *Where it shines* below).
 - **Your rules.** Opt-in with a cookie banner, or opt-out with an optional checkout notice. Set the delay, hourly limit,
   template, sender and notice text – or plug in your own reminder schedule.
 - **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
@@ -33,7 +33,7 @@ bin/magento setup:upgrade
 | Who gets a reminder | every shopper who entered an email | only with consent for `cart_reminder` |
 | Checkout notice | on, optional | off |
 | Email button | opens the cart page | restores the saved cart, only in the browser that consented |
-| Unsubscribe link | none until you add your own page | signed link and one-click headers |
+| Unsubscribe link | none until you add your own page | signed link, optional one-click headers |
 | Consent tables | none | created |
 
 To move a shop from opt-in to opt-out, uninstall the **consent bridge**, the **cookie banner** and **Consent** with
@@ -53,8 +53,8 @@ To move a shop from opt-in to opt-out, uninstall the **consent bridge**, the **c
 | Show notice | Automatic – Yes without consent, No with consent |
 | Notice text (store) | If you leave your cart, we may email you one reminder about it. |
 
-Carts expire with Magento's *Quote Lifetime* (normally 30 days). The recipient cooldown (7 days per address) and
-one-click unsubscribe headers are under **CommerceKings > Notifications**.
+Carts expire with Magento's *Quote Lifetime* (normally 30 days). The recipient cooldown (7 days per address) and the
+optional one-click unsubscribe headers are under **CommerceKings > Notifications**.
 
 To change the email, load the template in **Marketing > Email Templates**. Variables: `customer_name`, `items_html`,
 `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; keep the unsubscribe line inside
@@ -63,8 +63,8 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 ## Before going live
 
 - Set *Maximum reminders per hour* to your email provider's limit.
-- With *One-click unsubscribe* on (opt-in): send from a no-reply address whose domain DKIM-signs the unsubscribe
-  headers.
+- If you turn on the optional *One-click unsubscribe* (opt-in): send from a no-reply address whose domain
+  DKIM-signs the unsubscribe headers.
 - Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000` and restart it after each deployment
   ([queue setup](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#queue-transport)).
 - Rate-limit the guest subscribe endpoint in nginx or your proxy
@@ -80,9 +80,9 @@ Replace any of these with a DI preference:
 
 `Api\ReminderEmailResolverInterface` – where the recipient comes from
 
-## Flash sale load test
+## Where it shines
 
-Where it shines: a flash sale leaves thousands of carts abandoned at once, and every shopper gets one reminder
+A flash sale leaves thousands of carts abandoned at once, and every shopper gets one reminder
 within minutes. In a load test on a local sandbox (Magento 2.4.9 in production mode, 14 CPUs / 8 GB, RabbitMQ),
 12 consumers sent 13,333 reminder emails a minute – every cart exactly once, no email after a withdrawal, no
 deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 50 requests a second, with zero errors.
