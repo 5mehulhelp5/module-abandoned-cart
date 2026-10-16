@@ -16,12 +16,17 @@ bridge for **opt-in**:
   withdrawing it removes the subscription, the button restores the saved cart (only in the browser that consented)
   and the email has Consent's unsubscribe link. The checkout notice is off by default.
 
-```sh
-# opt-out
-composer require commercekings/module-abandoned-cart:^0.1
-# opt-in
-composer require commercekings/module-abandoned-cart:^0.1 commercekings/module-consent-notification:^0.1 commercekings/module-consent-vanilla:^0.1
+Opt-out:
 
+```sh
+composer require commercekings/module-abandoned-cart:^0.1
+bin/magento setup:upgrade
+```
+
+Opt-in:
+
+```sh
+composer require commercekings/module-abandoned-cart:^0.1 commercekings/module-consent-notification:^0.1 commercekings/module-consent-vanilla:^0.1
 bin/magento setup:upgrade
 ```
 
