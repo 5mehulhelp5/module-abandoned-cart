@@ -106,3 +106,10 @@ Cron, queue and emails work with any theme. The consent banner works on Luma and
 
 [How it works](docs/how-it-works.md) · [Security and links](docs/security.md) · [Testing](docs/testing.md) ·
 [Compatibility](COMPATIBILITY.md) · [Changes](CHANGELOG.md)
+
+## Disclaimer
+
+These modules help you ask for, record and respect your shoppers' choices – they don't make your store compliant on
+their own. You are responsible for your store's privacy: what you collect, the wording you show, your privacy policy
+and whether your setup meets the laws that apply to you (e.g. GDPR, ePrivacy, email marketing rules). Get legal advice
+if you are unsure.
