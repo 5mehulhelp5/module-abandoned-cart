@@ -4,10 +4,6 @@
 
 Guests and customers · opt-in or opt-out · fine-tune it to your store: delay, hourly limit, email template, sender and checkout notice (template, sender and notice text per store view) · cron never sends: a short run queues due carts, queue consumers send · one reminder per cart, or your own schedule through an extendable reminder policy · signed restore link that merges into the shopper's current cart · one-click unsubscribe · no duplicate emails, even under load (13,000+ emails a minute in our flash-sale test) · RabbitMQ or MySQL queue · Luma and Hyvä (Luma checkout)
 
-**Win back abandoned carts – guests included.** One friendly reminder to the email typed at checkout, no account
-needed. Works on Luma and Hyvä, opt-out or opt-in with a cookie banner – opt-ins and withdrawals can optionally be
-recorded on the server with the wording the shopper saw, as evidence.
-
 Sends **one** reminder email for a cart a shopper left in checkout, after a delay you set. Cron finds the carts;
 `CommerceKings_Notification`'s queue consumer sends the emails.
 
