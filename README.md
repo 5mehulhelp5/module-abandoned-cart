@@ -66,11 +66,8 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 
 ## Extending
 
-Replace any of these with a DI preference (namespace CommerceKings\AbandonedCart\Api):
-
-- ReminderPolicyInterface: when to send (default: once per cart)
-- UnsubscribeLinkInterface: your own unsubscribe page
-- ReminderEmailResolverInterface: where the recipient comes from
+DI preferences: `Api\ReminderPolicyInterface` (when to send; default once per cart), `Api\UnsubscribeLinkInterface`
+(your own unsubscribe page) and `Api\ReminderEmailResolverInterface` (where the recipient comes from).
 
 ## Limitations
 
