@@ -31,6 +31,8 @@
                     <item name="label" xsi:type="string">Abandoned cart reminder</item>
                     <!-- raise when what the visitor agrees to changes: older consents stop counting -->
                     <item name="terms_revision" xsi:type="string">1</item>
+                    <!-- the default banner category (CommerceKings_ConsentDefaults) -->
+                    <item name="category" xsi:type="string">personalization</item>
                     <item name="active_if" xsi:type="array">
                         <item name="consent_bridge" xsi:type="string">commercekings_consent_notification/general/enabled</item>
                     </item>

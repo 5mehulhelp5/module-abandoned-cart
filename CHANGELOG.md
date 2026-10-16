@@ -4,6 +4,7 @@
 
 First release. Features:
 
+- `cart_reminder` declares its banner category itself (`category = personalization`).
 - The `cart_reminder` consent purpose is active only with the consent bridge, so a banner in the opt-out setup shows
   no reminder switch.
 - **Opt-out without an extra module:** installed alone, abandoned cart runs opt-out. The checkout notice under the

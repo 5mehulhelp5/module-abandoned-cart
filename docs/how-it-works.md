@@ -28,7 +28,7 @@ deleted with the quote by Magento's cart cleanup):
 |---|---|
 | `quote_id` | the cart (`quote.entity_id`, foreign key, `ON DELETE CASCADE`) |
 | `queued_at` | waiting in the queue; cleared when the reminder is sent or skipped, so the cart can be found again |
-| `reminded_at` | email sent – one reminder per cart |
+| `reminded_at` | last reminder sent (`OncePerCart` sends one per cart) |
 | `delivery_version` | increasing delivery claim number; prevents an older failure from undoing a newer delivery |
 
 Each atomic delivery claim increments `delivery_version`, starting from zero. Rollback checks that version before

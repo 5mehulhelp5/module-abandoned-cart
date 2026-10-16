@@ -80,8 +80,11 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 
 ## Limitations
 
-- One reminder per cart, ever. The restore link shows the cart as it is now and works for 7 days.
+- One reminder per cart; follow-ups need another reminder policy. The restore link shows the cart as it is now and
+  works for 7 days.
 - A worker killed mid-send can leave a cart marked as reminded without an email – it is never sent twice.
+- Checkout capture needs Magento's Luma checkout (also as Hyvä's Luma checkout fallback); Hyvä Checkout is not
+  supported yet. Cron, queue and emails work with any theme.
 
 ## More
 
