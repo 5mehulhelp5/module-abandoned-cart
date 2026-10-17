@@ -123,7 +123,7 @@ class CartReminderTest extends TestCase
             if ($this->sendFails) {
                 throw new \RuntimeException('SMTP down');
             }
-            if ($this->oneClick && $this->optoutUrl !== '' && $this->headerSupport) { $this->assertNotNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'Apply headers before sending'); }
+            if ($this->oneClick && str_starts_with($this->optoutUrl, 'https:') && $this->headerSupport) { $this->assertNotNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'Apply headers before sending'); }
             $this->sentMessages++;
         });
         $builder = $this->createStub(TransportBuilder::class);
@@ -494,18 +494,14 @@ class CartReminderTest extends TestCase
         $this->assertSame(1, $this->sentMessages);
     }
 
-    public function testInsecureOptoutCannotBeAdvertisedAsOneClick(): void
+    public function testInsecureOptoutIsNotAdvertisedAsOneClickButStillSent(): void
     {
+        // an http store (e.g. staging) with one-click on: the reminder goes out with its link, without the headers
         $this->oneClick = true;
         $this->optoutUrl = 'http://shop.test/ckconsent/optout';
-        try {
-            $this->consumer()->process('42');
-            $this->fail('Expected HTTPS requirement');
-        } catch (\UnexpectedValueException $error) {
-            $this->assertStringContainsString('HTTPS', $error->getMessage());
-        }
-        $this->assertSame(0, $this->sentMessages);
-        $this->assertNull($this->updates[1]['data']['reminded_at']);
+        $this->consumer()->process('42');
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'));
     }
 
     public function testUnsupportedOneClickMessageStillSendsWithoutTheHeaders(): void
