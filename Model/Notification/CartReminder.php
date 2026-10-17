@@ -66,7 +66,7 @@ class CartReminder implements NotificationTypeInterface
     public function process(string $reference): void
     {
         $db = $this->resource->getConnection();
-        $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at', 'delivery_version'],
+        $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at', 'delivery_version', 'failed_sends'],
             ['entity_id', 'is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'],
             ['subscription_id', 'contact_id', 'captured_at', 'permission_ref'])
             ->where('s.subscription_id = ?', (int)$reference));
@@ -105,7 +105,8 @@ class CartReminder implements NotificationTypeInterface
         $claim = fn (): int => $db->update(
             $this->carts->joined(),
             // sent: the cart no longer waits in the queue, so a recurring policy can schedule the next reminder
-            ['c.reminded_at' => new Expression('NOW()'), 'c.queued_at' => null, 'c.delivery_version' => $deliveryVersion],
+            ['c.reminded_at' => new Expression('NOW()'), 'c.queued_at' => null, 'c.delivery_version' => $deliveryVersion,
+                'c.failed_sends' => 0],
             [
                 'c.quote_id = ?' => $id,
                 's.subscription_id = ?' => (int)$row['subscription_id'],
@@ -192,7 +193,17 @@ class CartReminder implements NotificationTypeInterface
             throw $e->getPrevious() ?? $e;
         } catch (\Throwable $e) {
             // Restore our own policy state; claiming already cleared queuing, and newer work must stay intact.
-            $restore();
+            // A send that keeps failing (a rejected address, a mail setting) waits longer each time, then stops.
+            $failed = (int)($row['failed_sends'] ?? 0) + 1;
+            $retry = CartTable::RETRY_MINUTES[$failed - 1] ?? null;
+            $db->update($this->carts->name(), [
+                'reminded_at' => $row['reminded_at'],
+                'failed_sends' => $failed,
+                'skip_until' => $retry !== null ? new Expression('NOW() + INTERVAL ' . $retry . ' MINUTE') : null,
+            ], ['quote_id = ?' => $id, 'delivery_version = ?' => $deliveryVersion]);
+            $this->logger->warning($retry !== null
+                ? sprintf('CommerceKings_AbandonedCart: cart %d send failed (%d), next try in %d minutes', $id, $failed, $retry)
+                : sprintf('CommerceKings_AbandonedCart: cart %d send failed %d times, no further reminder', $id, $failed));
             throw $e;
         }
         if ($status !== MailerInterface::SENT) {

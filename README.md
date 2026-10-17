@@ -46,6 +46,8 @@ Then switch it on in the admin – nothing is sent until you do:
 
 To move a shop from opt-in to opt-out, uninstall the **consent bridge**, the **cookie banner** and **Consent** with
 `bin/magento module:uninstall`, then `composer remove commercekings/privacy-bundle`.
+Subscriptions made with a consent are not used in opt-out mode; a shopper is subscribed again when they enter
+their email.
 
 ## Settings
 

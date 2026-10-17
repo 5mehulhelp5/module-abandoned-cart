@@ -6,6 +6,8 @@ First release. Features:
 
 - Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`): Magento 2.4.0–2.4.3 do not run on PHP 8.1.
 - `cart_reminder` declares its banner category itself (`category = personalization`).
+- A send that keeps failing (e.g. a rejected address) is tried again after 1 hour, 4 hours, 1 day and 1 day, then
+  given up (`ck_abandoned_cart.failed_sends`), instead of every minute until the cart expires.
 - The finder leaves a cart whose recipient is in cooldown (or has no address) out for an hour (`ck_abandoned_cart.skip_until`)
   instead of scanning it again on every run, oldest first, ahead of newer carts.
 - Email prices (item prices, total) are shown in the cart's own currency, as the shopper saw them, without a second

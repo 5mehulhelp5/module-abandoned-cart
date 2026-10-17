@@ -191,6 +191,7 @@ class FindAbandonedCarts
             $this->permission->validCondition('s.permission_ref'),
             'c.queued_at IS NULL',
             '(c.skip_until IS NULL OR c.skip_until <= NOW())',
+            '(c.failed_sends IS NULL OR c.failed_sends <= ' . count(CartTable::RETRY_MINUTES) . ')',
             $this->storeCondition(),
         ];
     }

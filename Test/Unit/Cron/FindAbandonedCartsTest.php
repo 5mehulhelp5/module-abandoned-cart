@@ -82,7 +82,7 @@ class FindAbandonedCartsTest extends TestCase
         $this->finder()->execute();
         $conditions = array_column($this->selectWhere, 0);
         foreach (['q.is_active = 1', 'q.items_count > 0', 'VALID(s.permission_ref)', 'c.queued_at IS NULL',
-            '(c.skip_until IS NULL OR c.skip_until <= NOW())'] as $condition) {
+            '(c.skip_until IS NULL OR c.skip_until <= NOW())', '(c.failed_sends IS NULL OR c.failed_sends <= 4)'] as $condition) {
             $this->assertContains($condition, $conditions);
         }
         $branches = end($conditions);

@@ -8,7 +8,8 @@
         <column xsi:type="timestamp" name="queued_at" on_update="false" nullable="true" comment="Reminder queued"/>
         <column xsi:type="timestamp" name="reminded_at" on_update="false" nullable="true" comment="Reminder sent"/>
         <column xsi:type="int" name="delivery_version" unsigned="true" nullable="false" default="0" comment="Delivery claim version"/>
-        <column xsi:type="timestamp" name="skip_until" on_update="false" nullable="true" comment="Finder skips the cart until then (recipient cooldown)"/>
+        <column xsi:type="timestamp" name="skip_until" on_update="false" nullable="true" comment="Finder skips the cart until then (recipient cooldown, failed send)"/>
+        <column xsi:type="smallint" name="failed_sends" unsigned="true" nullable="false" default="0" comment="Failed send attempts in a row"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="quote_id"/>
         </constraint>

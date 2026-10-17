@@ -19,6 +19,8 @@ use Magento\Framework\DB\Sql\Expression;
 class CartTable
 {
     public const TABLE = 'ck_abandoned_cart';
+    /** Delay before the next try after the 1st, 2nd, ... failed send; after the last one the cart is given up. */
+    public const RETRY_MINUTES = [60, 240, 1440, 1440];
 
     public function __construct(
         private readonly ResourceConnection $resource

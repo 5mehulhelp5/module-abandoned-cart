@@ -36,7 +36,8 @@
             "queue_token": true,
             "reminded_at": true,
             "delivery_version": true,
-            "skip_until": true
+            "skip_until": true,
+            "failed_sends": true
         },
         "constraint": {
             "PRIMARY": true,

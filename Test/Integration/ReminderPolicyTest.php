@@ -492,6 +492,9 @@ class ReminderPolicyTest extends TestCase
                 } finally {
                     $this->sendFails = false;
                 }
+                $this->assertSame(0, $this->finder()->execute(), 'a failed send waits before the next try');
+                $this->resource->getConnection()->update($this->table('ck_abandoned_cart'),
+                    ['skip_until' => gmdate('Y-m-d H:i:s', time() - 60)], ['quote_id = ?' => $quoteId]);
                 $this->assertSame(1, $this->finder()->execute());
                 $this->assertSame($queuedAt, $this->row($quoteId)['queued_at'], 'timestamps alone cannot distinguish the retry');
                 return $original->resolve($quoteId);
