@@ -15,7 +15,10 @@ use CommerceKings\Notification\Api\QueueInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Api\SubscriptionTypeInterface;
 use CommerceKings\Notification\Model\Config as NotificationConfig;
-use CommerceKings\Notification\Model\Mailer;
+use CommerceKings\Notification\Model\OneClickHeaders;
+use CommerceKings\Notification\Model\Provider\MagentoEmail;
+use CommerceKings\Notification\Model\ProviderPool;
+use CommerceKings\Notification\Model\Sender;
 use Magento\Framework\App\Bootstrap;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ResourceConnection;
@@ -109,7 +112,8 @@ if ($mode === 'finder') {
     (new FindAbandonedCarts($config, $resource, $guard, $queue, new OncePerCart(), $lifetime,
         $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class), $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class)))->execute();
 } else {
-    $mailer = new Mailer($builder, $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
+    $mailer = new Sender(new ProviderPool($om->get(NotificationConfig::class), [new MagentoEmail($builder, new OneClickHeaders(),
+        new \Psr\Log\NullLogger())]), $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class));
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class), $data,
         $mailer, $config, $guard, new OncePerCart(), new NullLogger(),
         $lifetime, $recipients, $om->get(NotificationConfig::class),

@@ -30,7 +30,10 @@ use CommerceKings\Notification\Api\QueueInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Model\Config as NotificationConfig;
 use CommerceKings\Notification\Model\Cooldown;
-use CommerceKings\Notification\Model\Mailer;
+use CommerceKings\Notification\Model\OneClickHeaders;
+use CommerceKings\Notification\Model\Provider\MagentoEmail;
+use CommerceKings\Notification\Model\ProviderPool;
+use CommerceKings\Notification\Model\Sender;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\CartRepositoryInterfaceFactory;
@@ -252,7 +255,9 @@ class ReminderPolicyTest extends TestCase
             $data = $this->createStub(ReminderData::class);
             $data->method('build')->willReturn(['customer_name' => '']);
         }
-        $mailer = new Mailer($builder, $this->createStub(Emulation::class), $this->cooldown(), $this->notificationConfig($cooldownDays));
+        $notificationConfig = $this->notificationConfig($cooldownDays);
+        $mailer = new Sender(new ProviderPool($notificationConfig, [new MagentoEmail($builder, new OneClickHeaders(),
+            $this->createStub(\Psr\Log\LoggerInterface::class))]), $this->createStub(Emulation::class), $this->cooldown(), $notificationConfig);
         return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class),
             $data, $mailer, $this->config(), $this->guard(),
             $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->lifetime(),

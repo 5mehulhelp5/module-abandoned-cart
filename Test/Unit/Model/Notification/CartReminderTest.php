@@ -15,7 +15,10 @@ use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use CommerceKings\Notification\Api\CooldownInterface;
 use CommerceKings\Notification\Model\Config as NotificationConfig;
-use CommerceKings\Notification\Model\Mailer;
+use CommerceKings\Notification\Model\OneClickHeaders;
+use CommerceKings\Notification\Model\Provider\MagentoEmail;
+use CommerceKings\Notification\Model\ProviderPool;
+use CommerceKings\Notification\Model\Sender;
 use Magento\Framework\Mail\Template\TransportBuilder;
 use Magento\Framework\Mail\TransportInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
@@ -28,7 +31,7 @@ use Psr\Log\LoggerInterface;
 
 // Shared fixtures use scenario-specific expectations; other outcomes are asserted from captured data.
 #[\PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations]
-/** The cart rules plus the real CommerceKings_Notification Mailer, with Magento's transport stubbed. */
+/** The cart rules plus the real CommerceKings_Notification sender and Magento email provider, with Magento's transport stubbed. */
 class CartReminderTest extends TestCase
 {
     use DbTestTrait;
@@ -147,7 +150,8 @@ class CartReminderTest extends TestCase
             $this->releasedRecipients[] = [$email, $token];
             $this->recipientClaimed = false;
         });
-        $mailer = new Mailer($builder, $this->emulation, $cooldown, $notificationConfig);
+        $provider = new MagentoEmail($builder, new OneClickHeaders(), $this->createStub(\Psr\Log\LoggerInterface::class));
+        $mailer = new Sender(new ProviderPool($notificationConfig, [$provider]), $this->emulation, $cooldown, $notificationConfig);
         $locks = $this->createStub(\Magento\Framework\Lock\LockManagerInterface::class);
         $locks->method('lock')->willReturnCallback(function ($name, $timeout) {
             $this->lockEvents[] = ['lock', $name, $timeout];

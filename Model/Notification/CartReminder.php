@@ -11,9 +11,9 @@ use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Api\Data\ReminderState;
-use CommerceKings\Notification\Api\Data\Message;
-use CommerceKings\Notification\Api\Data\MessageContent;
-use CommerceKings\Notification\Api\MailerInterface;
+use CommerceKings\Notification\Api\Data\Delivery;
+use CommerceKings\Notification\Api\Data\DeliveryContent;
+use CommerceKings\Notification\Api\SenderInterface;
 use CommerceKings\Notification\Api\NotificationTypeInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Exception\MessageSentException;
@@ -37,7 +37,7 @@ use Psr\Log\LoggerInterface;
  * The cart is then claimed with one atomic UPDATE that repeats the cart and permission checks - only one
  * delivery can win, and none after a withdrawal is stored. Mail already handed to the mail server can't
  * be recalled.
- * Sending (recipient cooldown, store emulation, one-click headers) is CommerceKings_Notification's Mailer.
+ * Sending (recipient cooldown, store emulation, one-click headers) is CommerceKings_Notification's sender and its selected provider.
  * A delivery version owns each claim. Failed sends restore the prior reminder timestamp only while that version
  * still matches, leaving a newer delivery or queue mark alone; the exception makes Magento log the failure.
  */
@@ -50,7 +50,7 @@ class CartReminder implements NotificationTypeInterface
         private readonly ResourceConnection $resource,
         private readonly CartRepositoryInterfaceFactory $repositories,
         private readonly ReminderData $reminderData,
-        private readonly MailerInterface $mailer,
+        private readonly SenderInterface $sender,
         private readonly Config $config,
         private readonly SubscriptionPermissionInterface $permission,
         private readonly ReminderPolicyInterface $policy,
@@ -162,12 +162,12 @@ class CartReminder implements NotificationTypeInterface
             ['reminded_at' => $row['reminded_at']],
             // Never undo a newer delivery or decrease the version; a newer queued mark must stay too.
             ['quote_id = ?' => $id, 'delivery_version = ?' => $deliveryVersion]);
-        $message = new Message(
+        $message = new Delivery(
             $storeId,
             $this->config->getTemplate($storeId),
             $this->config->getIdentity($storeId),
             $email,
-            function () use ($id, $row, $email, $storeId): MessageContent {
+            function () use ($id, $row, $email, $storeId): DeliveryContent {
                 // Consumers live across messages; a repository's cached quote must not survive a delivery attempt.
                 $quote = $this->repositories->create()->get($id);
                 if (!$quote instanceof Quote) {
@@ -175,7 +175,7 @@ class CartReminder implements NotificationTypeInterface
                 }
                 $vars = $this->reminderData->build($quote, (string)$row['permission_ref'],
                     ['subscription_id' => (int)$row['subscription_id'], 'email' => $email]);
-                return new MessageContent($vars, $vars['customer_name'] ?? null,
+                return new DeliveryContent($vars, $vars['customer_name'] ?? null,
                     // one-click only with a link to put in the header
                     ($vars['optout_url'] ?? '') !== '' && $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId)
                         ? $vars['optout_url'] : null);
@@ -185,9 +185,9 @@ class CartReminder implements NotificationTypeInterface
             fn (): bool => $this->recipients->resolve($id) === $email
         );
         try {
-            $status = $this->mailer->send($message);
+            $status = $this->sender->send($message);
         } catch (MessageSentException $e) {
-            // SMTP returned successfully. Keep the claim: a later cleanup error must not enable a duplicate.
+            // The provider accepted it. Keep the claim: a later cleanup error must not enable a duplicate.
             $this->logger->error(sprintf('CommerceKings_AbandonedCart: cart %d sent; post-send cleanup failed', $id),
                 ['exception_class' => get_class($e->getPrevious() ?? $e)]);
             throw $e->getPrevious() ?? $e;
@@ -206,7 +206,7 @@ class CartReminder implements NotificationTypeInterface
                 : sprintf('CommerceKings_AbandonedCart: cart %d send failed %d times, no further reminder', $id, $failed));
             throw $e;
         }
-        if ($status !== MailerInterface::SENT) {
+        if ($status !== SenderInterface::SENT) {
             $restore();
             $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $status));
             return;
