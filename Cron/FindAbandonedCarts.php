@@ -33,7 +33,8 @@ use Psr\Log\LoggerInterface;
  * found again.
  *
  * "Maximum reminders per hour": a run only publishes what still fits in the hour (sent plus validly queued); the reminder
- * checks it again when sending. Recipient cooldown suppresses recent addresses. Store settings and policy
+ * checks it again when sending. Recipient cooldown suppresses recent addresses; such a cart is left out for an hour
+ * (skip_until) instead of being scanned again on every run. Store settings and policy
  * conditions are repeated in the queue claim so a stale selection cannot authorize delivery.
  */
 class FindAbandonedCarts
@@ -41,6 +42,8 @@ class FindAbandonedCarts
     private const BATCH = 200;
     private const STUCK_HOURS = 24;
     private const MAX_RUN_SECONDS = 30;
+    /** a cart whose recipient is in cooldown is checked again after this, not on every run */
+    private const SKIP_MINUTES = 60;
 
     public function __construct(
         private readonly Config $config,
@@ -161,9 +164,23 @@ class FindAbandonedCarts
                 $email = $this->recipients->resolve($lastId);
                 if ($email !== null && !$this->cooldown->isRecent($email)) {
                     yield $lastId => (int)$row['subscription_id'];
+                } else {
+                    $this->skip($lastId);
                 }
             }
         } while (count($rows) === self::BATCH);
+    }
+
+    /**
+     * No address or one in the recipient cooldown: leave the cart out of the selection for SKIP_MINUTES, so carts that
+     * cannot be sent yet are not scanned (oldest first) on every run ahead of newer ones.
+     */
+    private function skip(int $quoteId): void
+    {
+        $this->carts->ensure($quoteId);
+        $this->resource->getConnection()->update($this->carts->name(),
+            ['skip_until' => new Expression('NOW() + INTERVAL ' . self::SKIP_MINUTES . ' MINUTE')],
+            ['quote_id = ?' => $quoteId]);
     }
 
     private function eligibleConditions(): array
@@ -173,6 +190,7 @@ class FindAbandonedCarts
             'q.items_count > 0',
             $this->permission->validCondition('s.permission_ref'),
             'c.queued_at IS NULL',
+            '(c.skip_until IS NULL OR c.skip_until <= NOW())',
             $this->storeCondition(),
         ];
     }

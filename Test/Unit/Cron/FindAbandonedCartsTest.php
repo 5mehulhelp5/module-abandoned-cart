@@ -81,7 +81,8 @@ class FindAbandonedCartsTest extends TestCase
     {
         $this->finder()->execute();
         $conditions = array_column($this->selectWhere, 0);
-        foreach (['q.is_active = 1', 'q.items_count > 0', 'VALID(s.permission_ref)', 'c.queued_at IS NULL'] as $condition) {
+        foreach (['q.is_active = 1', 'q.items_count > 0', 'VALID(s.permission_ref)', 'c.queued_at IS NULL',
+            '(c.skip_until IS NULL OR c.skip_until <= NOW())'] as $condition) {
             $this->assertContains($condition, $conditions);
         }
         $branches = end($conditions);
@@ -139,16 +140,25 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertSame(1010, $claim['where']['s.subscription_id = ?'], 'the selected subscription, not a newer one');
         $conditions = self::conditions($claim['where']);
         $this->assertContains('c.queued_at IS NULL', $conditions);
+        $this->assertContains('(c.skip_until IS NULL OR c.skip_until <= NOW())', $conditions);
         $this->assertContains('VALID(s.permission_ref)', $conditions);
         $this->assertStringContainsString('updated_at > NOW() - INTERVAL 30 DAY', implode(' ', $conditions));
     }
 
-    public function testRecentRecipientsAreNotQueued(): void
+    public function testRecentRecipientsAreNotQueuedAndLeftOutForAnHour(): void
     {
         $this->recent = true;
         $this->fetchAllResults = [self::due([10, 11])];
         $this->assertSame(0, $this->finder()->execute());
         $this->assertSame([], $this->published);
+        // not scanned again on every run ahead of newer carts (oldest first)
+        $skips = array_values(array_filter($this->updates, fn ($u) => isset($u['data']['skip_until'])));
+        $this->assertSame([10, 11], array_map(fn ($u) => $u['where']['quote_id = ?'], $skips));
+        $this->assertSame('ck_abandoned_cart', $skips[0]['table'], 'Magento\'s quote row is not written');
+        $this->assertSame(['skip_until'], array_keys($skips[0]['data']), 'queued_at and reminded_at stay untouched');
+        $this->assertSame('NOW() + INTERVAL 60 MINUTE', (string)$skips[0]['data']['skip_until']);
+        $this->assertSame(2, count(array_filter($this->queries, fn ($query) => str_contains($query[0], 'INSERT IGNORE'))),
+            'the send history row exists before the skip is written');
     }
 
     public function testPublishFailureClearsTheMarkAndPropagates(): void
@@ -181,6 +191,8 @@ class FindAbandonedCartsTest extends TestCase
         $this->fetchAllResults = [self::due(range(1, 200)), self::due([201])];
         $this->assertSame(1, $this->finder()->execute());
         $this->assertSame([[CartReminder::CODE, '1201']], $this->published);
+        $this->assertCount(200, array_filter($this->updates, fn ($u) => isset($u['data']['skip_until'])),
+            'carts without an address are left out for an hour too');
         $this->assertSame([[200, 0], [200, 0]], $this->limits);
         $this->assertStringContainsString("q.entity_id > '200'", end($this->selectWhere)[0]);
     }

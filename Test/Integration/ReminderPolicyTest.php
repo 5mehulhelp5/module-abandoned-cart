@@ -158,7 +158,7 @@ class ReminderPolicyTest extends TestCase
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
                 ['subscription_id', 'contact_id', 'permission_ref', 'captured_at'])
             ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id',
-                ['queued_at', 'reminded_at', 'delivery_version'])
+                ['queued_at', 'reminded_at', 'delivery_version', 'skip_until'])
             ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email'])
             ->where('q.entity_id = ?', $id));
     }
@@ -352,6 +352,11 @@ class ReminderPolicyTest extends TestCase
         $this->resource->getConnection()->update($this->table('ck_notification_cooldown'),
             ['sent_at' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)],
             ['recipient_hash = ?' => $this->cooldown()->hash($this->email)]);
+        // the skipped cart is left out for an hour, not scanned again on every run
+        $this->assertNotNull($this->row($second)['skip_until']);
+        $this->assertSame(0, $this->finder()->execute(), 'checked again only after the skip hour');
+        $this->resource->getConnection()->update($this->table('ck_abandoned_cart'),
+            ['skip_until' => gmdate('Y-m-d H:i:s', time() - 60)], ['quote_id = ?' => $second]);
         $this->assertSame(1, $this->finder()->execute());
         $this->assertSame([$second], $this->published);
         $this->consumer()->process($this->subscriptionOf($second));

@@ -132,9 +132,6 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 - One reminder per cart; follow-ups need another reminder policy. The restore link shows the cart as it is now and
   works for 7 days.
 - A worker killed mid-send can leave a cart marked as reminded without an email – it is never sent twice.
-- A cart whose address is in the recipient cooldown is checked again on every finder run until the cooldown ends,
-  oldest first. Many such carts on one address (e.g. scripted guest sign-ups) can use up a run's 30 seconds and
-  delay newer reminders – rate-limit the guest subscribe endpoint.
 
 ## More
 
