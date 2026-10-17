@@ -4,10 +4,13 @@ The first-release runtime target is Magento Open Source 2.4.9 with PHP 8.5 and L
 The Composer PHP range is a dependency constraint, not a claim that every Magento/PHP
 combination has passed runtime testing.
 
+**Minimum: Magento Open Source 2.4.4**, enforced by `magento/framework: ^103.0.4`. Magento 2.4.0–2.4.3
+run only on PHP 7.3/7.4; this package needs PHP 8.1.
+
 | Magento Open Source | PHP | Runtime verification |
 | --- | --- | --- |
 | 2.4.9 | 8.5 | Passed locally: Composer, PHP lint, DI compilation, PHPStan level 5, unit/JavaScript tests and quote integration tests |
-| Other Magento releases | 8.1–8.4 | Unverified; use a matching Magento dependency set and services |
+| 2.4.4–2.4.8 | 8.1–8.4 | Unverified; use a matching Magento dependency set and services |
 
 The shared sandbox also checks consent mapping against temporary database tables,
 the JavaScript lifecycle, and native Vanilla consent choices, guest checkout capture, local
