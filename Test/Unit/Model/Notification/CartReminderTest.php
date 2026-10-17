@@ -122,7 +122,7 @@ class CartReminderTest extends TestCase
             if ($this->sendFails) {
                 throw new \RuntimeException('SMTP down');
             }
-            if ($this->oneClick && $this->optoutUrl !== '') { $this->assertNotNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'Apply headers before sending'); }
+            if ($this->oneClick && $this->optoutUrl !== '' && $this->headerSupport) { $this->assertNotNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'Apply headers before sending'); }
             $this->sentMessages++;
         });
         $builder = $this->createStub(TransportBuilder::class);
@@ -501,19 +501,14 @@ class CartReminderTest extends TestCase
         $this->assertNull($this->updates[1]['data']['reminded_at']);
     }
 
-    public function testUnsupportedOneClickMessageDoesNotSendAndReleasesTheClaim(): void
+    public function testUnsupportedOneClickMessageStillSendsWithoutTheHeaders(): void
     {
+        // e.g. a mail transport replaced by an SMTP extension: Notification logs a warning instead of failing
         $this->oneClick = true;
         $this->headerSupport = false;
-        try {
-            $this->consumer()->process('42');
-            $this->fail('Expected unsupported message');
-        } catch (\UnexpectedValueException $error) {
-            $this->assertStringContainsString('does not support one-click', $error->getMessage());
-        }
-        $this->assertSame(0, $this->sentMessages);
-        $this->assertCount(2, $this->updates);
-        $this->assertNull($this->updates[1]['data']['reminded_at']);
+        $this->consumer()->process('42');
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'));
     }
 
     public function testPostSendCleanupFailureCannotReleaseTheClaimForAnotherEmail(): void

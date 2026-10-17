@@ -30,6 +30,12 @@ composer require commercekings/module-abandoned-cart:^0.1 commercekings/privacy-
 bin/magento setup:upgrade
 ```
 
+Then switch it on in the admin – nothing is sent until you do:
+
+1. **Stores > Configuration > CommerceKings > Abandoned Cart > Enabled**: Yes.
+2. Opt-in only: **Stores > Configuration > CommerceKings > Consent > Source**: *Cookie banner (vanilla-cookieconsent)*.
+   Without a source, no shopper has consent and no reminder is sent.
+
 | | Opt-out | Opt-in |
 |---|---|---|
 | Who gets a reminder | every shopper who entered an email | only with consent for `cart_reminder` |
@@ -126,6 +132,9 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 - One reminder per cart; follow-ups need another reminder policy. The restore link shows the cart as it is now and
   works for 7 days.
 - A worker killed mid-send can leave a cart marked as reminded without an email – it is never sent twice.
+- A cart whose address is in the recipient cooldown is checked again on every finder run until the cooldown ends,
+  oldest first. Many such carts on one address (e.g. scripted guest sign-ups) can use up a run's 30 seconds and
+  delay newer reminders – rate-limit the guest subscribe endpoint.
 
 ## More
 
