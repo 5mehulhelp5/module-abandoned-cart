@@ -35,7 +35,7 @@ bin/magento setup:upgrade
 | Who gets a reminder | every shopper who entered an email | only with consent for `cart_reminder` |
 | Checkout notice | on, optional | off |
 | Email button | opens the cart page | restores the saved cart, only in the browser that consented |
-| Unsubscribe link | none until you add your own page | signed link, optional one-click headers |
+| Unsubscribe link | **none – you must add your own** ([how](#your-own-unsubscribe-page)) | signed link, optional one-click headers |
 | Consent tables | none | created |
 
 To move a shop from opt-in to opt-out, uninstall the **consent bridge**, the **cookie banner** and **Consent** with
@@ -64,6 +64,8 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 
 ## Before going live
 
+- **Opt-out:** add your own unsubscribe page ([how](#your-own-unsubscribe-page)). Without it, reminders go out with
+  no unsubscribe link. In the EU, every marketing email must offer one (ePrivacy Directive, Art. 13).
 - Set *Maximum reminders per hour* to your email provider's limit.
 
 **Recommended**
@@ -86,6 +88,31 @@ Replace any of these with a DI preference:
 `Api\UnsubscribeLinkInterface` – your own unsubscribe page
 
 `Api\ReminderEmailResolverInterface` – where the recipient comes from
+
+### Your own unsubscribe page
+
+Opt-out has no consent to withdraw: unsubscribing removes the shopper's subscription, so no further reminders are
+sent. Implement `Api\UnsubscribeLinkInterface` to put your link into the email (`{{var optout_url}}`), and remove the
+subscription on your page:
+
+```php
+// Your link, e.g. https://shop.example/unsubscribe?id=123&sig=…
+public function getUrl(UnsubscribeContext $context): string
+{
+    $id = (int)$context->getAttribute('subscription_id');
+    return $this->url->getUrl('acme/unsubscribe', ['_query' => ['id' => $id, 'sig' => $this->sign($id)]]);
+}
+
+// Your controller, after checking the signature
+$this->subscriptionRemoval->remove($id); // CommerceKings\Notification\Api\SubscriptionRemovalInterface
+```
+
+```xml
+<preference for="CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface" type="Acme\Unsubscribe\Model\Link"/>
+```
+
+Sign the link (e.g. an HMAC of the id), so nobody can unsubscribe someone else. If you turn on *One-click
+unsubscribe*, your page must also accept the mail client's POST.
 
 ## Where it shines
 
