@@ -103,7 +103,12 @@ class Restore extends Action implements HttpGetActionInterface, HttpPostActionIn
         } catch (LocalizedException $error) {
             $this->messageManager->addNoticeMessage($error->getMessage());
         } catch (\Throwable $error) {
-            $this->logger->error('CommerceKings_AbandonedCart: cart restore failed.', ['exception' => $error]);
+            // Exception messages may contain cart or customer data; log type and origin only.
+            $this->logger->error(sprintf('CommerceKings_AbandonedCart: cart %d restore failed', $quoteId), [
+                'exception_class' => get_class($error),
+                'exception_code' => $error->getCode(),
+                'at' => $error->getFile() . ':' . $error->getLine(),
+            ]);
             $this->messageManager->addErrorMessage(__('We could not restore your saved cart. Please try again.'));
         }
         return $redirect->setPath('checkout/cart');
