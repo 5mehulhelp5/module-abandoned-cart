@@ -12,6 +12,7 @@ use Magento\Framework\Escaper;
 use Magento\Directory\Model\Currency;
 use Magento\Directory\Model\CurrencyFactory;
 use Magento\Framework\Pricing\PriceCurrencyInterface;
+use Magento\Tax\Model\Config as TaxConfig;
 use Magento\Framework\UrlInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\Quote\Item;
@@ -42,6 +43,7 @@ class ReminderData
         private readonly ProductConfiguration $productConfiguration,
         private readonly PriceCurrencyInterface $priceCurrency,
         private readonly CurrencyFactory $currencyFactory,
+        private readonly TaxConfig $taxConfig,
         private readonly UrlInterface $url,
         private readonly Escaper $escaper,
         private readonly UnsubscribeLinkInterface $unsubscribeLinks,
@@ -124,7 +126,7 @@ class ReminderData
                 . '<strong>' . $this->escaper->escapeHtml($item->getName()) . '</strong>'
                 . '<span style="color: #77797c; font-size: 13px; line-height: 20px;">' . $optionLines . '</span></td>'
                 . '<td align="right" style="' . self::FONT . ' padding: 12px 0; vertical-align: top; border-bottom: 1px solid #eeeeee; color: #222529; font-size: 15px; line-height: 22px; white-space: nowrap;">'
-                . (float)$item->getQty() . ' × ' . $this->price((float)$item->getPrice(), $quote) . '</td>'
+                . (float)$item->getQty() . ' × ' . $this->unitPrice($item, $quote) . '</td>'
                 . '</tr>';
         }
         return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width: 100%;">' . $rows . '</table>';
@@ -141,7 +143,25 @@ class ReminderData
     }
 
     /**
-     * Cart amounts are already in the cart's currency (the one the shopper saw): format them in it, never convert
+     * The unit price as Magento's cart shows it (Tax > Shopping Cart Display Settings > Display Prices: excluding tax,
+     * including tax, or both), in the cart's currency. Like Magento: including tax is price_incl_tax (cart currency);
+     * excluding tax is the item price, which Magento keeps in the base currency, converted at the cart's own rate.
+     */
+    private function unitPrice(Item $item, Quote $quote): string
+    {
+        $store = $quote->getStoreId();
+        $rate = (float)$quote->getBaseToQuoteRate() ?: 1.0;
+        $excl = $this->price(round((float)$item->getPrice() * $rate, 2), $quote);
+        $incl = $this->price((float)$item->getPriceInclTax(), $quote);
+        if ($this->taxConfig->displayCartPricesBoth($store)) {
+            return $this->escaper->escapeHtml(__('Excl. Tax')) . ': ' . $excl . '<br>'
+                . $this->escaper->escapeHtml(__('Incl. Tax')) . ': ' . $incl;
+        }
+        return $this->taxConfig->displayCartPricesInclTax($store) ? $incl : $excl;
+    }
+
+    /**
+     * Cart amounts (the total, price incl. tax) are already in the cart's currency (the one the shopper saw): format them in it, never convert
      * again from the base currency.
      */
     private function price(float $amount, Quote $quote): string

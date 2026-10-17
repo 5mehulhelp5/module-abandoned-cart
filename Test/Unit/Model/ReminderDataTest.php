@@ -40,6 +40,9 @@ class ReminderDataTest extends TestCase
     private array $formatted = [];
     private array $loaded = [];
     private string $quoteCurrency = 'EUR';
+    private float $baseToQuoteRate = 1.0;
+    /** Tax > Shopping Cart Display Settings > Display Prices: 1 excluding, 2 including, 3 both */
+    private int $cartPriceDisplay = 1;
 
     private function data(array $customOptions = []): ReminderData
     {
@@ -84,7 +87,11 @@ class ReminderDataTest extends TestCase
         $subscriptions = $this->createStub(SubscriptionRepositoryInterface::class);
         $subscriptions->method('get')->willReturnCallback(fn ($id) => new Subscription((int)$id, 'cart_reminder', 42, 1, 5, null,
             'cid-1', '2026-01-01 00:00:00'));
-        return new ReminderData($image, $configuration, $price, $currencies, $url, $escaper,
+        $tax = $this->createStub(\Magento\Tax\Model\Config::class);
+        $tax->method('displayCartPricesExclTax')->willReturnCallback(fn () => $this->cartPriceDisplay === 1);
+        $tax->method('displayCartPricesInclTax')->willReturnCallback(fn () => $this->cartPriceDisplay === 2);
+        $tax->method('displayCartPricesBoth')->willReturnCallback(fn () => $this->cartPriceDisplay === 3);
+        return new ReminderData($image, $configuration, $price, $currencies, $tax, $url, $escaper,
             $this->unsubscribe ?? new SubscriberUnsubscribeLink($subscriptions, $subscriber), $signature, $subscriber);
     }
 
@@ -94,7 +101,7 @@ class ReminderDataTest extends TestCase
         return $this->mockWith(Quote::class, [
             'getId' => 42, 'getStoreId' => 1, 'getCustomerId' => null, 'getCustomerFirstname' => $firstname, 'getCustomerEmail' => 'a@test.com',
             'getBillingAddress' => $billing, 'getAllVisibleItems' => $items, 'getGrandTotal' => 2400.0,
-            'getQuoteCurrencyCode' => $this->quoteCurrency,
+            'getQuoteCurrencyCode' => $this->quoteCurrency, 'getBaseToQuoteRate' => $this->baseToQuoteRate,
         ]);
     }
 
@@ -103,7 +110,7 @@ class ReminderDataTest extends TestCase
         $product = $this->createStub(Product::class);
         return $this->mockWith(Item::class, [
             'getProduct' => $product, 'getOptionByCode' => null, 'getProductType' => 'simple',
-            'getName' => $name, 'getQty' => 1, 'getPrice' => 2400.0,
+            'getName' => $name, 'getQty' => 1, 'getPrice' => 2400.0, 'getPriceInclTax' => 2880.0,
         ]);
     }
 
@@ -148,8 +155,25 @@ class ReminderDataTest extends TestCase
         $vars = $this->data()->build($this->quote([$this->item('Bag')]), 'cid-1');
         $this->assertSame('CHF 2,400.00', $vars['grand_total']);
         $this->assertStringContainsString('1 × CHF 2,400.00', $vars['items_html']);
-        $this->assertSame([[2400.0, 1, 'CHF'], [2400.0, 1, 'CHF']], $this->formatted, 'every amount: cart currency, its store');
+        $this->assertSame([[2400.0, 1, 'CHF'], [2880.0, 1, 'CHF'], [2400.0, 1, 'CHF']], $this->formatted,
+            'every amount: cart currency, its store');
         $this->assertSame(['CHF'], $this->loaded, 'the currency is loaded once per email');
+    }
+
+    public function testItemPricesFollowMagentosCartDisplaySettingInTheCartsCurrency(): void
+    {
+        // base EUR, cart in USD at 1.10: Magento keeps the item price (excl. tax) in base, price_incl_tax in the cart's
+        $this->quoteCurrency = 'USD';
+        $this->baseToQuoteRate = 1.1;
+        $quote = fn () => $this->quote([$this->item('Bag')]);
+
+        $this->assertStringContainsString('1 × $2,640.00</td>', $this->data()->build($quote(), 'cid-1')['items_html'],
+            'excluding tax: the base price converted at the cart\'s rate');
+        $this->cartPriceDisplay = 2;
+        $this->assertStringContainsString('1 × $2,880.00</td>', $this->data()->build($quote(), 'cid-1')['items_html']);
+        $this->cartPriceDisplay = 3;
+        $this->assertStringContainsString('1 × Excl. Tax: $2,640.00<br>Incl. Tax: $2,880.00</td>',
+            $this->data()->build($quote(), 'cid-1')['items_html']);
     }
 
     public function testGreetingFallsBackToBillingNameThenEmpty(): void
