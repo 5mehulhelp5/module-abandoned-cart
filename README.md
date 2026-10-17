@@ -2,7 +2,7 @@
 
 Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · RabbitMQ or MySQL queue
 
-[![License](https://badgen.net/github/license/commercekings/module-abandoned-cart)](LICENSE) [![Release](https://badgen.net/github/release/commercekings/module-abandoned-cart)](https://github.com/commercekings/module-abandoned-cart/releases) [![Checks](https://badgen.net/github/checks/commercekings/module-abandoned-cart/main?label=checks)](https://github.com/commercekings/module-abandoned-cart/actions)
+[![License](https://badgen.net/github/license/commercekings/module-abandoned-cart)](LICENSE) [![Release](https://badgen.net/github/release/commercekings/module-abandoned-cart)](https://github.com/commercekings/module-abandoned-cart/releases) [![Checks](https://github.com/commercekings/module-abandoned-cart/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/commercekings/module-abandoned-cart/actions/workflows/checks.yml)
 
 **Everyday reliable, never slows your store.** A well-timed email for every abandoned cart.
 
