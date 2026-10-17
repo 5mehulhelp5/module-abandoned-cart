@@ -1,6 +1,4 @@
-<a href="https://commercekings.net"><img align="right" width="152" src=".github/commercekings.svg" alt="Built by CommerceKings. Ready to sell more? Talk to us"></a>
-
-# Flash-Sale-Ready Abandoned Cart
+# <a href="https://commercekings.net"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/commercekings/module-abandoned-cart/main/.github/commercekings-dark.svg"><img align="right" width="152" src="https://raw.githubusercontent.com/commercekings/module-abandoned-cart/main/.github/commercekings-light.svg" alt="Built by CommerceKings. Ready to sell more? Talk to us"></picture></a>Flash-Sale-Ready Abandoned Cart
 
 Works with Magento 2.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · RabbitMQ or MySQL queue
 
