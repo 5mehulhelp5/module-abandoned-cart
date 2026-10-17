@@ -345,7 +345,7 @@ class CartReminderTest extends TestCase
         $this->assertSame('NOW()', (string)$claim['data']['c.reminded_at']);
         $this->assertSame(42, $claim['where']['c.quote_id = ?']);
         $this->assertContains('c.reminded_at IS NULL', self::conditions($claim['where']));
-        // Codex finding 1: the claim repeats the cart and consent checks in the same statement
+        // The claim repeats the cart and consent checks in the same statement
         $this->assertSame(1, $claim['where']['q.is_active = ?']);
         $this->assertContains('q.items_count > 0', self::conditions($claim['where']));
         $this->assertSame(9, $claim['where']['s.subscription_id = ?']);
@@ -373,7 +373,7 @@ class CartReminderTest extends TestCase
         $this->assertSame(['subscription_id' => 9, 'email' => 'a@test.com'], $this->built[2]);
     }
 
-    public function testCodexFinding1WithdrawalBetweenCheckAndClaimSendsNothing(): void
+    public function testWithdrawalBetweenCheckAndClaimSendsNothing(): void
     {
         // the checks above passed, then the visitor withdrew: the claim's own consent check fails, 0 rows
         $consumer = $this->consumer();
