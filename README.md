@@ -70,6 +70,12 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; keep the unsubscribe line inside
 `{{depend optout_url}}`.
 
+## Guest becomes a customer
+
+When a guest registers or signs in, the reminder goes to the account email, never to the address typed as a guest.
+The customer's subscription replaces the guest one when they open checkout. If Magento merges the guest cart into an
+existing customer cart, the guest address is removed by the nightly cleanup.
+
 ## Before going live
 
 - **Opt-out:** add your own unsubscribe page ([how](#your-own-unsubscribe-page)). Without it, reminders go out with
