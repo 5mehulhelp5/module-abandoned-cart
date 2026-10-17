@@ -6,6 +6,8 @@ First release. Features:
 
 - Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`): Magento 2.4.0–2.4.3 do not run on PHP 8.1.
 - `cart_reminder` declares its banner category itself (`category = personalization`).
+- Email prices (item prices, total) are shown in the cart's own currency, as the shopper saw them, without a second
+  conversion from the base currency.
 - The `cart_reminder` consent purpose is active only with the consent bridge, so a banner in the opt-out setup shows
   no reminder switch.
 - **Opt-out without an extra module:** installed alone, abandoned cart runs opt-out. The checkout notice under the

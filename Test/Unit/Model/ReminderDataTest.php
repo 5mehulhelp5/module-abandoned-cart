@@ -17,7 +17,7 @@ use Magento\Catalog\Helper\Product\Configuration as ProductConfiguration;
 use Magento\Catalog\Model\Product;
 use Magento\Catalog\Model\Product\Type\AbstractType;
 use Magento\Framework\Escaper;
-use Magento\Framework\Pricing\Helper\Data as PriceHelper;
+use Magento\Framework\Pricing\PriceCurrencyInterface;
 use Magento\Framework\UrlInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\Quote\Address;
@@ -37,6 +37,9 @@ class ReminderDataTest extends TestCase
 
     private array $urls = [];
     private array $imageProducts = [];
+    private array $formatted = [];
+    private array $loaded = [];
+    private string $quoteCurrency = 'EUR';
 
     private function data(array $customOptions = []): ReminderData
     {
@@ -47,8 +50,22 @@ class ReminderDataTest extends TestCase
         });
         $configuration = $this->createStub(ProductConfiguration::class);
         $configuration->method('getCustomOptions')->willReturn($customOptions);
-        $price = $this->createStub(PriceHelper::class);
-        $price->method('currency')->willReturnCallback(fn ($amount) => '€' . number_format((float)$amount, 2, '.', ','));
+        // format() only: a conversion (convert / convertAndFormat) would return null and fail the assertions
+        $price = $this->createStub(PriceCurrencyInterface::class);
+        $price->method('format')->willReturnCallback(function ($amount, $container, $precision, $scope, $currency) {
+            $code = $currency?->getCode();
+            $this->formatted[] = [$amount, $scope, $code];
+            return ['EUR' => '€', 'USD' => '$', 'CHF' => 'CHF '][$code ?? 'EUR'] . number_format((float)$amount, 2, '.', ',');
+        });
+        $currencies = $this->createStub(\Magento\Directory\Model\CurrencyFactory::class);
+        $currencies->method('create')->willReturnCallback(function () {
+            $currency = $this->createStub(\Magento\Directory\Model\Currency::class);
+            $currency->method('load')->willReturnCallback(function ($code) use ($currency) {
+                $this->loaded[] = $code;
+                return $this->mockWith(\Magento\Directory\Model\Currency::class, ['getCode' => $code]);
+            });
+            return $currency;
+        });
         $url = $this->createStub(UrlInterface::class);
         $url->method('getUrl')->willReturnCallback(function ($route, $params = []) {
             $this->urls[$route] = $params;
@@ -67,7 +84,7 @@ class ReminderDataTest extends TestCase
         $subscriptions = $this->createStub(SubscriptionRepositoryInterface::class);
         $subscriptions->method('get')->willReturnCallback(fn ($id) => new Subscription((int)$id, 'cart_reminder', 42, 1, 5, null,
             'cid-1', '2026-01-01 00:00:00'));
-        return new ReminderData($image, $configuration, $price, $url, $escaper,
+        return new ReminderData($image, $configuration, $price, $currencies, $url, $escaper,
             $this->unsubscribe ?? new SubscriberUnsubscribeLink($subscriptions, $subscriber), $signature, $subscriber);
     }
 
@@ -77,6 +94,7 @@ class ReminderDataTest extends TestCase
         return $this->mockWith(Quote::class, [
             'getId' => 42, 'getStoreId' => 1, 'getCustomerId' => null, 'getCustomerFirstname' => $firstname, 'getCustomerEmail' => 'a@test.com',
             'getBillingAddress' => $billing, 'getAllVisibleItems' => $items, 'getGrandTotal' => 2400.0,
+            'getQuoteCurrencyCode' => $this->quoteCurrency,
         ]);
     }
 
@@ -121,6 +139,17 @@ class ReminderDataTest extends TestCase
         $vars = $this->data()->build($this->quote(), 'cid-1');
         $this->assertSame('€2,400.00', $vars['grand_total']);
         $this->assertSame('Jane', $vars['customer_name']);
+    }
+
+    public function testAmountsStayInTheCartsCurrencyWithoutConversion(): void
+    {
+        // the shopper browsed in CHF while the base currency is EUR: the cart already holds CHF amounts
+        $this->quoteCurrency = 'CHF';
+        $vars = $this->data()->build($this->quote([$this->item('Bag')]), 'cid-1');
+        $this->assertSame('CHF 2,400.00', $vars['grand_total']);
+        $this->assertStringContainsString('1 × CHF 2,400.00', $vars['items_html']);
+        $this->assertSame([[2400.0, 1, 'CHF'], [2400.0, 1, 'CHF']], $this->formatted, 'every amount: cart currency, its store');
+        $this->assertSame(['CHF'], $this->loaded, 'the currency is loaded once per email');
     }
 
     public function testGreetingFallsBackToBillingNameThenEmpty(): void

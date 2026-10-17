@@ -9,7 +9,9 @@ use CommerceKings\Notification\Api\SubscriberInterface;
 use Magento\Catalog\Helper\Image as ImageHelper;
 use Magento\Catalog\Helper\Product\Configuration as ProductConfiguration;
 use Magento\Framework\Escaper;
-use Magento\Framework\Pricing\Helper\Data as PriceHelper;
+use Magento\Directory\Model\Currency;
+use Magento\Directory\Model\CurrencyFactory;
+use Magento\Framework\Pricing\PriceCurrencyInterface;
 use Magento\Framework\UrlInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\Quote\Item;
@@ -32,10 +34,14 @@ class ReminderData
     // no font of its own: the item rows take the email template's font
     private const FONT = '';
 
+    /** @var array<string, Currency> */
+    private array $currencies = [];
+
     public function __construct(
         private readonly ImageHelper $imageHelper,
         private readonly ProductConfiguration $productConfiguration,
-        private readonly PriceHelper $priceHelper,
+        private readonly PriceCurrencyInterface $priceCurrency,
+        private readonly CurrencyFactory $currencyFactory,
         private readonly UrlInterface $url,
         private readonly Escaper $escaper,
         private readonly UnsubscribeLinkInterface $unsubscribeLinks,
@@ -54,7 +60,7 @@ class ReminderData
         return [
             'customer_name' => $this->greetingName((string)($quote->getCustomerFirstname() ?: $quote->getBillingAddress()->getFirstname())),
             'items_html' => $this->itemsHtml($quote),
-            'grand_total' => $this->price((float)$quote->getGrandTotal()),
+            'grand_total' => $this->price((float)$quote->getGrandTotal(), $quote),
             'restore_url' => $this->restoreUrl($quote),
             'store_url' => $this->url->getUrl('', ['_nosid' => true]),
             'contact_url' => $this->url->getUrl('contact', ['_nosid' => true]),
@@ -118,7 +124,7 @@ class ReminderData
                 . '<strong>' . $this->escaper->escapeHtml($item->getName()) . '</strong>'
                 . '<span style="color: #77797c; font-size: 13px; line-height: 20px;">' . $optionLines . '</span></td>'
                 . '<td align="right" style="' . self::FONT . ' padding: 12px 0; vertical-align: top; border-bottom: 1px solid #eeeeee; color: #222529; font-size: 15px; line-height: 22px; white-space: nowrap;">'
-                . (float)$item->getQty() . ' × ' . $this->price((float)$item->getPrice()) . '</td>'
+                . (float)$item->getQty() . ' × ' . $this->price((float)$item->getPrice(), $quote) . '</td>'
                 . '</tr>';
         }
         return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width: 100%;">' . $rows . '</table>';
@@ -134,8 +140,16 @@ class ReminderData
         return preg_match('/^[\p{L}\'-]{1,20}$/u', $first) ? $first : '';
     }
 
-    private function price(float $amount): string
+    /**
+     * Cart amounts are already in the cart's currency (the one the shopper saw): format them in it, never convert
+     * again from the base currency.
+     */
+    private function price(float $amount, Quote $quote): string
     {
-        return (string)$this->priceHelper->currency($amount, true, false);
+        // a Currency, not its code: for a code without an exchange rate Magento would format in the base currency
+        $code = (string)$quote->getQuoteCurrencyCode();
+        $currency = $code !== '' ? $this->currencies[$code] ??= $this->currencyFactory->create()->load($code) : null;
+        return (string)$this->priceCurrency->format($amount, false, PriceCurrencyInterface::DEFAULT_PRECISION,
+            $quote->getStoreId(), $currency);
     }
 }
