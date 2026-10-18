@@ -18,6 +18,7 @@ use Magento\Store\Api\Data\StoreInterface;
 use Magento\Store\Model\StoreManagerInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use CommerceKings\AbandonedCart\Test\Unit\Fixture\TestReminderType;
 
 class FindAbandonedCartsTest extends TestCase
 {
@@ -33,9 +34,12 @@ class FindAbandonedCartsTest extends TestCase
     private bool $recent = false;
     private bool $publishFails = false;
     private int $perHour = 0;
+    /** cooldown checks: [channel, recipient] */
+    private array $cooldownAsked = [];
     private array $logs = [];
 
-    private function finder(bool $enabled = true): FindAbandonedCarts
+    /** @param \CommerceKings\AbandonedCart\Api\ReminderTypeInterface[] $extra more reminder types after email */
+    private function finder(bool $enabled = true, array $extra = []): FindAbandonedCarts
     {
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturnCallback(fn ($id) => $enabled && $id !== 3);
@@ -63,10 +67,14 @@ class FindAbandonedCartsTest extends TestCase
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(fn ($id) => in_array($id, $this->unresolved, true) ? null : 'fixture@example.test');
         $cooldown = $this->createStub(CooldownInterface::class);
-        $cooldown->method('isRecent')->willReturnCallback(fn () => $this->recent);
-        return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue,
-            $this->policy ?? new OncePerCart(), $lifetime, $stores, $logger, $recipients, $cooldown, $this->carts(),
-            $this->quietHours(), $this->subscriptionType());
+        $cooldown->method('isRecentFor')->willReturnCallback(function ($channel, $recipient) {
+            $this->cooldownAsked[] = [$channel, $recipient];
+            return $this->recent;
+        });
+        return new FindAbandonedCarts($this->resource(), $this->guard(), $queue, $lifetime, $stores, $logger, $cooldown,
+            $this->carts(), $this->quietHours(), new \CommerceKings\AbandonedCart\Model\ReminderTypePool(['cart_reminder' =>
+                $this->emailReminder($config, $recipients, null, $this->policy ?? new OncePerCart())]
+                + array_combine(array_map(fn ($type) => $type->getCode(), $extra), $extra)));
     }
 
     private function quietHours(): \CommerceKings\Notification\Api\QuietHoursInterface
@@ -77,13 +85,6 @@ class FindAbandonedCartsTest extends TestCase
             return $this->quiet || ($this->quietPerRecipient && $recipient !== null);
         });
         return $quiet;
-    }
-
-    private function subscriptionType(): \CommerceKings\AbandonedCart\Model\Notification\CartSubscription
-    {
-        $type = $this->createStub(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class);
-        $type->method('getChannel')->willReturn('email');
-        return $type;
     }
 
     /** A store in quiet hours for the reminder's channel queues nothing while they last. */
@@ -259,5 +260,47 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertSame(0, $this->finder()->execute(), 'the hour is used up; the rest waits');
         $this->assertSame([], $this->published);
         $this->assertContains(['type = ?', 'cart_reminder'], $this->selectWhere, 'only cart reminders count');
+    }
+
+    /** A channel module's type: its own carts, code, channel, cooldown key and stuck reset; email is unchanged. */
+    public function testEachReminderTypeQueuesItsOwnCarts(): void
+    {
+        $this->fetchAllResults = [self::due([10]), self::due([20])];
+        $this->assertSame(2, $this->finder(true, [new TestReminderType()])->execute());
+        $this->assertSame([[CartReminder::CODE, '1010'], ['cart_reminder_test', '1020']], $this->published);
+        $this->assertSame([['email', 'fixture@example.test'], ['sms', '+381601234567']], $this->cooldownAsked,
+            'each recipient checked on its own channel');
+        $stuck = array_values(array_filter($this->updates, fn ($u) => isset($u['where']['type = ?'])));
+        $this->assertSame([CartReminder::CODE, 'cart_reminder_test'], array_map(fn ($u) => $u['where']['type = ?'], $stuck));
+        $claims = array_values(array_filter($this->updates, fn ($u) => isset($u['where']['c.type = ?'])));
+        $this->assertSame([[CartReminder::CODE, 10], ['cart_reminder_test', 20]],
+            array_map(fn ($u) => [$u['where']['c.type = ?'], $u['where']['c.reference_id = ?']], $claims),
+            'every claim names its own type: one send history per type and cart');
+        $this->assertSame(['email', 'sms'], array_values(array_unique(array_column($this->quietAsked, 1))));
+    }
+
+    /** One hourly limit per type (its own provider): a full email hour does not stop another channel. */
+    public function testEachTypeHasItsOwnHourlyLimit(): void
+    {
+        $this->perHour = 1;
+        $this->fetchOneResults = [1, 0, 0, 0]; // email: 1 sent, 0 queued; test type: 0 sent, 0 queued
+        $this->fetchAllResults = [self::due([20])];
+        $published = $this->finder(true, [new TestReminderType(perHour: 5)])->execute();
+        $this->assertSame(1, $published);
+        $this->assertSame([['cart_reminder_test', '1020']], $this->published, 'email\'s hour is used up, the other is not');
+        $this->assertContains(['type = ?', CartReminder::CODE], $this->selectWhere);
+        $this->assertContains(['type = ?', 'cart_reminder_test'], $this->selectWhere);
+    }
+
+    /** A type that is off in every store, or a recipient it cannot find, never touches the email reminder. */
+    public function testAnotherTypeOffOrWithoutRecipientIsLeftAlone(): void
+    {
+        $this->fetchAllResults = [self::due([10]), self::due([20])];
+        $published = $this->finder(true, [new TestReminderType(enabled: false),
+            new TestReminderType('cart_reminder_other', 'viber', recipients: [20 => null])])->execute();
+        $this->assertSame(1, $published);
+        $this->assertSame([[CartReminder::CODE, '1010']], $this->published);
+        $skips = array_values(array_filter($this->updates, fn ($u) => isset($u['data']['skip_until'])));
+        $this->assertSame('cart_reminder_other', $skips[0]['where']['type = ?'], 'no recipient: its own cart is skipped');
     }
 }

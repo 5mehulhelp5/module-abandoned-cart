@@ -188,7 +188,12 @@ class CartSubscriptionTest extends TestCase
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturn($enabled);
         $type = new CartSubscription($this->om->get(QuoteIdMaskFactory::class), $this->om->get(QuoteIdMask::class),
-            $scope ?? $this->om->get(QuoteScope::class), $config, $this->resource);
+            $scope ?? $this->om->get(QuoteScope::class), $this->resource,
+            new \CommerceKings\AbandonedCart\Model\Reminder\EmailReminder($config,
+                $this->om->get(\CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface::class),
+                $this->createStub(\CommerceKings\AbandonedCart\Model\ReminderData::class),
+                new \CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart(),
+                $this->om->get(\CommerceKings\Notification\Model\Config::class)));
         $types = new SubscriptionTypePool([CartReminder::CODE => $type]);
         return new SubscriptionManagement($this->resource, $types,
             new \CommerceKings\Notification\Model\PermissionResolver(new ConsentPermission($consent ?? $this->consent(), $guard,

@@ -242,13 +242,22 @@ class ReminderPolicyTest extends TestCase
                 throw new \RuntimeException('Fixture queue failure');
             }
         });
-        return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
-            $this->policy ?? new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
-            $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class),
-            $this->quietHours(), $this->om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class));
+        return new FindAbandonedCarts($this->resource, $this->guard(), $queue, $this->lifetime(), $stores,
+            $this->createStub(LoggerInterface::class), $this->cooldown(), $this->om->get(CartTable::class), $this->quietHours(),
+            new \CommerceKings\AbandonedCart\Model\ReminderTypePool(['cart_reminder' => $this->emailReminder()]));
     }
 
-    private function consumer(?callable $send = null, int $cooldownDays = 7, ?ReminderData $data = null): CartReminder
+    /** The built-in email reminder over the fixture config, the real email resolver and this test's policy. */
+    private function emailReminder(?ReminderData $data = null, ?ReminderEmailResolverInterface $recipients = null)
+        : \CommerceKings\AbandonedCart\Model\Reminder\EmailReminder
+    {
+        return new \CommerceKings\AbandonedCart\Model\Reminder\EmailReminder($this->config(),
+            $recipients ?? $this->om->get(ReminderEmailResolverInterface::class),
+            $data ?? $this->createStub(ReminderData::class), $this->policy ?? new OncePerCart(), $this->notificationConfig());
+    }
+
+    private function consumer(?callable $send = null, int $cooldownDays = 7, ?ReminderData $data = null,
+        ?ReminderEmailResolverInterface $recipients = null): CartReminder
     {
         $transport = $this->createStub(TransportInterface::class);
         $transport->method('sendMessage')->willReturnCallback(function () use ($send) {
@@ -270,31 +279,17 @@ class ReminderPolicyTest extends TestCase
             $this->createStub(\Psr\Log\LoggerInterface::class))]), $this->createStub(Emulation::class), $this->cooldown(), $notificationConfig,
             new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->om->get(\CommerceKings\Notification\Api\StopListInterface::class),
             $this->quietHours());
-        return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class),
-            $data, $mailer, $this->config(), $this->guard(),
-            $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->lifetime(),
-            $this->om->get(ReminderEmailResolverInterface::class),
-            $this->notificationConfig(), $this->om->get(CartTable::class),
+        return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class), $mailer,
+            $this->guard(), $this->createStub(LoggerInterface::class), $this->lifetime(), $this->om->get(CartTable::class),
             $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class),
-            $this->om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class),
-        $this->om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class), $this->quietHours());
+            $this->om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class), $this->quietHours(),
+            $this->emailReminder($data, $recipients));
     }
 
     /** Quiet hours never hold these fixtures: the store's own settings stay out of the policy checks. */
     private function quietHours(): \CommerceKings\Notification\Api\QuietHoursInterface
     {
         return $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class);
-    }
-
-    private function withRecipients(CartReminder $consumer, ReminderEmailResolverInterface $recipients): CartReminder
-    {
-        $class = new \ReflectionClass($consumer);
-        $arguments = [];
-        foreach ($class->getConstructor()->getParameters() as $parameter) {
-            $arguments[] = $parameter->getName() === 'recipients' ? $recipients
-                : $class->getProperty($parameter->getName())->getValue($consumer);
-        }
-        return $class->newInstanceArgs($arguments);
     }
 
     public function testFinderUsesEachQuotesStoreLifetimeRatherThanTheOldSevenDaySetting(): void
@@ -528,7 +523,7 @@ class ReminderPolicyTest extends TestCase
             $this->assertSame(1, $this->finder()->execute());
             $queuedAt = $this->row($id)['queued_at'];
             $older = $this->consumer();
-            $original = (new \ReflectionProperty($older, 'recipients'))->getValue($older);
+            $original = $this->om->get(ReminderEmailResolverInterface::class);
             $recipients = $this->createMock(ReminderEmailResolverInterface::class);
             $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original, $queuedAt) {
                 // Another delivery claims and fails after this worker read the earlier snapshot.
@@ -548,7 +543,7 @@ class ReminderPolicyTest extends TestCase
                 $this->assertSame($queuedAt, $this->row($quoteId)['queued_at'], 'timestamps alone cannot distinguish the retry');
                 return $original->resolve($quoteId);
             });
-            $this->withRecipients($older, $recipients)->process($this->subscriptionOf($id));
+            $this->consumer(recipients: $recipients)->process($this->subscriptionOf($id));
             $this->assertSame(0, $this->sent, 'the earlier delivery version loses the claim');
             $this->assertSame(1, (int)$this->row($id)['delivery_version']);
             $this->finder()->execute();
@@ -843,7 +838,7 @@ class ReminderPolicyTest extends TestCase
             $this->om->get(CartTable::class)->key($id));
         $db->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s')], ['entity_id = ?' => $id]);
         $consumer = $this->consumer();
-        $original = (new \ReflectionProperty($consumer, 'recipients'))->getValue($consumer);
+        $original = $this->om->get(ReminderEmailResolverInterface::class);
         $recipients = $this->createMock(ReminderEmailResolverInterface::class);
         $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original, $db) {
             // meanwhile: the old mark is cleared, the cart ages, and a new finder run queues it again
@@ -854,7 +849,7 @@ class ReminderPolicyTest extends TestCase
             return $original->resolve($quoteId);
         });
         // this worker still holds its older 'recently updated' snapshot and skips
-        $this->withRecipients($consumer, $recipients)->process($this->subscriptionOf($id));
+        $this->consumer(recipients: $recipients)->process($this->subscriptionOf($id));
         $this->assertNotNull($this->row($id)['queued_at'], 'the newer mark stays');
     }
 
@@ -871,7 +866,7 @@ class ReminderPolicyTest extends TestCase
             // A claims delivery. Duplicate B reads that state and will skip it as already reminded.
             $this->state($id, ['reminded_at' => $old['queued_at']]);
             $consumer = $this->consumer();
-            $original = (new \ReflectionProperty($consumer, 'recipients'))->getValue($consumer);
+            $original = $this->om->get(ReminderEmailResolverInterface::class);
             $recipients = $this->createMock(ReminderEmailResolverInterface::class);
             $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original) {
                 // A fails before SMTP handoff. The next finder queues its retry in this same second.
@@ -879,7 +874,7 @@ class ReminderPolicyTest extends TestCase
                 $this->assertSame(1, $this->finder()->execute());
                 return $original->resolve($quoteId);
             });
-            $this->withRecipients($consumer, $recipients)->process($this->subscriptionOf($id));
+            $this->consumer(recipients: $recipients)->process($this->subscriptionOf($id));
             $this->assertSame(0, $this->sent);
             $this->finder()->execute(); // an extra copy may be published if B cleared the retry's mark
             foreach ($this->published as $quoteId) { $this->consumer()->process($this->subscriptionOf($quoteId)); }
@@ -895,7 +890,7 @@ class ReminderPolicyTest extends TestCase
         $id = $this->quote();
         $this->assertSame(1, $this->finder()->execute());
         $consumer = $this->consumer();
-        $original = (new \ReflectionProperty($consumer, 'recipients'))->getValue($consumer);
+        $original = $this->om->get(ReminderEmailResolverInterface::class);
         $raced = false;
         $recipients = $this->createStub(ReminderEmailResolverInterface::class);
         $recipients->method('resolve')->willReturnCallback(function ($quoteId) use ($original, &$raced) {
@@ -906,7 +901,7 @@ class ReminderPolicyTest extends TestCase
             }
             return $original->resolve($quoteId);
         });
-        $this->withRecipients($consumer, $recipients)->process($this->subscriptionOf($id));
+        $this->consumer(recipients: $recipients)->process($this->subscriptionOf($id));
         $this->consumer()->process($this->subscriptionOf($id));
         $this->assertSame(1, $this->sent, 'whichever wins the claim sends; the other skips');
         $this->assertNotNull($this->row($id)['reminded_at']);

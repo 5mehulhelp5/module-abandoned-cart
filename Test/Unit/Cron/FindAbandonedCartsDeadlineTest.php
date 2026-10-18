@@ -63,10 +63,11 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Cron {
                 if (isset($this->jumps[$this->resolved])) { $GLOBALS['ckFinderClock'] = $this->jumps[$this->resolved]; }
                 return 'fixture@example.test';
             });
-            return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue, new OncePerCart(), $lifetime,
-                $stores, $this->createStub(LoggerInterface::class), $recipients, $this->createStub(CooldownInterface::class),
-                $this->carts(), $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class),
-                $this->createStub(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class));
+            return new FindAbandonedCarts($this->resource(), $this->guard(), $queue, $lifetime, $stores,
+                $this->createStub(LoggerInterface::class), $this->createStub(CooldownInterface::class), $this->carts(),
+                $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class),
+                new \CommerceKings\AbandonedCart\Model\ReminderTypePool(['cart_reminder' =>
+                    $this->emailReminder($config, $recipients, null, new OncePerCart())]));
         }
 
         private static function page(array $ids): array

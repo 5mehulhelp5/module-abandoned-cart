@@ -42,7 +42,7 @@ class CartSubscriptionTest extends TestCase
         });
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturnCallback(fn ($storeId) => $this->enabled && $storeId === 2);
-        return new CartSubscription($masks, $maskResource, $scope, $config, $this->resource());
+        return new CartSubscription($masks, $maskResource, $scope, $this->resource(), $this->emailReminder($config));
     }
 
     public function testGuestNeedsTheMaskedIdOfAnActiveGuestCartInThisWebsite(): void
@@ -90,5 +90,22 @@ class CartSubscriptionTest extends TestCase
         $this->enabled = false;
         $target = $this->type()->authorize('masked-42', 0);
         $this->assertFalse($target->accepting, 'Notification removes the guest\'s subscription');
+    }
+
+    /** Another channel's subscription type: channel, purpose, permission, subscriber and "enabled" are its type's. */
+    public function testAnotherReminderTypeDecidesItsChannelPermissionAndStores(): void
+    {
+        $permission = $this->createStub(\CommerceKings\Notification\Api\SubscriptionPermissionInterface::class);
+        $subscriber = $this->createStub(\CommerceKings\Notification\Api\SubscriberInterface::class);
+        $sms = new \CommerceKings\AbandonedCart\Test\Unit\Fixture\TestReminderType('cart_reminder_sms', 'sms', $permission,
+            $subscriber, false);
+        $email = $this->type();
+        $type = new CartSubscription($this->createStub(QuoteIdMaskFactory::class), $this->createStub(QuoteIdMaskResource::class),
+            $this->createStub(QuoteScope::class), $this->resource(), $sms);
+        $this->assertSame(['sms', 'cart_reminder_sms', $permission, $subscriber],
+            [$type->getChannel(), $type->getPurpose(), $type->getPermission(), $type->getSubscriber()]);
+        $this->assertTrue($type->isSingle() && $type->isStoppable(), 'one per cart, stoppable like the email reminder');
+        $this->assertSame(['email', 'cart_reminder', null, null],
+            [$email->getChannel(), $email->getPurpose(), $email->getPermission(), $email->getSubscriber()]);
     }
 }

@@ -4,22 +4,18 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Model\Notification;
 
 use CommerceKings\Notification\Api\SubscriptionRemovalInterface;
-use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
+use CommerceKings\AbandonedCart\Api\Data\ReminderMessage;
+use CommerceKings\AbandonedCart\Api\ReminderTypeInterface;
 use CommerceKings\AbandonedCart\Model\CartTable;
-use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
-use CommerceKings\AbandonedCart\Model\ReminderData;
-use CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface;
 use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Api\Data\ReminderState;
-use CommerceKings\Notification\Api\Data\Delivery;
-use CommerceKings\Notification\Api\Data\DeliveryContent;
+use CommerceKings\Notification\Api\Channel;
 use CommerceKings\Notification\Api\QuietHoursInterface;
 use CommerceKings\Notification\Api\SenderInterface;
 use CommerceKings\Notification\Api\NotificationTypeInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Exception\MessageSentException;
-use CommerceKings\Notification\Model\Config as NotificationConfig;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 use Magento\Framework\Lock\LockManagerInterface;
@@ -28,8 +24,10 @@ use Magento\Quote\Model\Quote;
 use Psr\Log\LoggerInterface;
 
 /**
- * Notification type "cart_reminder" (CommerceKings_Notification's shared consumer). Reference = the cart's
- * subscription id (CartSubscription: who subscribed, under which permission); the send history is per cart.
+ * A cart reminder of one ReminderTypeInterface: the email reminder "cart_reminder" by default, another channel's
+ * through a virtual type with its "type" argument (see docs/extending.md). Notification type for
+ * CommerceKings_Notification's shared consumer; reference = the cart's subscription id of that type (CartSubscription:
+ * who subscribed, under which permission); the send history is per cart and type.
  *
  * Messages can arrive twice or late, so everything is re-checked against the current cart:
  * still active (not ordered), has items, an email and a valid permission (Notification's
@@ -42,30 +40,41 @@ use Psr\Log\LoggerInterface;
  * Sending (recipient cooldown, store emulation, one-click headers) is CommerceKings_Notification's sender and its selected provider.
  * A delivery version owns each claim. Failed sends restore the prior reminder timestamp only while that version
  * still matches, leaving a newer delivery or queue mark alone; the exception makes Magento log the failure.
+ *
+ * @api a virtual type with its "type" argument (ReminderTypeInterface) is a stable extension point
  */
 class CartReminder implements NotificationTypeInterface
 {
+    /** The built-in email reminder's code. */
     public const CODE = 'cart_reminder';
-    private const HOURLY_LOCK = 'commercekings_abandoned_cart_hourly';
+    /** The email reminder's hourly lock; another type's adds "_<code>" (its own provider, its own limit). */
+    public const HOURLY_LOCK = 'commercekings_abandoned_cart_hourly';
+
+    private readonly CartTable $carts;
+    /** The type's own permission, else the shop-wide one - as Notification resolves it for the subscription type. */
+    private readonly SubscriptionPermissionInterface $permission;
 
     public function __construct(
         private readonly ResourceConnection $resource,
         private readonly CartRepositoryInterfaceFactory $repositories,
-        private readonly ReminderData $reminderData,
         private readonly SenderInterface $sender,
-        private readonly Config $config,
-        private readonly SubscriptionPermissionInterface $permission,
-        private readonly ReminderPolicyInterface $policy,
+        SubscriptionPermissionInterface $shopWidePermission,
         private readonly LoggerInterface $logger,
         private readonly QuoteLifetime $lifetime,
-        private readonly ReminderEmailResolverInterface $recipients,
-        private readonly NotificationConfig $notificationConfig,
-        private readonly CartTable $carts,
+        CartTable $carts,
         private readonly LockManagerInterface $locks,
         private readonly SubscriptionRemovalInterface $removal,
-        private readonly CartSubscription $subscriptionType,
-        private readonly QuietHoursInterface $quietHours
+        private readonly QuietHoursInterface $quietHours,
+        private readonly ReminderTypeInterface $type
     ) {
+        $this->carts = $carts->forType($type->getCode());
+        $this->permission = $type->getPermission() ?? $shopWidePermission;
+    }
+
+    /** The lock for one type's hourly limit; the email reminder keeps its own name. */
+    public static function hourlyLock(string $typeCode): string
+    {
+        return $typeCode === self::CODE ? self::HOURLY_LOCK : self::HOURLY_LOCK . '_' . $typeCode;
     }
 
     public function process(string $reference): void
@@ -76,20 +85,20 @@ class CartReminder implements NotificationTypeInterface
             ['subscription_id', 'contact_id', 'captured_at', 'permission_ref'])
             ->where('s.subscription_id = ?', (int)$reference));
         $id = $row ? (int)$row['entity_id'] : 0;
-        $email = $row ? $this->recipients->resolve($id) : null;
+        $email = $row ? $this->type->getRecipient($id) : null;
         $activity = $row ? max((string)$row['updated_at'], (string)$row['captured_at']) : '';
         $skip = match (true) {
             !$row => 'subscription or cart gone',
             !(int)$row['is_active'] => 'ordered / closed',
             !(int)$row['items_count'] => 'empty',
-            $email === null => 'no email',
-            !$this->policy->canSend(new ReminderState($id, (int)$row['store_id'], $row['sent_at'],
+            $email === null => $this->type->getChannel() === Channel::EMAIL ? 'no email' : 'no recipient',
+            !$this->type->getPolicy()->canSend(new ReminderState($id, (int)$row['store_id'], $row['sent_at'],
                 ['updated_at' => $row['updated_at']])) => 'reminder policy',
             $this->lifetime->isExpired((string)$row['updated_at'], (int)$row['store_id']) => 'quote expired',
-            $activity > gmdate('Y-m-d H:i:s', time() - $this->config->getDelayMinutes((int)$row['store_id']) * 60) => 'cart recently updated',
-            !$this->permission->isValidFor((string)$row['permission_ref'], Config::PURPOSE, (int)$row['store_id'])
+            $activity > gmdate('Y-m-d H:i:s', time() - $this->type->getDelayMinutes((int)$row['store_id']) * 60) => 'cart recently updated',
+            !$this->permission->isValidFor((string)$row['permission_ref'], $this->type->getPurpose(), (int)$row['store_id'])
                 => 'permission withdrawn, expired or for another purpose / website',
-            !$this->config->isEnabled((int)$row['store_id']) => 'disabled',
+            !$this->type->isEnabled((int)$row['store_id']) => 'disabled',
             default => null,
         };
         $queuedAt = $row ? $row['queued_at'] : null;
@@ -103,7 +112,7 @@ class CartReminder implements NotificationTypeInterface
         // claim: only one delivery of this message can flip sent_at from NULL - and only while the cart
         // is still what was checked above and its permission is still valid, in the same statement: a
         // withdrawal stored before this point stops the send, one after it finds the reminder already out
-        $delay = $this->config->getDelayMinutes((int)$row['store_id']);
+        $delay = $this->type->getDelayMinutes((int)$row['store_id']);
         $previousVersion = (int)$row['delivery_version'];
         $deliveryVersion = $previousVersion + 1;
         $this->carts->ensure($id);
@@ -117,7 +126,7 @@ class CartReminder implements NotificationTypeInterface
                 'c.delivery_version = ?' => $previousVersion,
                 'c.queued_at <=> ?' => $queuedAt ?? new Expression('NULL'),
                 'q.store_id = ?' => (int)$row['store_id'],
-                $this->policy->dueCondition(new ReminderQuery((int)$row['store_id'], 'c', 'q')),
+                $this->type->getPolicy()->dueCondition(new ReminderQuery((int)$row['store_id'], 'c', 'q')),
                 // Compare the state that was checked too, so parallel consumers cannot claim it twice.
                 $row['sent_at'] === null ? 'c.sent_at IS NULL'
                     : $db->quoteInto('c.sent_at = ?', $row['sent_at']),
@@ -134,10 +143,10 @@ class CartReminder implements NotificationTypeInterface
                 $this->permission->validCondition('s.permission_ref'),
             ]
         );
-        $perHour = $this->config->getMaxPerHour();
+        $perHour = $this->type->getMaxPerHour();
         if ($perHour > 0) {
             // the provider's hourly limit holds when a delayed backlog drains: count and claim one at a time
-            if (!$this->locks->lock(self::HOURLY_LOCK, 10)) {
+            if (!$this->locks->lock(self::hourlyLock($this->type->getCode()), 10)) {
                 $this->release($id, $queuedAt);
                 $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (hourly limit busy)', $id));
                 return;
@@ -146,7 +155,7 @@ class CartReminder implements NotificationTypeInterface
                 $full = $this->sentLastHour() >= $perHour;
                 $claimed = $full ? 0 : $claim();
             } finally {
-                $this->locks->unlock(self::HOURLY_LOCK);
+                $this->locks->unlock(self::hourlyLock($this->type->getCode()));
             }
             if ($full) {
                 $this->release($id, $queuedAt);
@@ -167,30 +176,23 @@ class CartReminder implements NotificationTypeInterface
             ['sent_at' => $row['sent_at'], 'failed_sends' => (int)($row['failed_sends'] ?? 0)],
             // Never undo a newer delivery or decrease the version; a newer queued mark must stay too.
             $this->carts->key($id) + ['delivery_version = ?' => $deliveryVersion]);
-        $message = new Delivery(
+        $message = $this->type->createDelivery(new ReminderMessage(
+            $id,
             $storeId,
-            $this->config->getTemplate($storeId),
-            $this->config->getIdentity($storeId),
+            (int)$row['subscription_id'],
             $email,
-            function () use ($id, $row, $email, $storeId): DeliveryContent {
+            (string)$row['permission_ref'],
+            function () use ($id): Quote {
                 // Consumers live across messages; a repository's cached quote must not survive a delivery attempt.
                 $quote = $this->repositories->create()->get($id);
                 if (!$quote instanceof Quote) {
                     throw new \UnexpectedValueException('Cart repository must return a Magento quote for a reminder.');
                 }
-                $vars = $this->reminderData->build($quote, (string)$row['permission_ref'],
-                    ['subscription_id' => (int)$row['subscription_id'], 'email' => $email]);
-                // one-click: the consent withdrawal link (opt-in); without one, Notification uses the stop link
-                return new DeliveryContent($vars, $vars['customer_name'] ?? null,
-                    ($vars['optout_url'] ?? '') !== '' && $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId)
-                        ? $vars['optout_url'] : null);
+                return $quote;
             },
-            true,
             // A replaced resolver may read an external recipient source. Recheck it after claiming too.
-            fn (): bool => $this->recipients->resolve($id) === $email,
-            stoppable: $this->subscriptionType->isStoppable(),
-            type: self::CODE
-        );
+            fn (): bool => $this->type->getRecipient($id) === $email
+        ));
         try {
             $status = $this->sender->send($message);
         } catch (MessageSentException $e) {
@@ -222,7 +224,7 @@ class CartReminder implements NotificationTypeInterface
             $restore();
             if ($status === SenderInterface::QUIET_HOURS) {
                 // held, not dropped: the finder leaves the cart out until the quiet window ends, then queues it again
-                $until = $this->quietHours->nextAllowedAt($storeId, $this->subscriptionType->getChannel(), $email);
+                $until = $this->quietHours->nextAllowedAt($storeId, $this->type->getChannel(), $email);
                 // null: the window ended since the send; the next run simply queues the cart again
                 if ($until !== null) {
                     // UTC, like the finder's NOW() on Magento's database session
@@ -255,6 +257,6 @@ class CartReminder implements NotificationTypeInterface
     {
         $db = $this->resource->getConnection();
         return (int)$db->fetchOne($db->select()->from($this->carts->name(), new Expression('COUNT(*)'))
-            ->where('type = ?', self::CODE)->where('sent_at >= NOW() - INTERVAL 1 HOUR'));
+            ->where('type = ?', $this->type->getCode())->where('sent_at >= NOW() - INTERVAL 1 HOUR'));
     }
 }

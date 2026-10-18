@@ -92,7 +92,8 @@ class ReminderDataTest extends TestCase
         $tax->method('displayCartPricesInclTax')->willReturnCallback(fn () => $this->cartPriceDisplay === 2);
         $tax->method('displayCartPricesBoth')->willReturnCallback(fn () => $this->cartPriceDisplay === 3);
         return new ReminderData($image, $configuration, $price, $currencies, $tax, $url, $escaper,
-            $this->unsubscribe ?? new SubscriberUnsubscribeLink($subscriptions, $subscriber), $signature, $subscriber,
+            $this->unsubscribe ?? new SubscriberUnsubscribeLink($subscriptions, $subscriber),
+            new \CommerceKings\AbandonedCart\Model\RestoreLink($url, $signature, $subscriber),
             $this->createStub(\CommerceKings\Notification\Api\StopListInterface::class));
     }
 
@@ -291,5 +292,21 @@ class ReminderDataTest extends TestCase
         $this->assertSame('a@test.com', $seen->getAttribute('email'));
         $this->assertArrayHasKey('quote_id', (fn () => $this->attributes)->call($seen));
         $this->assertNull($seen->getAttribute('not_there'), 'a missing attribute is null, never an error');
+    }
+
+    /** The same facts as the email, without markup, for a reminder on another channel (CartDataInterface). */
+    public function testCartFactsForOtherChannels(): void
+    {
+        $data = $this->data();
+        $facts = $data->get($this->quote([$this->item('Notebook <b>A5</b>')]));
+        $vars = $data->build($this->quote([$this->item('Notebook <b>A5</b>')]), 'cid-1');
+        $this->assertSame('Jane', $facts->firstName);
+        $this->assertSame($vars['grand_total'], $facts->grandTotal);
+        $this->assertSame('https://shop/', $facts->storeUrl);
+        $this->assertCount(1, $facts->items);
+        $this->assertSame(['Notebook <b>A5</b>', 1.0], [$facts->items[0]['name'], $facts->items[0]['qty']],
+            'plain values: a text or template escapes them itself');
+        $this->assertStringContainsString($facts->items[0]['price'], $vars['items_html'], 'the price the email shows');
+        $this->assertSame([], $facts->items[0]['options']);
     }
 }

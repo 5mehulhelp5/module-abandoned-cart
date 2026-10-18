@@ -99,6 +99,10 @@ the unsubscribe headers, as [RFC 8058](https://www.rfc-editor.org/rfc/rfc8058) r
 
 ## Extending
 
+**Reminders on other channels** (SMS, WhatsApp, Viber): a channel module adds its own reminder type next to the
+built-in email reminder – di.xml and `@api` only, sharing the finder, claim, retries, quiet hours and send history.
+See [Reminders on other channels](docs/extending.md).
+
 Replace any of these with a DI preference:
 
 `Api\ReminderPolicyInterface` – when to send (default: once per cart)
@@ -152,6 +156,7 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 ## More
 
 [How it works](docs/how-it-works.md) · [Security and links](docs/security.md) · [Testing](docs/testing.md) ·
+[Other channels](docs/extending.md) ·
 [Compatibility](COMPATIBILITY.md) · [Changes](CHANGELOG.md)
 
 ## Disclaimer

@@ -62,7 +62,6 @@ class CartReminderTest extends TestCase
     private ?array $recipientSequence = null;
     private bool $oneClick = false;
     private string $blockUrl = '';
-    private bool $stoppable = true;
     /** Notification's "One-click unsubscribe" per store; null = $oneClick everywhere */
     private ?array $oneClickStores = null;
     /** the stores the setting was read for */
@@ -86,7 +85,8 @@ class CartReminderTest extends TestCase
     private \Symfony\Component\Mime\Email $nativeMessage;
     private string $optoutUrl = 'https://shop.test/ckconsent/optout?c=id&t=signature';
 
-    private function consumer(array|false $row = self::ROW, bool $enabled = true, bool $withdrawn = false): CartReminder
+    private function consumer(array|false $row = self::ROW, bool $enabled = true, bool $withdrawn = false,
+        ?\CommerceKings\AbandonedCart\Api\ReminderTypeInterface $type = null): CartReminder
     {
         $this->fetchRowResult = $row;
         $config = $this->createStub(Config::class);
@@ -189,8 +189,9 @@ class CartReminderTest extends TestCase
             $this->lockEvents[] = ['unlock', $name];
             return true;
         });
-        return new CartReminder($this->resource(), $repositories, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks, $this->removal(),
-            $this->subscriptionType(), $this->quietHours());
+        return new CartReminder($this->resource(), $repositories, $mailer, $permission, $logger, $lifetime, $this->carts(),
+            $locks, $this->removal(), $this->quietHours(),
+            $type ?? $this->emailReminder($config, $recipients, $data, $this->policy ?? new OncePerCart(), $notificationConfig));
     }
 
     private function quietHours(): \CommerceKings\Notification\Api\QuietHoursInterface
@@ -262,14 +263,6 @@ class CartReminderTest extends TestCase
         // Notification's own way out: the stop link becomes the one-click URL when there is no other
         $stopList->method('getStopUrl')->willReturnCallback(fn () => $this->blockUrl);
         return $stopList;
-    }
-
-    private function subscriptionType(): \CommerceKings\AbandonedCart\Model\Notification\CartSubscription
-    {
-        $type = $this->createStub(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class);
-        $type->method('isStoppable')->willReturnCallback(fn () => $this->stoppable);
-        $type->method('getChannel')->willReturn('email');
-        return $type;
     }
 
     private function removal(): \CommerceKings\Notification\Api\SubscriptionRemovalInterface
@@ -742,5 +735,40 @@ class CartReminderTest extends TestCase
     {
         $this->consumer()->process('42');
         $this->assertSame(self::ROW['queued_at'], $this->updates[0]['where']['c.queued_at <=> ?']);
+    }
+
+    /** A channel module's type, through the @api only: its own delivery, purpose, permission, lock and history. */
+    public function testAnotherTypeSendsItsOwnDeliveryUnderItsOwnLockAndHistory(): void
+    {
+        $this->perHour = 0;
+        $permission = $this->createStub(\CommerceKings\Notification\Api\SubscriptionPermissionInterface::class);
+        $permission->method('validCondition')->willReturnCallback(fn ($column) => 'OWN(' . $column . ')');
+        $permission->method('isValidFor')->willReturnCallback(function (...$args) {
+            $this->validityChecks[] = ['own', ...$args];
+            return true;
+        });
+        $type = new \CommerceKings\AbandonedCart\Test\Unit\Fixture\TestReminderType('cart_reminder_test', 'email', $permission,
+            null, true, 180, 5, null, [42 => 'text@test.com']);
+        $this->consumer(self::ROW, true, false, $type)->process('9');
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertSame([['own', 'cid-1', 'cart_reminder_test', 1]], $this->validityChecks, 'its own permission and purpose');
+        $claim = $this->updates[0];
+        $this->assertSame('cart_reminder_test', $claim['where']['c.type = ?'], 'its own send history');
+        $this->assertContains('OWN(s.permission_ref)', self::conditions($claim['where']));
+        $this->assertSame([['lock', 'commercekings_abandoned_cart_hourly_cart_reminder_test', 10],
+            ['unlock', 'commercekings_abandoned_cart_hourly_cart_reminder_test']], $this->lockEvents, 'its own hourly limit');
+        $message = $type->messages[0];
+        $this->assertSame([42, 1, 9, 'text@test.com', 'cid-1'],
+            [$message->quoteId, $message->storeId, $message->subscriptionId, $message->recipient, $message->permissionRef]);
+        $this->assertInstanceOf(Quote::class, ($message->quote)(), 'the cart, loaded when the content is built');
+        $this->assertTrue(($message->isRecipientCurrent)());
+    }
+
+    public function testAnotherTypeWithoutRecipientIsSkipped(): void
+    {
+        $type = new \CommerceKings\AbandonedCart\Test\Unit\Fixture\TestReminderType(recipients: [42 => null]);
+        $this->consumer(self::ROW, true, false, $type)->process('9');
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertContains('CommerceKings_AbandonedCart: cart 42 skipped (no recipient)', $this->logs);
     }
 }

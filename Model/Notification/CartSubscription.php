@@ -3,9 +3,8 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Model\Notification;
 
-use CommerceKings\AbandonedCart\Model\Config;
+use CommerceKings\AbandonedCart\Api\ReminderTypeInterface;
 use CommerceKings\AbandonedCart\Model\QuoteScope;
-use CommerceKings\Notification\Api\Channel;
 use CommerceKings\Notification\Api\Data\Target;
 use CommerceKings\Notification\Api\SubscriberInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
@@ -15,11 +14,15 @@ use Magento\Quote\Model\QuoteIdMaskFactory;
 use Magento\Quote\Model\ResourceModel\Quote\QuoteIdMask as QuoteIdMaskResource;
 
 /**
- * Who may subscribe a cart to its reminder (CommerceKings_Notification does email, consent and storage).
+ * Who may subscribe a cart to one reminder type (the email reminder by default; another channel's through a virtual
+ * type with its "type" argument, see docs/extending.md) - CommerceKings_Notification does the address rules, consent
+ * and storage; the channel, purpose, permission and "enabled" are the reminder type's.
  * Guests send the masked cart id from checkout, like Magento's guest-cart APIs; customers send their quote
  * id and must own it. The cart must be active in the current website. The same cart conditions are repeated
  * inside Notification's write, so a cart that changed after this check is not subscribed. A subscription goes
  * when Magento deletes its cart (quote cleanup), and with it the guest's address.
+ *
+ * @api a virtual type with its "type" argument (ReminderTypeInterface) is a stable extension point
  */
 class CartSubscription implements SubscriptionTypeInterface
 {
@@ -27,31 +30,31 @@ class CartSubscription implements SubscriptionTypeInterface
         private readonly QuoteIdMaskFactory $quoteIdMaskFactory,
         private readonly QuoteIdMaskResource $quoteIdMaskResource,
         private readonly QuoteScope $scope,
-        private readonly Config $config,
-        private readonly ResourceConnection $resource
+        private readonly ResourceConnection $resource,
+        private readonly ReminderTypeInterface $type
     ) {
     }
 
     public function getPurpose(): string
     {
-        return Config::PURPOSE;
+        return $this->type->getPurpose();
     }
 
-    /** The shop-wide permission: opt-out, or the cookie banner with the consent bridge. */
+    /** The reminder type's own permission; null (the email reminder): the shop-wide one. */
     public function getPermission(): ?SubscriptionPermissionInterface
     {
-        return null;
+        return $this->type->getPermission();
     }
 
-    /** The shop-wide subscriber, with the shop-wide permission. */
+    /** The subscriber behind the type's own permission; null: the shop-wide one. */
     public function getSubscriber(): ?SubscriberInterface
     {
-        return null;
+        return $this->type->getSubscriber();
     }
 
     public function getChannel(): string
     {
-        return Channel::EMAIL;
+        return $this->type->getChannel();
     }
 
     public function isSingle(): bool
@@ -77,7 +80,7 @@ class CartSubscription implements SubscriptionTypeInterface
             . ' AND ck_q.is_active = 1 AND %s)',
             $this->resource->getConnection()->quoteIdentifier($this->resource->getTableName('quote')), $quoteId, $storeId,
             $customerId ? sprintf('ck_q.customer_id = %d', $customerId) : 'ck_q.customer_id IS NULL');
-        return new Target($quoteId, $storeId, $this->config->isEnabled($storeId), $condition);
+        return new Target($quoteId, $storeId, $this->type->isEnabled($storeId), $condition);
     }
 
     public function orphanCondition(string $referenceIdColumn): string

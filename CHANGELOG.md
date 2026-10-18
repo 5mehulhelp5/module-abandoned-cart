@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased (feature/reminder-channels)
+
+- **Reminders on other channels:** a channel module (e.g. `module-abandoned-cart-sms`) adds a reminder type next to
+  the built-in email reminder, with di.xml and `@api` only: `Api\ReminderTypeInterface` (code, channel, purpose, own
+  permission and subscriber, enabled / delay / per hour, policy, recipient, delivery) in `Model\ReminderTypePool`
+  ("types"), and virtual types of `Model\Notification\CartReminder` and `Model\Notification\CartSubscription` with
+  its type as argument `type`. The finder queues every registered type; each has its own settings, policy, hourly
+  limit and lock, and send history per cart. `Api\CartDataInterface` (`Data\CartFacts`: the cart's plain facts) and
+  `Api\RestoreLinkInterface` (the email's signed link; the cart page for other channels) for its text. Guide:
+  [docs/extending.md](docs/extending.md).
+- The email reminder is unchanged: the same code, settings, template, claim, restore link, lock and send history; it
+  is now the first registered reminder type (`Model\Reminder\EmailReminder`). The finder checks the recipient
+  cooldown per channel (Notification's `CooldownInterface::isRecentFor()`).
+
 ## Unreleased (0.1.0)
 
 First release. Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`); PHP 8.1–8.5.

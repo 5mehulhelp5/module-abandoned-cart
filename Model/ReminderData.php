@@ -6,8 +6,11 @@ namespace CommerceKings\AbandonedCart\Model;
 use CommerceKings\Notification\Api\Channel;
 use CommerceKings\Notification\Api\StopListInterface;
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
+use CommerceKings\AbandonedCart\Api\CartDataInterface;
+use CommerceKings\AbandonedCart\Api\Data\CartFacts;
+use CommerceKings\AbandonedCart\Api\RestoreLinkInterface;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
-use CommerceKings\Notification\Api\SubscriberInterface;
+use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use Magento\Catalog\Helper\Image as ImageHelper;
 use Magento\Catalog\Helper\Product\Configuration as ProductConfiguration;
 use Magento\Framework\Escaper;
@@ -25,7 +28,7 @@ use Magento\Quote\Model\Quote\Item\Option;
  * chosen options, qty, price) as email-safe inline-styled HTML, the total and the restore link.
  * Runs inside store emulation (frontend URLs, store currency, theme images).
  */
-class ReminderData
+class ReminderData implements CartDataInterface
 {
     /**
      * Custom option types shown in the email: only the store's own predefined choices. Free text
@@ -50,10 +53,24 @@ class ReminderData
         private readonly UrlInterface $url,
         private readonly Escaper $escaper,
         private readonly UnsubscribeLinkInterface $unsubscribeLinks,
-        private readonly LinkSignature $signature,
-        private readonly SubscriberInterface $subscriber,
+        private readonly RestoreLinkInterface $restoreLinks,
         private readonly StopListInterface $stopList
     ) {
+    }
+
+    /** The cart's facts for a reminder on another channel: the same name, items and prices the email shows. */
+    public function get(Quote $quote): CartFacts
+    {
+        $this->url->setScope($quote->getStoreId());
+        $name = (string)($quote->getCustomerFirstname() ?: $quote->getBillingAddress()->getFirstname());
+        return new CartFacts(
+            $this->greetingName($name),
+            array_map(fn (array $item) => ['name' => $item['name'], 'qty' => $item['qty'], 'price' => $item['price'],
+                'image' => $item['image'], 'options' => array_map(fn ($option) => $option[0] . ': ' . $option[1],
+                    $item['options'])], $this->items($quote)),
+            $this->price((float)$quote->getGrandTotal(), $quote),
+            $this->url->getUrl('', ['_nosid' => true])
+        );
     }
 
     /**
@@ -67,7 +84,7 @@ class ReminderData
             'customer_name' => $this->greetingName((string)($quote->getCustomerFirstname() ?: $quote->getBillingAddress()->getFirstname())),
             'items_html' => $this->itemsHtml($quote),
             'grand_total' => $this->price((float)$quote->getGrandTotal(), $quote),
-            'restore_url' => $this->restoreUrl($quote),
+            'restore_url' => $this->restoreLinks->getUrl($quote, CartReminder::CODE),
             'store_url' => $this->url->getUrl('', ['_nosid' => true]),
             'contact_url' => $this->url->getUrl('contact', ['_nosid' => true]),
             'optout_url' => $this->unsubscribeLinks->getUrl(new UnsubscribeContext($permissionRef, (int)$quote->getStoreId(),
@@ -79,27 +96,37 @@ class ReminderData
         ];
     }
 
-    /**
-     * The signed restore link only when the subscriber can be identified (RestoreAccess hands the cart to
-     * that visitor only); otherwise Magento's cart page - the visitor's own session or account cart.
-     */
-    private function restoreUrl(Quote $quote): string
-    {
-        if (!$this->subscriber->identifiesVisitor()) {
-            return $this->url->getUrl('checkout/cart', ['_nosid' => true]);
-        }
-        return $this->url->getUrl('cartreminder/cart/restore', [
-            '_query' => [
-                'q' => (int)$quote->getId(),
-                't' => $this->signature->sign('restore', (int)$quote->getId()),
-            ],
-            '_nosid' => true,
-        ]);
-    }
-
     private function itemsHtml(Quote $quote): string
     {
         $rows = '';
+        foreach ($this->items($quote) as $item) {
+            $optionLines = '';
+            foreach ($item['options'] as [$label, $value]) {
+                $optionLines .= '<br>' . $this->escaper->escapeHtml($label) . ': ' . $this->escaper->escapeHtml($value);
+            }
+
+            $rows .= '<tr>'
+                . '<td width="72" style="padding: 12px 12px 12px 0; vertical-align: top; border-bottom: 1px solid #eeeeee;">'
+                . '<img src="' . $this->escaper->escapeUrl($item['image']) . '" width="64" height="64" alt="" style="display: block; border-radius: 8px; border: 1px solid #eeeeee;"></td>'
+                . '<td style="' . self::FONT . ' padding: 12px 12px 12px 0; vertical-align: top; border-bottom: 1px solid #eeeeee; color: #222529; font-size: 15px; line-height: 22px;">'
+                . '<strong>' . $this->escaper->escapeHtml($item['name']) . '</strong>'
+                . '<span style="color: #77797c; font-size: 13px; line-height: 20px;">' . $optionLines . '</span></td>'
+                . '<td align="right" style="' . self::FONT . ' padding: 12px 0; vertical-align: top; border-bottom: 1px solid #eeeeee; color: #222529; font-size: 15px; line-height: 22px; white-space: nowrap;">'
+                . $item['qty'] . ' × ' . $item['price'] . '</td>'
+                . '</tr>';
+        }
+        return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width: 100%;">' . $rows . '</table>';
+    }
+
+    /**
+     * The cart's visible items as plain values: name, quantity, unit price as the cart shows it, thumbnail, and the
+     * option lines a visitor cannot type ([label, value], no markup).
+     *
+     * @return array<int, array{name: string, qty: float, price: string, image: string, options: array<int, array{0: string, 1: string}>}>
+     */
+    private function items(Quote $quote): array
+    {
+        $items = [];
         /** @var Item $item */
         foreach ($quote->getAllVisibleItems() as $item) {
             $product = $item->getProduct();
@@ -116,27 +143,19 @@ class ReminderData
                 $this->productConfiguration->getCustomOptions($item),
                 fn ($option) => in_array($option['option_type'] ?? '', self::SAFE_OPTION_TYPES, true)
             ));
-            $optionLines = '';
+            $lines = [];
             foreach ($options as $option) {
                 $value = is_array($option['value'] ?? null) ? implode(', ', $option['value']) : (string)($option['value'] ?? '');
                 $value = trim(strip_tags(html_entity_decode($value)));
                 if ($value === '') {
                     continue;
                 }
-                $optionLines .= '<br>' . $this->escaper->escapeHtml($option['label'] ?? '') . ': ' . $this->escaper->escapeHtml($value);
+                $lines[] = [(string)($option['label'] ?? ''), $value];
             }
-
-            $rows .= '<tr>'
-                . '<td width="72" style="padding: 12px 12px 12px 0; vertical-align: top; border-bottom: 1px solid #eeeeee;">'
-                . '<img src="' . $this->escaper->escapeUrl($image) . '" width="64" height="64" alt="" style="display: block; border-radius: 8px; border: 1px solid #eeeeee;"></td>'
-                . '<td style="' . self::FONT . ' padding: 12px 12px 12px 0; vertical-align: top; border-bottom: 1px solid #eeeeee; color: #222529; font-size: 15px; line-height: 22px;">'
-                . '<strong>' . $this->escaper->escapeHtml($item->getName()) . '</strong>'
-                . '<span style="color: #77797c; font-size: 13px; line-height: 20px;">' . $optionLines . '</span></td>'
-                . '<td align="right" style="' . self::FONT . ' padding: 12px 0; vertical-align: top; border-bottom: 1px solid #eeeeee; color: #222529; font-size: 15px; line-height: 22px; white-space: nowrap;">'
-                . (float)$item->getQty() . ' × ' . $this->unitPrice($item, $quote) . '</td>'
-                . '</tr>';
+            $items[] = ['name' => (string)$item->getName(), 'qty' => (float)$item->getQty(),
+                'price' => $this->unitPrice($item, $quote), 'image' => (string)$image, 'options' => $lines];
         }
-        return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width: 100%;">' . $rows . '</table>';
+        return $items;
     }
 
     /**

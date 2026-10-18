@@ -111,6 +111,20 @@ trait DbTestTrait
             new \CommerceKings\Notification\Model\DeliveryState($resource));
     }
 
+    /** The built-in email reminder over the test's own config, recipients, email data and policy (wiring only). */
+    private function emailReminder(\CommerceKings\AbandonedCart\Model\Config $config,
+        ?\CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface $recipients = null,
+        ?\CommerceKings\AbandonedCart\Model\ReminderData $data = null,
+        ?\CommerceKings\AbandonedCart\Api\ReminderPolicyInterface $policy = null,
+        ?\CommerceKings\Notification\Model\Config $notificationConfig = null
+    ): \CommerceKings\AbandonedCart\Model\Reminder\EmailReminder {
+        return new \CommerceKings\AbandonedCart\Model\Reminder\EmailReminder($config,
+            $recipients ?? $this->createStub(\CommerceKings\AbandonedCart\Api\ReminderEmailResolverInterface::class),
+            $data ?? $this->createStub(\CommerceKings\AbandonedCart\Model\ReminderData::class),
+            $policy ?? new \CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart(),
+            $notificationConfig ?? $this->createStub(\CommerceKings\Notification\Model\Config::class));
+    }
+
     /** CartTable::joined() as the fake records it (traits hold no constants before PHP 8.2). */
     private static function joined(): string
     {

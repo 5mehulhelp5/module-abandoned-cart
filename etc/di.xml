@@ -6,6 +6,34 @@
          consent bridge Consent's signed page; none without a permission module) -->
     <preference for="CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface" type="CommerceKings\AbandonedCart\Model\SubscriberUnsubscribeLink"/>
     <preference for="CommerceKings\AbandonedCart\Api\ReminderPolicyInterface" type="CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart"/>
+    <preference for="CommerceKings\AbandonedCart\Api\CartDataInterface" type="CommerceKings\AbandonedCart\Model\ReminderData"/>
+    <preference for="CommerceKings\AbandonedCart\Api\RestoreLinkInterface" type="CommerceKings\AbandonedCart\Model\RestoreLink"/>
+    <!-- the reminders the finder queues, one per channel (argument "types": code => ReminderTypeInterface); email is
+         built in, a channel module adds its own here and wires the two virtual types below (docs/extending.md) -->
+    <type name="CommerceKings\AbandonedCart\Model\ReminderTypePool">
+        <arguments>
+            <argument name="types" xsi:type="array">
+                <item name="cart_reminder" xsi:type="object">CommerceKings\AbandonedCart\Model\Reminder\EmailReminder</item>
+            </argument>
+        </arguments>
+    </type>
+    <!-- the email reminder: this module's settings, template and the cart's email; its email data lazily, because
+         Notification's subscription types are built from it (CartSubscription) -->
+    <type name="CommerceKings\AbandonedCart\Model\Reminder\EmailReminder">
+        <arguments>
+            <argument name="reminderData" xsi:type="object">CommerceKings\AbandonedCart\Model\ReminderData\Proxy</argument>
+        </arguments>
+    </type>
+    <type name="CommerceKings\AbandonedCart\Model\Notification\CartReminder">
+        <arguments>
+            <argument name="type" xsi:type="object">CommerceKings\AbandonedCart\Model\Reminder\EmailReminder</argument>
+        </arguments>
+    </type>
+    <type name="CommerceKings\AbandonedCart\Model\Notification\CartSubscription">
+        <arguments>
+            <argument name="type" xsi:type="object">CommerceKings\AbandonedCart\Model\Reminder\EmailReminder</argument>
+        </arguments>
+    </type>
     <!-- sending: CommerceKings_Notification's shared queue consumer hands the cart's subscription id to this type -->
     <type name="CommerceKings\Notification\Model\TypePool">
         <arguments>
@@ -41,22 +69,6 @@
             </argument>
         </arguments>
     </type>
-    <!-- the cart reminder's permission: its type's own, else the shop-wide one (Notification's TypePermission) -->
-    <virtualType name="CommerceKingsCartReminderPermission" type="CommerceKings\Notification\Model\TypePermission">
-        <arguments>
-            <argument name="typeCode" xsi:type="string">cart_reminder</argument>
-        </arguments>
-    </virtualType>
-    <type name="CommerceKings\AbandonedCart\Model\Notification\CartReminder">
-        <arguments>
-            <argument name="permission" xsi:type="object">CommerceKingsCartReminderPermission</argument>
-        </arguments>
-    </type>
-    <type name="CommerceKings\AbandonedCart\Cron\FindAbandonedCarts">
-        <arguments>
-            <argument name="permission" xsi:type="object">CommerceKingsCartReminderPermission</argument>
-        </arguments>
-    </type>
     <!-- the cart reminder's subscriber: its type's own, else the shop-wide one (Notification's TypeSubscriber) -->
     <virtualType name="CommerceKingsCartReminderSubscriber" type="CommerceKings\Notification\Model\TypeSubscriber">
         <arguments>
@@ -68,7 +80,7 @@
             <argument name="subscriber" xsi:type="object">CommerceKingsCartReminderSubscriber</argument>
         </arguments>
     </type>
-    <type name="CommerceKings\AbandonedCart\Model\ReminderData">
+    <type name="CommerceKings\AbandonedCart\Model\RestoreLink">
         <arguments>
             <argument name="subscriber" xsi:type="object">CommerceKingsCartReminderSubscriber</argument>
         </arguments>
