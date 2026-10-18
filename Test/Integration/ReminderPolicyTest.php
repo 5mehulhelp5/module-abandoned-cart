@@ -208,8 +208,7 @@ class ReminderPolicyTest extends TestCase
     {
         return new Cooldown($this->resource,
             $this->om->get(\Magento\Framework\Encryption\EncryptorInterface::class),
-            $this->om->get(\Magento\Framework\Math\Random::class), $this->notificationConfig(),
-            $this->om->get(\CommerceKings\Notification\Model\KeyFingerprint::class));
+            $this->om->get(\Magento\Framework\Math\Random::class), $this->notificationConfig());
     }
 
     /** Notification's permission: the fixture subscriptions are always allowed (the claim SQL stays real). */
