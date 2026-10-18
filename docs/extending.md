@@ -46,10 +46,10 @@ class SmsReminder implements ReminderTypeInterface
     public function __construct(
         private readonly Config $config,                              // your own settings
         private readonly SubscriptionPermissionInterface $permission, // the AddressConsent virtual type (di.xml)
-        private readonly ReminderPolicyInterface $policy,             // e.g. OncePerCart
+        private readonly ReminderPolicyInterface $policy,             // the preference: one per cart
         private readonly SubscriptionRepositoryInterface $subscriptions,
-        private readonly CartDataInterface $cartData,
-        private readonly RestoreLinkInterface $restoreLinks
+        private readonly CartDataInterface $cartData,                 // a \Proxy (di.xml)
+        private readonly RestoreLinkInterface $restoreLinks           // a \Proxy (di.xml)
     ) {
     }
 
@@ -124,7 +124,9 @@ class SmsReminder implements ReminderTypeInterface
 <type name="Vendor\CartSms\Model\SmsReminder">
     <arguments>
         <argument name="permission" xsi:type="object">VendorCartSmsConsent</argument>
-        <argument name="policy" xsi:type="object">CommerceKings\AbandonedCart\Model\ReminderPolicy\OncePerCart</argument>
+        <!-- always through a proxy: both are built from Notification's subscription type pool, which builds this -->
+        <argument name="cartData" xsi:type="object">CommerceKings\AbandonedCart\Api\CartDataInterface\Proxy</argument>
+        <argument name="restoreLinks" xsi:type="object">CommerceKings\AbandonedCart\Api\RestoreLinkInterface\Proxy</argument>
     </arguments>
 </type>
 <!-- its notification type (Notification's consumer) and subscription type (who may sign up a cart) -->
@@ -154,15 +156,19 @@ class SmsReminder implements ReminderTypeInterface
 </type>
 ```
 
-If your type depends on something that is built from Notification's subscription type pool (as the email reminder's
-data is), inject that through a Magento proxy (`…\Proxy`) – the pool builds your subscription type, which builds your
-reminder type.
+Inject `CartDataInterface` and `RestoreLinkInterface` always via `\Proxy` (as above): Notification's subscription type
+pool builds your subscription type, which builds your reminder type, and both of these depend back on that pool (the
+restore link through the email reminder's subscriber) – injected directly, Magento reports a circular dependency. The
+same goes for anything else of yours that is built from that pool. The reminder policy needs no argument: the
+`ReminderPolicyInterface` preference is one reminder per cart; pass your own implementation for another rule.
 
 ## 3. Checkout
 
 - **The checkbox and the phone field:** Notification's `CommerceKings_Notification::address-consent.phtml` with
   `type` = your code and `channel` = `sms` (see Notification's module-authors guide, *Address consent*). Show both
-  only when a provider exists for the channel: `ProviderPoolInterface::getAll()` has one with that channel.
+  only when a provider exists for the channel: `ProviderPoolInterface::getAll()` has one with that channel. On
+  Luma's checkout the widget finds the phone input when it appears, so the block works below the shipping form; to
+  place it right next to the field, add it as a child of the shipping address component in the checkout `jsLayout`.
 - **Subscribe:** after the checkbox recorded the consent (`ckAddressConsent:recorded`), sign the cart up through
   Notification's REST routes: guests `POST /V1/ck-notification/subscriptions` with `{"type": "cart_reminder_sms",
   "reference": <masked cart id>, "recipient": <phone>}`, customers `POST …/subscriptions/mine` with the quote id as
