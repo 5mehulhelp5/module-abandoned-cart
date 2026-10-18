@@ -6,6 +6,15 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 **Everyday reliable, never slows your store.** A well-timed email for every abandoned cart.
 
+- **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
+  minute, every cart exactly once (see *Where it shines* below).
+- **Your rules.** Opt-in with a cookie banner, or opt-out with an optional checkout notice. Set the delay, hourly limit,
+  template, sender and notice text – or plug in your own reminder schedule.
+- **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
+  one.
+- **Respectful by design.** A recipient cooldown, optional quiet hours, no email after a shopper says no, and a
+  "stop these emails" link that suppresses an address someone else signed up.
+
 **Email reminders are built in** and work out of the box. No extra module or provider needed.
 
 **Text messages and WhatsApp:** add [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider:
@@ -18,15 +27,6 @@ WhatsApp, Viber). Consent for a phone number is a checkbox next to the number at
 **Optional, consent for email:** send reminders only to shoppers who agree, through a cookie banner. Install
 [privacy-bundle](https://github.com/commercekings/privacy-bundle) (or its parts: [module-consent-notification](https://github.com/commercekings/module-consent-notification),
 [module-consent](https://github.com/commercekings/module-consent), [module-consent-vanilla](https://github.com/commercekings/module-consent-vanilla)).
-
-- **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
-  minute, every cart exactly once (see *Where it shines* below).
-- **Your rules.** Opt-in with a cookie banner, or opt-out with an optional checkout notice. Set the delay, hourly limit,
-  template, sender and notice text – or plug in your own reminder schedule.
-- **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
-  one.
-- **Respectful by design.** A recipient cooldown, optional quiet hours, no email after a shopper says no, and a
-  "stop these emails" link that suppresses an address someone else signed up.
 
 ## Installation
 
