@@ -192,7 +192,8 @@ class CartSubscriptionTest extends TestCase
             $this->om->get(ContactRepositoryInterface::class), $this->stores,
             new EmailAddress(), new StringLength(['max' => 255]), $this->om->create(FilterManager::class),
             $this->om->get(\CommerceKings\Notification\Api\StopListInterface::class), $this->om->get(\Magento\Customer\Api\CustomerRepositoryInterface::class),
-            $this->om->get(\CommerceKings\Notification\Model\RecipientNormalizerPool::class));
+            $this->om->get(\CommerceKings\Notification\Model\RecipientNormalizerPool::class),
+            $this->om->get(\Magento\Framework\Event\ManagerInterface::class), new \Psr\Log\NullLogger());
     }
 
     private function customer(): int
