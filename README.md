@@ -67,8 +67,8 @@ Carts expire with Magento's *Quote Lifetime* (normally 30 days). The recipient c
 optional one-click unsubscribe headers are under **CommerceKings > Notifications**.
 
 To change the email, load the template in **Marketing > Email Templates**. Variables: `customer_name`, `items_html`,
-`grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; keep the unsubscribe line inside
-`{{depend optout_url}}`.
+`grand_total`, `restore_url`, `optout_url`, `block_url`, `contact_url`, `store_url`; keep the unsubscribe line inside
+`{{depend optout_url}}` and the stop link inside `{{depend block_url}}`.
 
 ## Guest becomes a customer
 

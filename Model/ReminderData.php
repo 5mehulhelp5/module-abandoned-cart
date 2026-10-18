@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Model;
 
+use CommerceKings\Notification\Api\Channel;
+use CommerceKings\Notification\Api\RecipientBlockInterface;
+use Magento\Framework\App\ObjectManager;
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
 use CommerceKings\Notification\Api\SubscriberInterface;
@@ -38,6 +41,8 @@ class ReminderData
     /** @var array<string, Currency> */
     private array $currencies = [];
 
+    private readonly RecipientBlockInterface $blocks;
+
     public function __construct(
         private readonly ImageHelper $imageHelper,
         private readonly ProductConfiguration $productConfiguration,
@@ -48,8 +53,10 @@ class ReminderData
         private readonly Escaper $escaper,
         private readonly UnsubscribeLinkInterface $unsubscribeLinks,
         private readonly LinkSignature $signature,
-        private readonly SubscriberInterface $subscriber
+        private readonly SubscriberInterface $subscriber,
+        ?RecipientBlockInterface $blocks = null
     ) {
+        $this->blocks = $blocks ?? ObjectManager::getInstance()->get(RecipientBlockInterface::class);
     }
 
     /**
@@ -69,6 +76,9 @@ class ReminderData
             'optout_url' => $this->unsubscribeLinks->getUrl(new UnsubscribeContext($permissionRef, (int)$quote->getStoreId(),
                 $context + ['quote_id' => (int)$quote->getId(),
                     'customer_id' => $quote->getCustomerId() ? (int)$quote->getCustomerId() : null])),
+            // Notification's "stop these emails" link (do not contact); '' when the shop turned it off
+            'block_url' => isset($context['email']) && is_string($context['email'])
+                ? $this->blocks->getBlockUrl(Channel::EMAIL, $context['email'], (int)$quote->getStoreId()) : '',
         ];
     }
 
