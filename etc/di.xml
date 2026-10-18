@@ -57,4 +57,25 @@
             <argument name="permission" xsi:type="object">CommerceKingsCartReminderPermission</argument>
         </arguments>
     </type>
+    <!-- the cart reminder's subscriber: its type's own, else the shop-wide one (Notification's TypeSubscriber) -->
+    <virtualType name="CommerceKingsCartReminderSubscriber" type="CommerceKings\Notification\Model\TypeSubscriber">
+        <arguments>
+            <argument name="typeCode" xsi:type="string">cart_reminder</argument>
+        </arguments>
+    </virtualType>
+    <type name="CommerceKings\AbandonedCart\Model\RestoreAccess">
+        <arguments>
+            <argument name="subscriber" xsi:type="object">CommerceKingsCartReminderSubscriber</argument>
+        </arguments>
+    </type>
+    <type name="CommerceKings\AbandonedCart\Model\ReminderData">
+        <arguments>
+            <argument name="subscriber" xsi:type="object">CommerceKingsCartReminderSubscriber</argument>
+        </arguments>
+    </type>
+    <type name="CommerceKings\AbandonedCart\Model\SubscriberUnsubscribeLink">
+        <arguments>
+            <argument name="subscriber" xsi:type="object">CommerceKingsCartReminderSubscriber</argument>
+        </arguments>
+    </type>
 </config>

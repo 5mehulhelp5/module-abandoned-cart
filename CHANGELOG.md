@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restore access, the restore link and the unsubscribe link use the cart reminder's subscriber
+  (`CommerceKingsCartReminderSubscriber`): its type's own, else the shop-wide one.
 - Follows Notification's "stop" naming: the template variable is `stop_url`; reminders declare `getChannel()` email.
 - A skipped send (cooldown, stop, changed recipient) keeps the failure count, so a bad address is still given up.
 - The restore page sends no Referer (the signed link is in its URL); restore links are signed with a

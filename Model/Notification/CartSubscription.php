@@ -7,6 +7,7 @@ use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\QuoteScope;
 use CommerceKings\Notification\Api\Channel;
 use CommerceKings\Notification\Api\Data\Target;
+use CommerceKings\Notification\Api\SubscriberInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Api\SubscriptionTypeInterface;
 use Magento\Framework\App\ResourceConnection;
@@ -38,6 +39,12 @@ class CartSubscription implements SubscriptionTypeInterface
 
     /** The shop-wide permission: opt-out, or the cookie banner with the consent bridge. */
     public function getPermission(): ?SubscriptionPermissionInterface
+    {
+        return null;
+    }
+
+    /** The shop-wide subscriber, with the shop-wide permission. */
+    public function getSubscriber(): ?SubscriberInterface
     {
         return null;
     }

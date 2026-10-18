@@ -188,7 +188,7 @@ class CartSubscriptionTest extends TestCase
         return new SubscriptionManagement($this->resource, $types,
             new \CommerceKings\Notification\Model\PermissionResolver(new ConsentPermission($consent ?? $this->consent(), $guard,
                 $this->stores, $this->createStub(BrowserIdentityInterface::class), $this->createStub(ConsentStore::class),
-                $this->createStub(\CommerceKings\Consent\Api\WithdrawalLinkInterface::class)), $types),
+                $this->createStub(\CommerceKings\Consent\Api\WithdrawalLinkInterface::class)), $types, $this->resource),
             $this->om->get(ContactRepositoryInterface::class), $this->stores,
             new EmailAddress(), new StringLength(['max' => 255]), $this->om->create(FilterManager::class),
             $this->om->get(\CommerceKings\Notification\Api\StopListInterface::class), $this->om->get(\Magento\Customer\Api\CustomerRepositoryInterface::class),
