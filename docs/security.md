@@ -90,5 +90,5 @@ Email content restricts visitor-controlled values and uses the shop's catalog da
 
 - **No visitor text in the email.** Custom options are shown only for the store's predefined choices (`drop_down`, `radio`, `checkbox`, `multiple`); free text (such as an engraved message), file names and other types are left out. Product and configurable option names come from the catalog.
 - **Greeting** uses only the first word of the name, letters/`-`/`'` only, max 20 characters. The default template uses "Hi %name," when a valid name is available and omits the greeting otherwise.
-- The guest subscribe endpoint has no rate limit in code: add one in nginx or your proxy – see module-notification's [operations guide](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting).
+- The guest subscribe endpoint has no rate limit in code: add one in your web server, proxy or CDN as the first line of defence – see module-notification's [operations guide](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting). [commercekings/module-rate-limit](https://github.com/commercekings/module-rate-limit) (Magento 2.4.7+) is an optional second line for it and the restore link.
 - The recorded consent shows what a browser sent; a scripted client can fake it, like with any cookie banner.

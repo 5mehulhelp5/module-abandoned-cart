@@ -88,8 +88,9 @@ existing customer cart, the guest address is removed by the nightly cleanup.
 - Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000`, so long-running workers recycle.
 - To scale, run more consumers in parallel. Number of consumers = email provider's limit per second ÷ emails one
   consumer sends per second.
-- Rate-limit the guest subscribe endpoint in nginx or your proxy
-  ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)).
+- Rate-limit the guest subscribe endpoint in your web server, proxy or CDN – the first line of defence
+  ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)). Optional
+  second line: [commercekings/module-rate-limit](https://github.com/commercekings/module-rate-limit) (Magento 2.4.7+), which also covers the restore link.
 
 **Note:** If you turn on the optional *One-click unsubscribe*, send from a no-reply address whose domain DKIM-signs
 the unsubscribe headers, as [RFC 8058](https://www.rfc-editor.org/rfc/rfc8058) requires.
