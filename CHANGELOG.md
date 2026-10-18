@@ -4,7 +4,9 @@
 
 - Follows Notification's quiet hours: a store in quiet hours for the reminder's channel queues nothing, and a reminder
   held by them (`QUIET_HOURS`) is restored like a skip (failure count kept) and waits in `skip_until` until they end.
-  Reminders are email, which quiet hours leave out unless the shop selects it.
+  Reminders are email, which quiet hours leave out unless the shop selects it. The retry time is asked for the
+  reminder's recipient, so quiet hours per recipient (a preference) hold each reminder on its own.
+- Reminder deliveries name their type (`Delivery::$type` = `cart_reminder`) for providers with templates of their own.
 - Restore access, the restore link and the unsubscribe link use the cart reminder's subscriber
   (`CommerceKingsCartReminderSubscriber`): its type's own, else the shop-wide one.
 - Follows Notification's "stop" naming: the template variable is `stop_url`; reminders declare `getChannel()` email.

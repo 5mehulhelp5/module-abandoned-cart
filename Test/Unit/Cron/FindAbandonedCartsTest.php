@@ -22,6 +22,8 @@ use Psr\Log\LoggerInterface;
 class FindAbandonedCartsTest extends TestCase
 {
     private bool $quiet = false;
+    /** quiet for every given recipient, but not for the whole store (a recipient-time-zone preference) */
+    private bool $quietPerRecipient = false;
     private array $quietAsked = [];
     use DbTestTrait;
 
@@ -70,9 +72,9 @@ class FindAbandonedCartsTest extends TestCase
     private function quietHours(): \CommerceKings\Notification\Api\QuietHoursInterface
     {
         $quiet = $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class);
-        $quiet->method('isQuiet')->willReturnCallback(function ($storeId, $channel) {
-            $this->quietAsked[] = [$storeId, $channel];
-            return $this->quiet;
+        $quiet->method('isQuiet')->willReturnCallback(function ($storeId, $channel, $recipient = null) {
+            $this->quietAsked[] = [$storeId, $channel, $recipient];
+            return $this->quiet || ($this->quietPerRecipient && $recipient !== null);
         });
         return $quiet;
     }
@@ -91,6 +93,16 @@ class FindAbandonedCartsTest extends TestCase
         $this->assertSame(0, $this->finder()->execute());
         $this->assertSame([], $this->updates);
         $this->assertSame('email', $this->quietAsked[0][1], 'asked for the reminder\'s channel');
+        $this->assertNull($this->quietAsked[0][2], 'asked for the whole store: no recipient is known yet');
+    }
+
+    /** Quiet hours per recipient answer false for the whole store: the finder queues, the sender holds each one. */
+    public function testQuietHoursPerRecipientLeaveTheFinderAlone(): void
+    {
+        $this->quietPerRecipient = true;
+        $this->fetchAllResults = [self::due([10])];
+        $this->assertSame(1, $this->finder()->execute());
+        $this->assertSame([[CartReminder::CODE, '1010']], $this->published);
     }
 
     public function testDisabledStoresDoNothing(): void

@@ -189,7 +189,8 @@ class CartReminder implements NotificationTypeInterface
             true,
             // A replaced resolver may read an external recipient source. Recheck it after claiming too.
             fn (): bool => $this->recipients->resolve($id) === $email,
-            stoppable: $this->subscriptionType->isStoppable()
+            stoppable: $this->subscriptionType->isStoppable(),
+            type: self::CODE
         );
         try {
             $status = $this->sender->send($message);
@@ -222,7 +223,7 @@ class CartReminder implements NotificationTypeInterface
             $restore();
             if ($status === SenderInterface::QUIET_HOURS) {
                 // held, not dropped: the finder leaves the cart out until the quiet window ends, then queues it again
-                $until = $this->quietHours->nextAllowedAt($storeId, $this->subscriptionType->getChannel());
+                $until = $this->quietHours->nextAllowedAt($storeId, $this->subscriptionType->getChannel(), $email);
                 // null: the window ended since the send; the next run simply queues the cart again
                 if ($until !== null) {
                     // UTC, like the finder's NOW() on Magento's database session

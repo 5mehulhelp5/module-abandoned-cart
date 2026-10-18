@@ -36,9 +36,9 @@ use Psr\Log\LoggerInterface;
  *
  * "Maximum reminders per hour": a run only publishes what still fits in the hour (sent plus validly queued); the reminder
  * checks it again when sending. Recipient cooldown suppresses recent addresses; such a cart is left out for an hour
- * (skip_until) instead of being scanned again on every run. A store in quiet hours for the reminder's channel is left
- * out while they last; a reminder held by them waits in skip_until until they end. Store settings and policy
- * conditions are repeated in the queue claim so a stale selection cannot authorize delivery.
+ * (skip_until) instead of being scanned again on every run. A store in quiet hours for every recipient on the
+ * reminder's channel is left out while they last; a reminder held by them waits in skip_until until they end. Store
+ * settings and policy conditions are repeated in the queue claim so a stale selection cannot authorize delivery.
  */
 class FindAbandonedCarts
 {
@@ -206,9 +206,10 @@ class FindAbandonedCarts
         $branches = [];
         foreach ($this->stores->getStores() as $store) {
             $id = (int)$store->getId();
-            // a store in quiet hours for the reminder's channel queues nothing until they end
+            // a store in quiet hours for every recipient on the reminder's channel queues nothing until they end;
+            // quiet hours per recipient (a preference) answer false here and the sender holds each reminder
             if (!$this->config->isEnabled($id)
-                || $this->quietHours->isQuiet($id, $this->subscriptionType->getChannel())) {
+                || $this->quietHours->isQuiet($id, $this->subscriptionType->getChannel(), null)) {
                 continue;
             }
             $delay = $this->config->getDelayMinutes($id);

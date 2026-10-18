@@ -78,6 +78,10 @@ class CartReminderTest extends TestCase
     private bool $stopAll = false;
     /** quiet hours: the window's end, or null when not quiet */
     private ?\DateTimeImmutable $quietUntil = null;
+    /** quiet hours calls: [method, store, channel, recipient] */
+    private array $quietAsked = [];
+    /** Delivery::$type of each delivery the provider got */
+    private array $deliveredTypes = [];
     private array $removedSubscriptions = [];
     private \Symfony\Component\Mime\Email $nativeMessage;
     private string $optoutUrl = 'https://shop.test/ckconsent/optout?c=id&t=signature';
@@ -158,7 +162,22 @@ class CartReminderTest extends TestCase
             $this->recipientClaimed = false;
         });
         $provider = new MagentoEmail($builder, new OneClickHeaders(), $this->createStub(\Psr\Log\LoggerInterface::class));
-        $mailer = new Sender(new ProviderPool($notificationConfig, [$provider]), $this->emulation, $cooldown, $notificationConfig,
+        $spy = new class($provider, function (\CommerceKings\Notification\Api\Data\Delivery $delivery) { $this->deliveredTypes[] = $delivery->type; })
+            implements \CommerceKings\Notification\Api\ProviderInterface {
+            public function __construct(private readonly MagentoEmail $inner, private readonly \Closure $seen)
+            {
+            }
+            public function getCode(): string { return $this->inner->getCode(); }
+            public function getLabel(): string { return $this->inner->getLabel(); }
+            public function getChannel(): string { return $this->inner->getChannel(); }
+            public function supportsOneClickUnsubscribe(): bool { return $this->inner->supportsOneClickUnsubscribe(); }
+            public function send(\CommerceKings\Notification\Api\Data\Delivery $delivery, \CommerceKings\Notification\Api\Data\DeliveryContent $content): void
+            {
+                ($this->seen)($delivery);
+                $this->inner->send($delivery, $content);
+            }
+        };
+        $mailer = new Sender(new ProviderPool($notificationConfig, [$spy]), $this->emulation, $cooldown, $notificationConfig,
             new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->stopList(),
             $this->quietHours());
         $locks = $this->createStub(\Magento\Framework\Lock\LockManagerInterface::class);
@@ -177,8 +196,14 @@ class CartReminderTest extends TestCase
     private function quietHours(): \CommerceKings\Notification\Api\QuietHoursInterface
     {
         $quiet = $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class);
-        $quiet->method('isQuiet')->willReturnCallback(fn () => $this->quietUntil !== null);
-        $quiet->method('nextAllowedAt')->willReturnCallback(fn () => $this->quietUntil);
+        $quiet->method('isQuiet')->willReturnCallback(function (...$args) {
+            $this->quietAsked[] = ['isQuiet', ...$args];
+            return $this->quietUntil !== null;
+        });
+        $quiet->method('nextAllowedAt')->willReturnCallback(function (...$args) {
+            $this->quietAsked[] = ['nextAllowedAt', ...$args];
+            return $this->quietUntil;
+        });
         return $quiet;
     }
 
@@ -275,6 +300,16 @@ class CartReminderTest extends TestCase
         $this->assertSame([null, 2, '2026-10-19 06:00:00'],
             [$data['reminded_at'], $data['failed_sends'], $data['skip_until']], 'restored, failures kept, retry after the window');
         $this->assertStringContainsString('skipped (quiet hours)', implode(' ', $this->logs));
+        $this->assertSame([['isQuiet', 1, 'email', 'a@test.com'], ['nextAllowedAt', 1, 'email', 'a@test.com']],
+            $this->quietAsked, 'asked for this recipient, by the sender and for the retry time');
+    }
+
+    /** A provider with templates of its own (e.g. WhatsApp) maps the notification type to one of them. */
+    public function testTheDeliveryNamesItsNotificationType(): void
+    {
+        $this->consumer()->process('42');
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertSame([CartReminder::CODE], $this->deliveredTypes);
     }
 
     /** A skipped send (here: the recipient cooldown) keeps the failure count, so a bad address is still given up. */
