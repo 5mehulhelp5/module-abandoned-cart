@@ -41,7 +41,7 @@ class CartReminderTest extends TestCase
         'entity_id' => '42', 'is_active' => '1', 'items_count' => '2', 'customer_email' => 'a@test.com', 'store_id' => '1',
         'customer_id' => null, 'updated_at' => '2026-10-01 12:00:00',
         'subscription_id' => '9', 'contact_id' => '7', 'captured_at' => '2026-10-01 12:00:00', 'permission_ref' => 'cid-1',
-        'reminded_at' => null, 'queued_at' => '2026-10-01 12:30:00', 'delivery_version' => '0',
+        'sent_at' => null, 'queued_at' => '2026-10-01 12:30:00', 'delivery_version' => '0',
     ];
     private int $perHour = 0;
     private bool $hourlyLockFree = true;
@@ -211,11 +211,11 @@ class CartReminderTest extends TestCase
     private function assertReleasedOnly(): void
     {
         $this->assertCount(1, $this->updates, 'no claim');
-        $this->assertSame('ck_abandoned_cart', $this->updates[0]['table']);
+        $this->assertSame('ck_notification_delivery_state', $this->updates[0]['table']);
         $this->assertSame(['queued_at' => null], $this->updates[0]['data']);
-        $this->assertSame(['quote_id = ?', 'queued_at = ?'],
+        $this->assertSame(['type = ?', 'reference_id = ?', 'subject_key = ?', 'queued_at = ?'],
             self::conditions($this->updates[0]['where']));
-        $this->assertSame(42, $this->updates[0]['where']['quote_id = ?']);
+        $this->assertSame(42, $this->updates[0]['where']['reference_id = ?']);
         $this->assertSame('2026-10-01 12:30:00', $this->updates[0]['where']['queued_at = ?'], 'only the mark it read');
     }
 
@@ -237,7 +237,7 @@ class CartReminderTest extends TestCase
             'ordered' => [['is_active' => '0'] + self::ROW, true, false, 'ordered / closed'],
             'empty' => [['items_count' => '0'] + self::ROW, true, false, 'empty'],
             'no email' => [['contact_id' => null] + self::ROW, true, false, 'no email'],
-            'already reminded' => [['reminded_at' => '2026-10-10 09:00:00'] + self::ROW, true, false, 'reminder policy'],
+            'already reminded' => [['sent_at' => '2026-10-10 09:00:00'] + self::ROW, true, false, 'reminder policy'],
             'permission withdrawn / expired / old revision' => [self::ROW, true, true,
                 'permission withdrawn, expired or for another purpose / website'],
             'module disabled' => [self::ROW, false, false, 'disabled'],
@@ -298,7 +298,7 @@ class CartReminderTest extends TestCase
         $this->assertSame([], $this->removedSubscriptions, 'the subscription stays');
         $data = array_merge(...array_map(fn ($u) => $u['data'], array_slice($this->updates, 1)));
         $this->assertSame([null, 2, '2026-10-19 06:00:00'],
-            [$data['reminded_at'], $data['failed_sends'], $data['skip_until']], 'restored, failures kept, retry after the window');
+            [$data['sent_at'], $data['failed_sends'], $data['skip_until']], 'restored, failures kept, retry after the window');
         $this->assertStringContainsString('skipped (quiet hours)', implode(' ', $this->logs));
         $this->assertSame([['isQuiet', 1, 'email', 'a@test.com'], ['nextAllowedAt', 1, 'email', 'a@test.com']],
             $this->quietAsked, 'asked for this recipient, by the sender and for the retry time');
@@ -338,8 +338,8 @@ class CartReminderTest extends TestCase
         $consumer->process('42');
         $consumer->process('43');
         $this->assertSame(1, $this->sentMessages);
-        $this->assertNull($this->updates[2]['data']['reminded_at']);
-        $this->assertSame(['reminded_at', 'failed_sends'], array_keys($this->updates[2]['data']),
+        $this->assertNull($this->updates[2]['data']['sent_at']);
+        $this->assertSame(['sent_at', 'failed_sends'], array_keys($this->updates[2]['data']),
             'the prior reminder state and failure count come back');
         $this->assertSame([], $this->releasedRecipients);
     }
@@ -408,11 +408,11 @@ class CartReminderTest extends TestCase
             $state->quoteId === 42 && $state->storeId === 1 && $state->lastRemindedAt === $last
             && $state->getAttribute('updated_at') === self::ROW['updated_at']))->willReturn(true);
         $this->policy->expects($this->once())->method('dueCondition')->with($this->callback(fn (ReminderQuery $query) =>
-            $query->storeId === 1 && $query->quoteId() === 'q.entity_id' && $query->column('reminded_at') === 'c.reminded_at'))->willReturn('CUSTOM_POLICY');
-        $this->consumer(['reminded_at' => $last] + self::ROW)->process('42');
+            $query->storeId === 1 && $query->quoteId() === 'q.entity_id' && $query->column('reminded_at') === 'c.sent_at'))->willReturn('CUSTOM_POLICY');
+        $this->consumer(['sent_at' => $last] + self::ROW)->process('42');
         $this->assertSame(1, $this->sentMessages);
         $this->assertContains('CUSTOM_POLICY', self::conditions($this->updates[0]['where']));
-        $this->assertContains("c.reminded_at = '$last'", self::conditions($this->updates[0]['where']));
+        $this->assertContains("c.sent_at = '$last'", self::conditions($this->updates[0]['where']));
     }
 
     public function testFailedDeliveryRestoresAlternativePolicyState(): void
@@ -423,18 +423,18 @@ class CartReminderTest extends TestCase
         $this->sendFails = true;
         $last = '2026-10-01 12:00:00';
         try {
-            $this->consumer(['reminded_at' => $last, 'delivery_version' => '4'] + self::ROW)->process('42');
+            $this->consumer(['sent_at' => $last, 'delivery_version' => '4'] + self::ROW)->process('42');
             $this->fail('transport should fail');
         } catch (\RuntimeException $error) {
             $this->assertSame('SMTP down', $error->getMessage());
         }
-        $this->assertSame($last, $this->updates[1]['data']['reminded_at']);
+        $this->assertSame($last, $this->updates[1]['data']['sent_at']);
         $this->assertSame(4, $this->updates[0]['where']['c.delivery_version = ?']);
         $this->assertSame(5, $this->updates[0]['data']['c.delivery_version']);
-        $this->assertSame(['reminded_at', 'failed_sends', 'skip_until'], array_keys($this->updates[1]['data']),
+        $this->assertSame(['sent_at', 'failed_sends', 'skip_until'], array_keys($this->updates[1]['data']),
             'rollback keeps the version and queue mark');
-        $this->assertSame($last, $this->updates[1]['data']['reminded_at']);
-        $this->assertSame(['quote_id = ?' => 42, 'delivery_version = ?' => 5], $this->updates[1]['where']);
+        $this->assertSame($last, $this->updates[1]['data']['sent_at']);
+        $this->assertSame(['type = ?' => 'cart_reminder', 'reference_id = ?' => 42, 'subject_key = ?' => '', 'delivery_version = ?' => 5], $this->updates[1]['where']);
     }
 
     public function testUnsupportedCartRepresentationReleasesCartClaimWithoutSending(): void
@@ -450,10 +450,10 @@ class CartReminderTest extends TestCase
         }
         $this->assertSame([], $this->mail);
         $this->assertCount(2, $this->updates);
-        $this->assertNull($this->updates[1]['data']['reminded_at']);
-        $this->assertSame(['reminded_at', 'failed_sends', 'skip_until'], array_keys($this->updates[1]['data']));
-        $this->assertSame('ck_abandoned_cart', $this->updates[1]['table']);
-        $this->assertSame(42, $this->updates[1]['where']['quote_id = ?']);
+        $this->assertNull($this->updates[1]['data']['sent_at']);
+        $this->assertSame(['sent_at', 'failed_sends', 'skip_until'], array_keys($this->updates[1]['data']));
+        $this->assertSame('ck_notification_delivery_state', $this->updates[1]['table']);
+        $this->assertSame(42, $this->updates[1]['where']['reference_id = ?']);
     }
 
     public function testClaimsThenSends(): void
@@ -466,15 +466,15 @@ class CartReminderTest extends TestCase
         $this->assertContains(['s.subscription_id = ?', 42], $this->selectWhere, 'the reference is the subscription id');
         $claim = $this->updates[0];
         $this->assertSame(self::joined(), $claim['table']);
-        $this->assertSame(['c.reminded_at', 'c.queued_at', 'c.delivery_version', 'c.failed_sends'], array_keys($claim['data']),
+        $this->assertSame(['c.sent_at', 'c.queued_at', 'c.delivery_version', 'c.failed_sends'], array_keys($claim['data']),
             'Magento\'s quote row is not written');
         $this->assertSame(0, $claim['data']['c.failed_sends'], 'a sent reminder resets the failure count');
         $this->assertSame(0, $claim['where']['c.delivery_version = ?']);
         $this->assertSame(1, $claim['data']['c.delivery_version']);
         $this->assertNull($claim['data']['c.queued_at'], 'sent: no longer waiting in the queue');
-        $this->assertSame('NOW()', (string)$claim['data']['c.reminded_at']);
-        $this->assertSame(42, $claim['where']['c.quote_id = ?']);
-        $this->assertContains('c.reminded_at IS NULL', self::conditions($claim['where']));
+        $this->assertSame('NOW()', (string)$claim['data']['c.sent_at']);
+        $this->assertSame(42, $claim['where']['c.reference_id = ?']);
+        $this->assertContains('c.sent_at IS NULL', self::conditions($claim['where']));
         // The claim repeats the cart and consent checks in the same statement
         $this->assertSame(1, $claim['where']['q.is_active = ?']);
         $this->assertContains('q.items_count > 0', self::conditions($claim['where']));
@@ -537,8 +537,8 @@ class CartReminderTest extends TestCase
         $this->consumer()->process('42');
         $this->assertSame([], $this->mail);
         $this->assertCount(2, $this->updates);
-        $this->assertNull($this->updates[1]['data']['reminded_at']);
-        $this->assertSame(['reminded_at', 'failed_sends'], array_keys($this->updates[1]['data']));
+        $this->assertNull($this->updates[1]['data']['sent_at']);
+        $this->assertSame(['sent_at', 'failed_sends'], array_keys($this->updates[1]['data']));
     }
 
     public function testCustomerUsesMagentoEmailAndIgnoresOldGuestCapture(): void
@@ -569,10 +569,10 @@ class CartReminderTest extends TestCase
             $this->assertSame('SMTP down', $e->getMessage());
         }
         $release = $this->updates[1];
-        $this->assertSame(['reminded_at' => null, 'failed_sends' => 1], array_diff_key($release['data'], ['skip_until' => 1]),
+        $this->assertSame(['sent_at' => null, 'failed_sends' => 1], array_diff_key($release['data'], ['skip_until' => 1]),
             'only the reminder timestamp is restored, and the failure counted');
         $this->assertSame('NOW() + INTERVAL 60 MINUTE', (string)$release['data']['skip_until'], 'the next try waits an hour');
-        $this->assertSame(['quote_id = ?' => 42, 'delivery_version = ?' => 1], $release['where'], 'only its delivery claim');
+        $this->assertSame(['type = ?' => 'cart_reminder', 'reference_id = ?' => 42, 'subject_key = ?' => '', 'delivery_version = ?' => 1], $release['where'], 'only its delivery claim');
     }
 
     public function testOneClickHeadersAreOptionalAndDoNotReplaceTemplateVariables(): void
@@ -706,6 +706,8 @@ class CartReminderTest extends TestCase
         $this->assertSame([['lock', 'commercekings_abandoned_cart_hourly', 10], ['unlock', 'commercekings_abandoned_cart_hourly']],
             $this->lockEvents);
         $this->assertContains('CommerceKings_AbandonedCart: cart 42 skipped (hourly limit)', $this->logs);
+        $this->assertContains(['type = ?', 'cart_reminder'], $this->selectWhere, 'only cart reminders count');
+        $this->assertContains(['sent_at >= NOW() - INTERVAL 1 HOUR', null], $this->selectWhere);
     }
 
     public function testUnderTheHourlyLimitTheClaimRunsInsideTheLock(): void
@@ -714,7 +716,7 @@ class CartReminderTest extends TestCase
         $this->fetchOneResult = '4';
         $this->consumer()->process('42');
         $this->assertSame(1, $this->sentMessages);
-        $this->assertSame(['c.reminded_at', 'c.queued_at', 'c.delivery_version', 'c.failed_sends'], array_keys($this->updates[0]['data']),
+        $this->assertSame(['c.sent_at', 'c.queued_at', 'c.delivery_version', 'c.failed_sends'], array_keys($this->updates[0]['data']),
             'claimed');
         $this->assertSame('unlock', end($this->lockEvents)[0], 'unlocked before sending finished');
     }

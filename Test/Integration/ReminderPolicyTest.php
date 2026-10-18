@@ -95,6 +95,9 @@ class ReminderPolicyTest extends TestCase
             if ($hashes) { $db->delete($this->table('ck_notification_cooldown'), ['recipient_hash IN (?)' => $hashes]); }
             $db->delete($this->table(SubscriptionManagement::TABLE),
                 ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quoteIds]);
+            // no foreign key to the quote: the send history goes with the daily cleanup, here at once
+            $db->delete($this->table(\CommerceKings\Notification\Api\DeliveryStateInterface::TABLE),
+                ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quoteIds]);
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quoteIds]);
             if ($emails) { $db->delete($this->table('ck_notification_contact'), ['recipient IN (?)' => $emails]); }
         }
@@ -127,7 +130,7 @@ class ReminderPolicyTest extends TestCase
 
     /**
      * Write the cart's subscription (email → the guest contact of the cart's website, permission_ref, captured_at)
-     * and its send history (queued_at, reminded_at).
+     * and its send history (queued_at, reminded_at - stored as Notification's delivery state sent_at).
      */
     private function state(int $id, array $values): void
     {
@@ -144,10 +147,14 @@ class ReminderPolicyTest extends TestCase
                 ['type = ?' => CartReminder::CODE, 'reference_id = ?' => $id]);
         }
         $history = array_diff_key($values, array_flip(['email', 'permission_ref', 'captured_at']));
+        if (array_key_exists('reminded_at', $history)) {
+            $history['sent_at'] = $history['reminded_at'];
+            unset($history['reminded_at']);
+        }
         if ($history) {
             $carts = $this->om->get(CartTable::class);
             $carts->ensure($id);
-            $db->update($carts->name(), $history, ['quote_id = ?' => $id]);
+            $db->update($carts->name(), $history, $carts->key($id));
         }
     }
 
@@ -160,8 +167,10 @@ class ReminderPolicyTest extends TestCase
             ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
                 ['subscription_id', 'contact_id', 'permission_ref', 'captured_at'])
-            ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id',
-                ['queued_at', 'reminded_at', 'delivery_version', 'skip_until'])
+            // the cart's own history, also without a subscription (it survives a withdrawal)
+            ->joinLeft(['c' => $this->table(\CommerceKings\Notification\Api\DeliveryStateInterface::TABLE)],
+                $db->quoteInto("c.type = ? AND c.reference_id = q.entity_id AND c.subject_key = ''", CartReminder::CODE),
+                ['queued_at', 'reminded_at' => 'sent_at', 'delivery_version', 'skip_until'])
             ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email' => 'recipient'])
             ->where('q.entity_id = ?', $id));
     }
@@ -345,6 +354,30 @@ class ReminderPolicyTest extends TestCase
         $this->assertSame(0, $finder->execute());
     }
 
+    /** The send history is the cart's, not the subscription's: a withdrawal and a new sign-up send no second one. */
+    public function testAWithdrawalAndANewSignUpNeverSendASecondReminderForTheCart(): void
+    {
+        $id = $this->quote();
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(1, $this->sent);
+        $old = (int)$this->subscriptionOf($id);
+        $this->om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class)->remove($old);
+        $this->assertNull($this->row($id)['subscription_id']);
+        $this->assertNotNull($this->row($id)['reminded_at'], 'the history stays without a subscription');
+
+        // the shopper signs up for the same cart again: a new subscription row
+        $this->resource->getConnection()->insert($this->table(SubscriptionManagement::TABLE), [
+            'type' => CartReminder::CODE, 'reference_id' => $id, 'store_id' => (int)$this->row($id)['store_id'],
+            'subject_key' => '', 'permission_ref' => 'fixture-consent',
+            'captured_at' => gmdate('Y-m-d H:i:s', time() - 120)]);
+        $this->state($id, ['email' => $this->email]);
+        $new = $this->subscriptionOf($id);
+        $this->assertNotSame((string)$old, $new);
+        $this->assertSame(0, $this->finder()->execute(), 'not due again');
+        $this->consumer()->process($new);
+        $this->assertSame(1, $this->sent, 'no second reminder for the cart');
+    }
+
     public function testSameAddressCartsAreDeferredWithoutBeingMarkedSentAndDuplicatesDoNotSendAgain(): void
     {
         $first = $this->quote();
@@ -371,8 +404,8 @@ class ReminderPolicyTest extends TestCase
         // the skipped cart is left out for an hour, not scanned again on every run
         $this->assertNotNull($this->row($second)['skip_until']);
         $this->assertSame(0, $this->finder()->execute(), 'checked again only after the skip hour');
-        $this->resource->getConnection()->update($this->table('ck_abandoned_cart'),
-            ['skip_until' => gmdate('Y-m-d H:i:s', time() - 60)], ['quote_id = ?' => $second]);
+        $this->resource->getConnection()->update($this->om->get(CartTable::class)->name(),
+            ['skip_until' => gmdate('Y-m-d H:i:s', time() - 60)], $this->om->get(CartTable::class)->key($second));
         $this->assertSame(1, $this->finder()->execute());
         $this->assertSame([$second], $this->published);
         $this->consumer()->process($this->subscriptionOf($second));
@@ -509,8 +542,8 @@ class ReminderPolicyTest extends TestCase
                     $this->sendFails = false;
                 }
                 $this->assertSame(0, $this->finder()->execute(), 'a failed send waits before the next try');
-                $this->resource->getConnection()->update($this->table('ck_abandoned_cart'),
-                    ['skip_until' => gmdate('Y-m-d H:i:s', time() - 60)], ['quote_id = ?' => $quoteId]);
+                $this->resource->getConnection()->update($this->om->get(CartTable::class)->name(),
+                    ['skip_until' => gmdate('Y-m-d H:i:s', time() - 60)], $this->om->get(CartTable::class)->key($quoteId));
                 $this->assertSame(1, $this->finder()->execute());
                 $this->assertSame($queuedAt, $this->row($quoteId)['queued_at'], 'timestamps alone cannot distinguish the retry');
                 return $original->resolve($quoteId);
@@ -676,7 +709,7 @@ class ReminderPolicyTest extends TestCase
 
     public function testHistoryPolicyCanUseTheCartIdInSelectionAndClaimSql(): void
     {
-        $history = $this->table('ck_abandoned_cart');
+        $history = $this->table(\CommerceKings\Notification\Api\DeliveryStateInterface::TABLE);
         // a third-party policy with its own history subquery, keyed by the cart id; once per cart like the default
         $this->policy = new class($history) implements ReminderPolicyInterface {
             public function __construct(private readonly string $history) {}
@@ -687,8 +720,9 @@ class ReminderPolicyTest extends TestCase
             }
             public function dueCondition(\CommerceKings\AbandonedCart\Api\Data\ReminderQuery $query): string
             {
-                return sprintf('NOT EXISTS (SELECT 1 FROM %s AS h WHERE h.quote_id = %s AND h.reminded_at IS NOT NULL)'
-                    . ' AND %s IS NULL', $this->history, $query->quoteId(), $query->column('reminded_at'));
+                return sprintf("NOT EXISTS (SELECT 1 FROM %s AS h WHERE h.type = 'cart_reminder' AND h.reference_id = %s"
+                    . ' AND h.sent_at IS NOT NULL) AND %s IS NULL', $this->history, $query->quoteId(),
+                    $query->column('reminded_at'));
             }
         };
         $id = $this->quote();
@@ -805,14 +839,16 @@ class ReminderPolicyTest extends TestCase
         $id = $this->quote();
         $this->assertSame(1, $this->finder()->execute());
         $db = $this->resource->getConnection();
-        $db->update($this->table('ck_abandoned_cart'), ['queued_at' => gmdate('Y-m-d H:i:s', time() - 300)], ['quote_id = ?' => $id]);
+        $db->update($this->om->get(CartTable::class)->name(), ['queued_at' => gmdate('Y-m-d H:i:s', time() - 300)],
+            $this->om->get(CartTable::class)->key($id));
         $db->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s')], ['entity_id = ?' => $id]);
         $consumer = $this->consumer();
         $original = (new \ReflectionProperty($consumer, 'recipients'))->getValue($consumer);
         $recipients = $this->createMock(ReminderEmailResolverInterface::class);
         $recipients->expects($this->once())->method('resolve')->willReturnCallback(function ($quoteId) use ($original, $db) {
             // meanwhile: the old mark is cleared, the cart ages, and a new finder run queues it again
-            $db->update($this->table('ck_abandoned_cart'), ['queued_at' => null], ['quote_id = ?' => $quoteId]);
+            $db->update($this->om->get(CartTable::class)->name(), ['queued_at' => null],
+                $this->om->get(CartTable::class)->key($quoteId));
             $db->update($this->table('quote'), ['updated_at' => gmdate('Y-m-d H:i:s', time() - 120)], ['entity_id = ?' => $quoteId]);
             $this->assertSame(1, $this->finder()->execute());
             return $original->resolve($quoteId);

@@ -71,7 +71,7 @@ class CartReminder implements NotificationTypeInterface
     public function process(string $reference): void
     {
         $db = $this->resource->getConnection();
-        $row = $db->fetchRow($this->carts->select(['reminded_at', 'queued_at', 'delivery_version', 'failed_sends'],
+        $row = $db->fetchRow($this->carts->select(['sent_at', 'queued_at', 'delivery_version', 'failed_sends'],
             ['entity_id', 'is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'],
             ['subscription_id', 'contact_id', 'captured_at', 'permission_ref'])
             ->where('s.subscription_id = ?', (int)$reference));
@@ -83,7 +83,7 @@ class CartReminder implements NotificationTypeInterface
             !(int)$row['is_active'] => 'ordered / closed',
             !(int)$row['items_count'] => 'empty',
             $email === null => 'no email',
-            !$this->policy->canSend(new ReminderState($id, (int)$row['store_id'], $row['reminded_at'],
+            !$this->policy->canSend(new ReminderState($id, (int)$row['store_id'], $row['sent_at'],
                 ['updated_at' => $row['updated_at']])) => 'reminder policy',
             $this->lifetime->isExpired((string)$row['updated_at'], (int)$row['store_id']) => 'quote expired',
             $activity > gmdate('Y-m-d H:i:s', time() - $this->config->getDelayMinutes((int)$row['store_id']) * 60) => 'cart recently updated',
@@ -100,7 +100,7 @@ class CartReminder implements NotificationTypeInterface
             return;
         }
 
-        // claim: only one delivery of this message can flip reminded_at from NULL - and only while the cart
+        // claim: only one delivery of this message can flip sent_at from NULL - and only while the cart
         // is still what was checked above and its permission is still valid, in the same statement: a
         // withdrawal stored before this point stops the send, one after it finds the reminder already out
         $delay = $this->config->getDelayMinutes((int)$row['store_id']);
@@ -110,18 +110,17 @@ class CartReminder implements NotificationTypeInterface
         $claim = fn (): int => $db->update(
             $this->carts->joined(),
             // sent: the cart no longer waits in the queue, so a recurring policy can schedule the next reminder
-            ['c.reminded_at' => new Expression('NOW()'), 'c.queued_at' => null, 'c.delivery_version' => $deliveryVersion,
+            ['c.sent_at' => new Expression('NOW()'), 'c.queued_at' => null, 'c.delivery_version' => $deliveryVersion,
                 'c.failed_sends' => 0],
-            [
-                'c.quote_id = ?' => $id,
+            $this->carts->key($id, 'c') + [
                 's.subscription_id = ?' => (int)$row['subscription_id'],
                 'c.delivery_version = ?' => $previousVersion,
                 'c.queued_at <=> ?' => $queuedAt ?? new Expression('NULL'),
                 'q.store_id = ?' => (int)$row['store_id'],
                 $this->policy->dueCondition(new ReminderQuery((int)$row['store_id'], 'c', 'q')),
                 // Compare the state that was checked too, so parallel consumers cannot claim it twice.
-                $row['reminded_at'] === null ? 'c.reminded_at IS NULL'
-                    : $db->quoteInto('c.reminded_at = ?', $row['reminded_at']),
+                $row['sent_at'] === null ? 'c.sent_at IS NULL'
+                    : $db->quoteInto('c.sent_at = ?', $row['sent_at']),
                 'q.is_active = ?' => 1,
                 'q.items_count > 0',
                 'q.customer_id <=> ?' => $row['customer_id'] ?? new Expression('NULL'),
@@ -165,9 +164,9 @@ class CartReminder implements NotificationTypeInterface
         $storeId = (int)$row['store_id'];
         // a send that did not happen (cooldown, block, changed recipient) keeps the failure count of earlier attempts
         $restore = fn () => $db->update($this->carts->name(),
-            ['reminded_at' => $row['reminded_at'], 'failed_sends' => (int)($row['failed_sends'] ?? 0)],
+            ['sent_at' => $row['sent_at'], 'failed_sends' => (int)($row['failed_sends'] ?? 0)],
             // Never undo a newer delivery or decrease the version; a newer queued mark must stay too.
-            ['quote_id = ?' => $id, 'delivery_version = ?' => $deliveryVersion]);
+            $this->carts->key($id) + ['delivery_version = ?' => $deliveryVersion]);
         $message = new Delivery(
             $storeId,
             $this->config->getTemplate($storeId),
@@ -205,10 +204,10 @@ class CartReminder implements NotificationTypeInterface
             $failed = (int)($row['failed_sends'] ?? 0) + 1;
             $retry = CartTable::RETRY_MINUTES[$failed - 1] ?? null;
             $db->update($this->carts->name(), [
-                'reminded_at' => $row['reminded_at'],
+                'sent_at' => $row['sent_at'],
                 'failed_sends' => $failed,
                 'skip_until' => $retry !== null ? new Expression('NOW() + INTERVAL ' . $retry . ' MINUTE') : null,
-            ], ['quote_id = ?' => $id, 'delivery_version = ?' => $deliveryVersion]);
+            ], $this->carts->key($id) + ['delivery_version = ?' => $deliveryVersion]);
             $this->logger->warning($retry !== null
                 ? sprintf('CommerceKings_AbandonedCart: cart %d send failed (%d), next try in %d minutes', $id, $failed, $retry)
                 : sprintf('CommerceKings_AbandonedCart: cart %d send failed %d times, no further reminder', $id, $failed));
@@ -228,7 +227,7 @@ class CartReminder implements NotificationTypeInterface
                 if ($until !== null) {
                     // UTC, like the finder's NOW() on Magento's database session
                     $db->update($this->carts->name(), ['skip_until' => gmdate('Y-m-d H:i:s', $until->getTimestamp())],
-                        ['quote_id = ?' => $id, 'delivery_version = ?' => $deliveryVersion]);
+                        $this->carts->key($id) + ['delivery_version = ?' => $deliveryVersion]);
                 }
             }
             $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $status));
@@ -247,7 +246,7 @@ class CartReminder implements NotificationTypeInterface
         if ($id && $queuedAt !== null) {
             // sending clears the mark, so an unchanged mark also proves nothing was sent since
             $this->resource->getConnection()->update($this->carts->name(), ['queued_at' => null],
-                ['quote_id = ?' => $id, 'queued_at = ?' => $queuedAt]);
+                $this->carts->key($id) + ['queued_at = ?' => $queuedAt]);
         }
     }
 
@@ -256,6 +255,6 @@ class CartReminder implements NotificationTypeInterface
     {
         $db = $this->resource->getConnection();
         return (int)$db->fetchOne($db->select()->from($this->carts->name(), new Expression('COUNT(*)'))
-            ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'));
+            ->where('type = ?', self::CODE)->where('sent_at >= NOW() - INTERVAL 1 HOUR'));
     }
 }

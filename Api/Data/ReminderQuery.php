@@ -5,8 +5,9 @@ namespace CommerceKings\AbandonedCart\Api\Data;
 
 /**
  * SQL context for the cart being selected or claimed. quoteId() is the cart's id, present in every selection and
- * claim - reference it in a policy's own delivery-history subquery. column() qualifies a column of the module's
- * send history (ck_abandoned_cart): queued_at or reminded_at; both are NULL for a cart that was never queued.
+ * claim - reference it in a policy's own delivery-history subquery. column() qualifies a column of the cart's send
+ * history (Notification's delivery state for the cart): queued_at or reminded_at (stored there as sent_at); both are
+ * NULL for a cart that was never queued.
  * Anything else is refused here rather than failing later in SQL.
  * @api
  */
@@ -14,6 +15,8 @@ class ReminderQuery
 {
     /** Send-history columns a policy may reference. */
     public const COLUMNS = ['queued_at', 'reminded_at'];
+    /** Their names in Notification's delivery state. */
+    private const STORED = ['queued_at' => 'queued_at', 'reminded_at' => 'sent_at'];
 
     public function __construct(
         public readonly int $storeId,
@@ -39,6 +42,6 @@ class ReminderQuery
         if (!in_array($name, self::COLUMNS, true)) {
             throw new \InvalidArgumentException(sprintf('Unknown reminder column "%s"; use quoteId() for the cart.', $name));
         }
-        return ($this->tableAlias !== '' ? $this->tableAlias . '.' : '') . $name;
+        return ($this->tableAlias !== '' ? $this->tableAlias . '.' : '') . self::STORED[$name];
     }
 }

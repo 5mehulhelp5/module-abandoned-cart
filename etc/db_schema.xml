@@ -1,28 +1,7 @@
 <?xml version="1.0"?>
-<!-- Abandoned cart send history per cart, next to Magento's cart (quote). Who subscribed, with which consent,
-     is the cart's CommerceKings_Notification subscription. -->
+<!-- No tables of its own: a cart's send history is CommerceKings_Notification's delivery state
+     (ck_notification_delivery_state, type cart_reminder, reference the quote id). ck_abandoned_cart stays in
+     db_schema_whitelist.json so setup:upgrade drops it where an earlier build created it. -->
 <schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:Setup/Declaration/Schema/etc/schema.xsd">
-    <table name="ck_abandoned_cart" resource="checkout" engine="innodb" comment="CK abandoned cart: send history per cart">
-        <column xsi:type="int" name="quote_id" unsigned="true" nullable="false" comment="Cart (quote) ID"/>
-        <column xsi:type="timestamp" name="queued_at" on_update="false" nullable="true" comment="Reminder queued"/>
-        <column xsi:type="timestamp" name="reminded_at" on_update="false" nullable="true" comment="Reminder sent"/>
-        <column xsi:type="int" name="delivery_version" unsigned="true" nullable="false" default="0" comment="Delivery claim version"/>
-        <column xsi:type="timestamp" name="skip_until" on_update="false" nullable="true" comment="Finder skips the cart until then (recipient cooldown, failed send)"/>
-        <column xsi:type="smallint" name="failed_sends" unsigned="true" nullable="false" default="0" comment="Failed send attempts in a row"/>
-        <constraint xsi:type="primary" referenceId="PRIMARY">
-            <column name="quote_id"/>
-        </constraint>
-        <!-- Magento's quote cleanup removes the send history with the cart -->
-        <constraint xsi:type="foreign" referenceId="CK_ABANDONED_CART_QUOTE_ID_QUOTE_ENTITY_ID"
-                    table="ck_abandoned_cart" column="quote_id" referenceTable="quote"
-                    referenceColumn="entity_id" onDelete="CASCADE"/>
-        <index referenceId="CK_ABANDONED_CART_QUEUED_AT" indexType="btree">
-            <column name="queued_at"/>
-        </index>
-        <!-- reminders sent in the last hour (Maximum reminders per hour) -->
-        <index referenceId="CK_ABANDONED_CART_REMINDED_AT" indexType="btree">
-            <column name="reminded_at"/>
-        </index>
-    </table>
 </schema>

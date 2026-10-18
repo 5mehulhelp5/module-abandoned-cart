@@ -72,7 +72,7 @@ class FindAbandonedCarts
         }
         $db = $this->resource->getConnection();
         $stuck = $db->update($this->carts->name(), ['queued_at' => null],
-            ['queued_at < NOW() - INTERVAL ' . self::STUCK_HOURS . ' HOUR']);
+            array_merge(['queued_at < NOW() - INTERVAL ' . self::STUCK_HOURS . ' HOUR'], $this->carts->ofType()));
         if ($stuck) {
             $this->logger->warning(sprintf('CommerceKings_AbandonedCart: %d cart(s) waited over %d hours, queued again',
                 $stuck, self::STUCK_HOURS));
@@ -96,7 +96,7 @@ class FindAbandonedCarts
             $claimed = $db->update(
                 $this->carts->joined(),
                 ['c.queued_at' => new Expression('NOW()')],
-                array_merge(['c.quote_id = ?' => $id, 's.subscription_id = ?' => $subscriptionId],
+                array_merge($this->carts->key($id, 'c'), ['s.subscription_id = ?' => $subscriptionId],
                     $this->eligibleConditions())
             );
             if (!$claimed) {
@@ -105,7 +105,7 @@ class FindAbandonedCarts
             try {
                 $this->queue->publish(CartReminder::CODE, (string)$subscriptionId);
             } catch (\Throwable $error) {
-                $db->update($this->carts->name(), ['queued_at' => null], ['quote_id = ?' => $id]);
+                $db->update($this->carts->name(), ['queued_at' => null], $this->carts->key($id));
                 throw $error;
             }
             if (++$published >= $room) {
@@ -126,7 +126,7 @@ class FindAbandonedCarts
     {
         $db = $this->resource->getConnection();
         $sent = (int)$db->fetchOne($db->select()->from($this->carts->name(), new Expression('COUNT(*)'))
-            ->where('reminded_at >= NOW() - INTERVAL 1 HOUR'));
+            ->where('type = ?', CartReminder::CODE)->where('sent_at >= NOW() - INTERVAL 1 HOUR'));
         $queued = (int)$db->fetchOne($this->carts->select([new Expression('COUNT(*)')])
             ->where('c.queued_at IS NOT NULL')
             ->where($this->permission->validCondition('s.permission_ref')));
@@ -185,7 +185,7 @@ class FindAbandonedCarts
         $this->carts->ensure($quoteId);
         $this->resource->getConnection()->update($this->carts->name(),
             ['skip_until' => new Expression('NOW() + INTERVAL ' . self::SKIP_MINUTES . ' MINUTE')],
-            ['quote_id = ?' => $quoteId]);
+            $this->carts->key($quoteId));
     }
 
     private function eligibleConditions(): array

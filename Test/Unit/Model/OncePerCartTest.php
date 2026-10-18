@@ -18,6 +18,6 @@ class OncePerCartTest extends TestCase
             $this->assertFalse($policy->canSend(new ReminderState(42, $storeId, '2020-01-01 00:00:00')));
             $this->assertFalse($policy->canSend(new ReminderState(42, $storeId, '')));
         }
-        $this->assertSame('c.reminded_at IS NULL', $policy->dueCondition(new ReminderQuery(1, 'c', 'q')));
+        $this->assertSame('c.sent_at IS NULL', $policy->dueCondition(new ReminderQuery(1, 'c', 'q')));
     }
 }

@@ -106,14 +106,17 @@ trait DbTestTrait
     /** The module's real CartTable on this fake; joined() as self::joined() below. */
     private function carts(): \CommerceKings\AbandonedCart\Model\CartTable
     {
-        return new \CommerceKings\AbandonedCart\Model\CartTable($this->resource());
+        $resource = $this->resource();
+        return new \CommerceKings\AbandonedCart\Model\CartTable($resource,
+            new \CommerceKings\Notification\Model\DeliveryState($resource));
     }
 
     /** CartTable::joined() as the fake records it (traits hold no constants before PHP 8.2). */
     private static function joined(): string
     {
-        return 'ck_abandoned_cart AS c INNER JOIN quote AS q ON q.entity_id = c.quote_id'
-            . " INNER JOIN ck_notification_subscription AS s ON s.type = 'cart_reminder' AND s.reference_id = c.quote_id";
+        return 'ck_notification_delivery_state AS c INNER JOIN ck_notification_subscription AS s ON c.type = s.type'
+            . ' AND c.reference_id = s.reference_id AND c.subject_key = s.subject_key'
+            . ' INNER JOIN quote AS q ON q.entity_id = s.reference_id';
     }
 
     /** All WHERE conditions of an update as plain strings ("col = ?" keys and numeric-key conditions). */

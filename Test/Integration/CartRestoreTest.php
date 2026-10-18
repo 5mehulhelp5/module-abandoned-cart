@@ -51,6 +51,8 @@ class CartRestoreTest extends TestCase
         if ($this->quoteIds) {
             $this->resource->getConnection()->delete($this->resource->getTableName('ck_notification_subscription'),
                 ['type = ?' => 'cart_reminder', 'reference_id IN (?)' => $this->quoteIds]);
+            $this->resource->getConnection()->delete($this->resource->getTableName(\CommerceKings\Notification\Api\DeliveryStateInterface::TABLE),
+                ['type = ?' => 'cart_reminder', 'reference_id IN (?)' => $this->quoteIds]);
             $this->resource->getConnection()->delete($this->resource->getTableName('quote'), ['entity_id IN (?)' => $this->quoteIds]);
         }
     }
@@ -85,7 +87,7 @@ class CartRestoreTest extends TestCase
         $carts = $this->om->get(\CommerceKings\AbandonedCart\Model\CartTable::class);
         $carts->ensure((int)$quote->getId());
         $this->resource->getConnection()->update($carts->name(),
-            ['reminded_at' => gmdate('Y-m-d H:i:s')], ['quote_id = ?' => (int)$quote->getId()]);
+            ['sent_at' => gmdate('Y-m-d H:i:s')], $carts->key((int)$quote->getId()));
         return $quote;
     }
 

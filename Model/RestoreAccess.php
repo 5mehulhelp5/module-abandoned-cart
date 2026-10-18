@@ -44,7 +44,7 @@ class RestoreAccess
 
     public function isAvailable(Quote $quote): bool
     {
-        $value = (string)($this->carts->load((int)$quote->getId())['reminded_at'] ?? '');
+        $value = (string)($this->carts->load((int)$quote->getId())['sent_at'] ?? '');
         $sent = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, new \DateTimeZone('UTC'));
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         return $quote->getIsActive() && $quote->getItemsCount() && $sent

@@ -97,6 +97,8 @@ class CartSubscriptionTest extends TestCase
                 ->where('contact_id IS NOT NULL'));
             $db->delete($this->table(SubscriptionManagement::TABLE),
                 ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quotes]);
+            $db->delete($this->table(\CommerceKings\Notification\Api\DeliveryStateInterface::TABLE),
+                ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quotes]);
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quotes]);
             $contacts = array_merge($contacts, $db->fetchCol($db->select()->from($this->table(ContactRepository::TABLE), 'contact_id')
                 ->where('recipient IN (?)', ['captured@example.test', 'new@example.test', 'changed@example.test'])));
@@ -161,7 +163,10 @@ class CartSubscriptionTest extends TestCase
             ->joinLeft(['s' => $this->table(SubscriptionManagement::TABLE)],
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
                 ['captured_at', 'permission_ref', 'customer_id'])
-            ->joinLeft(['c' => $this->table(CartTable::TABLE)], 'c.quote_id = q.entity_id', ['reminded_at'])
+            // the cart's own send history, also without a subscription (it survives a withdrawal)
+            ->joinLeft(['c' => $this->table(\CommerceKings\Notification\Api\DeliveryStateInterface::TABLE)],
+                $db->quoteInto("c.type = ? AND c.reference_id = q.entity_id AND c.subject_key = ''", CartReminder::CODE),
+                ['reminded_at' => 'sent_at'])
             ->joinLeft(['n' => $this->table(ContactRepository::TABLE)], 'n.contact_id = s.contact_id', ['email' => 'recipient'])
             ->where('q.entity_id = ?', $id));
     }
@@ -303,7 +308,7 @@ class CartSubscriptionTest extends TestCase
         $db->update($this->table('quote'), ['updated_at' => '2026-01-01 00:00:00'], ['entity_id = ?' => $id]);
         $carts = $this->om->get(CartTable::class);
         $carts->ensure($id);
-        $db->update($carts->name(), ['reminded_at' => '2026-01-01 00:00:00'], ['quote_id = ?' => $id]);
+        $db->update($carts->name(), ['sent_at' => '2026-01-01 00:00:00'], $carts->key($id));
         $management = $this->management();
         $this->assertTrue($management->subscribeGuest(CartReminder::CODE, $mask, 'captured@example.test'));
         $before = $this->row($id);
@@ -368,7 +373,7 @@ class CartSubscriptionTest extends TestCase
         $carts = $this->om->get(CartTable::class);
         foreach ([$guest, $registered] as $id) {
             $carts->ensure($id);
-            $db->update($carts->name(), ['reminded_at' => '2026-01-01 00:00:00'], ['quote_id = ?' => $id]);
+            $db->update($carts->name(), ['sent_at' => '2026-01-01 00:00:00'], $carts->key($id));
         }
         $before = [$guest => $this->row($guest), $registered => $this->row($registered)];
         $newBefore = $this->row($newGrant);

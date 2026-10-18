@@ -89,10 +89,11 @@ class RestoreTest extends TestCase
         $stores->method('getStore')->willReturn($store);
         $lifetime = $this->createStub(\CommerceKings\AbandonedCart\Model\QuoteLifetime::class);
         $lifetime->method('isExpired')->willReturnCallback(fn ($updated) => $updated === 'expired');
-        // the cart's send history (ck_abandoned_cart) and its subscription's owner browser (Notification)
+        // the cart's send history (Notification's delivery state) and its subscription's owner browser (Notification)
         $carts = $this->createStub(\CommerceKings\AbandonedCart\Model\CartTable::class);
         $carts->method('load')->willReturnCallback(fn ($id) => $id === $cart['id']
-            ? ['quote_id' => $cart['id'], 'reminded_at' => $cart['reminded']] : null);
+            ? ['type' => 'cart_reminder', 'reference_id' => $cart['id'], 'subject_key' => '', 'sent_at' => $cart['reminded']]
+            : null);
         $subscriptions = $this->createStub(\CommerceKings\Notification\Api\SubscriptionRepositoryInterface::class);
         $subscriptions->method('find')->willReturnCallback(fn ($type, $id) => $type === 'cart_reminder'
             && $id === $cart['id'] && $cart['browser'] !== null ? [new \CommerceKings\Notification\Api\Data\Subscription(

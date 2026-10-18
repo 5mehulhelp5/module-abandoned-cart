@@ -28,7 +28,7 @@ class ReminderContextTest extends TestCase
         $query = new ReminderQuery(2, 'c', 'q');
         $this->assertSame(2, $query->storeId);
         $this->assertSame('q.entity_id', $query->quoteId(), 'present in every selection and claim');
-        $this->assertSame('c.reminded_at', $query->column('reminded_at'));
+        $this->assertSame('c.sent_at', $query->column('reminded_at'));
         $this->assertSame('c.queued_at', $query->column('queued_at'));
         $this->assertSame('entity_id', (new ReminderQuery(2))->quoteId());
         foreach (['entity_id', 'quote_id', 'updated_at'] as $column) {

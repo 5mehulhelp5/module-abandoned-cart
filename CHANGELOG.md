@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Send history in Notification:** a cart's send history (`queued_at`, the reminder's `sent_at`, `skip_until`,
+  `failed_sends`, `delivery_version`) is Notification's delivery state (`ck_notification_delivery_state`, type
+  `cart_reminder`, reference = quote id), the same for every feature; `ck_abandoned_cart` is gone (dropped by
+  `setup:upgrade`). Still one row per cart that survives a withdrawal and a new sign-up: one reminder per cart, retry
+  backoff, `skip_until`, quiet hours and the hourly limit are unchanged. Reminder policies keep `reminded_at`
+  (`ReminderQuery::column()`, `ReminderState::$lastRemindedAt`); their SQL now reads `sent_at`. The history is
+  removed by Notification's daily cleanup once the cart is gone, instead of a foreign key to `quote`.
 - Follows Notification's quiet hours: a store in quiet hours for the reminder's channel queues nothing, and a reminder
   held by them (`QUIET_HOURS`) is restored like a skip (failure count kept) and waits in `skip_until` until they end.
   Reminders are email, which quiet hours leave out unless the shop selects it. The retry time is asked for the
