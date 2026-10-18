@@ -12,8 +12,8 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
   template, sender and notice text – or plug in your own reminder schedule.
 - **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
   one.
-- **Respectful by design.** A recipient cooldown, no email after a shopper says no, and a "stop these emails" link
-  that suppresses an address someone else signed up.
+- **Respectful by design.** A recipient cooldown, optional quiet hours, no email after a shopper says no, and a
+  "stop these emails" link that suppresses an address someone else signed up.
 
 ## Installation
 
@@ -64,8 +64,9 @@ their email.
 | Show notice (website) | Automatic – Yes without consent, No with consent |
 | Notice text (store) | If you leave your cart, we may email you one reminder about it. |
 
-Carts expire with Magento's *Quote Lifetime* (normally 30 days). The recipient cooldown (7 days per address) and the
-optional one-click unsubscribe headers are under **CommerceKings > Notifications**.
+Carts expire with Magento's *Quote Lifetime* (normally 30 days). The recipient cooldown (7 days per address), quiet
+hours (for email, select it under *Channels*) and the optional one-click unsubscribe headers are under
+**CommerceKings > Notifications**; a reminder held by quiet hours goes out when they end.
 
 To change the email, load the template in **Marketing > Email Templates**. Variables: `customer_name`, `items_html`,
 `grand_total`, `restore_url`, `optout_url`, `stop_url`, `contact_url`, `store_url`; keep the unsubscribe line inside
@@ -145,8 +146,8 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
   works for 7 days.
 - A worker killed mid-send can leave a cart marked as reminded without an email – it is never sent twice.
 - Restore links are signed with Magento's encryption key: changing the key invalidates links already sent.
-- Reminders are email only. An SMS reminder would need its own subscription type (on the `sms` channel) and its own
-  branch in the reminder finder; Notification already handles the channel.
+- Reminders are email only. SMS or WhatsApp reminders need their own subscription types (with Notification's
+  address consent) and a phone field at checkout – Notification already handles the channels.
 
 ## More
 

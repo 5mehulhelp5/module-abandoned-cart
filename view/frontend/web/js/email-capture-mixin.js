@@ -4,7 +4,7 @@
  * Only with permission for purpose cart_reminder (CommerceKings_Notification/js/permission; with the consent
  * bridge: the consent choice). On checkout entry (prefilled email) and 1 s after the last change of a valid
  * email, subscribe the cart through
- * CommerceKings_Notification: POST /V1/ck-notification/subscriptions {type, reference: masked cart id, email}.
+ * CommerceKings_Notification: POST /V1/ck-notification/subscriptions {type, reference: masked cart id, recipient}.
  * Saves and clears are
  * serialized, acknowledged by the server, and retried after transient failures.
  * If the permission is switched off while on checkout, the same endpoint is called with an empty email

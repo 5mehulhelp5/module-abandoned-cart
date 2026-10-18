@@ -162,7 +162,7 @@ class CartReminder implements NotificationTypeInterface
             return;
         }
         $storeId = (int)$row['store_id'];
-        // a send that did not happen (cooldown, block, changed recipient) keeps the failure count of earlier attempts
+        // a send that did not happen (cooldown, stop, changed recipient) keeps the failure count of earlier attempts
         $restore = fn () => $db->update($this->carts->name(),
             ['sent_at' => $row['sent_at'], 'failed_sends' => (int)($row['failed_sends'] ?? 0)],
             // Never undo a newer delivery or decrease the version; a newer queued mark must stay too.
@@ -215,7 +215,7 @@ class CartReminder implements NotificationTypeInterface
         }
         if ($status === SenderInterface::STOPPED) {
             // the address is on the do-not-contact list: this subscription ends here, so the finder never queues the
-            // cart again (a "retry later" would re-queue it on every run until the block lifts)
+            // cart again (a "retry later" would re-queue it on every run until the stop lifts)
             $this->removal->remove((int)$row['subscription_id']);
         }
         if ($status !== SenderInterface::SENT) {
