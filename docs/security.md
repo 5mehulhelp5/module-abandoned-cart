@@ -72,7 +72,7 @@ token; the customer id is never taken from the request body.
 
 | Endpoint | Who | Purpose |
 |---|---|---|
-| `POST /rest/V1/ck-notification/subscriptions` (anonymous, Notification) | guest checkout | subscribe the cart with email + consent, or unsubscribe with `""` |
+| `POST /rest/V1/ck-notification/subscriptions` (anonymous, Notification) | guest checkout | subscribe the cart with its recipient (email, or a number with its checkbox consent), or unsubscribe with `""` |
 | `POST /rest/V1/ck-notification/subscriptions/mine` (`self`, Notification) | logged-in customer on checkout | subscribe their own cart |
 | `GET /cartreminder/cart/restore?q=&t=` | email | validate ownership and show restore confirmation |
 | `POST /cartreminder/cart/restore` (form key, `q`, `t`) | confirmation page | adopt or merge the saved cart |
@@ -90,5 +90,5 @@ Email content restricts visitor-controlled values and uses the shop's catalog da
 
 - **No visitor text in the email.** Custom options are shown only for the store's predefined choices (`drop_down`, `radio`, `checkbox`, `multiple`); free text (such as an engraved message), file names and other types are left out. Product and configurable option names come from the catalog.
 - **Greeting** uses only the first word of the name, letters/`-`/`'` only, max 20 characters. The default template uses "Hi %name," when a valid name is available and omits the greeting otherwise.
-- The guest subscribe endpoint is anonymous and has no rate limit in code. Without one, a script can create guest carts and make the shop send one reminder to any address, up to *Maximum reminders per hour* – delaying real shoppers' reminders in that hour. Adding one is recommended: in your web server, proxy or CDN as the first line of defense – see module-notification's [operations guide](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting). [commercekings/module-rate-limit](https://github.com/commercekings/module-rate-limit) (Magento 2.4.7+) is an optional second line for it and the restore link.
+- The guest subscribe endpoint is anonymous and has no rate limit in code. Without one, a script can create guest carts and make the shop send one reminder to any address – or a paid text to any number (SMS pumping) – up to *Maximum reminders per hour* – delaying real shoppers' reminders in that hour. Adding one is recommended: in your web server, proxy or CDN as the first line of defense – see module-notification's [operations guide](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting). [commercekings/module-rate-limit](https://github.com/commercekings/module-rate-limit) (Magento 2.4.7+) is an optional second line for it and the restore link.
 - The recorded consent shows what a browser sent; a scripted client can fake it, like with any cookie banner.

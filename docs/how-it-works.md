@@ -1,7 +1,9 @@
 # How it works
 
 The detailed reference for `commercekings/module-abandoned-cart`. Start with the [README](../README.md).
-Sections describe the consent setup unless they say otherwise.
+Sections describe the consent setup unless they say otherwise. It describes the built-in email reminder
+(`cart_reminder`); another reminder type (e.g. `cart_reminder_sms`) shares the finder, claim and retries with its own
+settings, hourly limit and send-history row – see [other channels](extending.md).
 
 ## Flow
 
@@ -18,14 +20,14 @@ Sections describe the consent setup unless they say otherwise.
 ## Data
 
 Magento's `quote` table is not changed or written. Who subscribed a cart, with which consent, is its
-`commercekings/module-notification` subscription (`ck_notification_subscription`, type `cart_reminder`,
-reference = quote id): the guest contact (`ck_notification_contact`) or the customer, the consent id (`permission_ref`)
-(the restore link works only in the browser that consent was given in) and `captured_at` (last change; identical retries preserve it).
-This module has no table of its own. A cart's send history is Notification's delivery state
+`commercekings/module-notification` subscription (`ck_notification_subscription`, type `cart_reminder`, reference =
+quote id): the guest contact (`ck_notification_contact`) or the customer, the consent id (`permission_ref`) (the restore
+link works only in the browser that consent was given in) and `captured_at` (last change; identical retries preserve
+it). This module has no table of its own. A cart's send history is Notification's delivery state
 (`ck_notification_delivery_state`, `Api\DeliveryStateInterface`), keyed like the subscription – type `cart_reminder`,
-reference = quote id, subject `''` – so one row per cart, created when it is first queued. It is the cart's, not
-the subscription's: it survives a withdrawal and a new sign-up. Notification's daily cleanup removes it once Magento's
-cart cleanup has removed the quote.
+reference = quote id, subject `''` – so one row per cart and reminder type, created when it is first queued. It is the
+cart's, not the subscription's: it survives a withdrawal and a new sign-up. Notification's daily cleanup removes it once
+Magento's cart cleanup has removed the quote.
 
 | Column | Meaning |
 |---|---|
@@ -51,7 +53,7 @@ reset `sent_at`: the default remains one reminder per cart.
 
 ## Delivery policy and quote lifetime
 
-The default policy sends one reminder per cart. Replace
+The default policy sends one reminder per cart and reminder type. Replace
 `CommerceKings\AbandonedCart\Api\ReminderPolicyInterface` through a DI preference to supply another
 frequency rule. `getDescription()` supplies its read-only admin frequency preview.
 `canSend(ReminderState)` and `dueCondition(ReminderQuery)` must agree;
@@ -84,22 +86,21 @@ negative lifetime permits no reminders. The module conservatively stops at `upda
 Magento's daily cleanup uses a calendar-date cutoff, so physical deletion can occur later.
 Queue, delivery and withdrawal writes preserve `updated_at` and do not extend quote retention.
 
-Restore access stops at the earlier of seven days after sending and the current configured quote
+The email's restore access stops at the earlier of seven days after sending and the current configured quote
 expiry. A reminder sent near expiry can therefore have a shorter restore window. Changing Magento's
 quote lifetime affects pending delivery and restore checks; this module never extends retention.
 
-Each cart can receive one reminder. A separate recipient cooldown also limits sends across
+Each cart can receive one reminder per reminder type. A separate recipient cooldown also limits sends across
 all carts and stores sharing an email address. **Cooldown (days)** is a global admin
 setting, default **7** (**0** turns it off), under CommerceKings > Notifications – it belongs to
 `commercekings/module-notification` and is shared with every notification that uses it. Deferred carts
 remain unsent and may become eligible after the cooldown if their quote and consent are still valid.
 
-`ck_notification_cooldown` (module-notification) stores Magento-native keyed hashes of normalized email addresses,
-claim timestamps and random claim tokens; it contains no raw email. This is suppression data,
-not a consent identity. It survives cart deletion and consent withdrawal, so these cannot reset
-the send limit; daily cron removes rows older than the current cooldown. Key rotation resets
-suppression for addresses hashed with the previous key. Failed sends release only their own
-recipient claim; successful or interrupted handoffs retain it conservatively.
+`ck_notification_cooldown` (module-notification) stores Magento-native keyed hashes of normalized addresses (email or
+phone, per channel), claim timestamps and random claim tokens; it contains no raw email. This is suppression data, not a
+consent identity. It survives cart deletion and consent withdrawal, so these cannot reset the send limit; daily cron
+removes rows older than the current cooldown. Key rotation resets suppression for addresses hashed with the previous
+key. Failed sends release only their own recipient claim; successful or interrupted handoffs retain it conservatively.
 
 ## Consent rules
 
@@ -132,11 +133,12 @@ own claim, checked against the cart and its consent at send time, lets one deliv
 - **Messages wait in the broker, not in our table.** Each is a few bytes (`cart_reminder|<subscription id>`).
   A shopper who orders, unsubscribes or changes the cart while its message waits is re-checked at send time and
   skipped; switching the feature off makes waiting messages skip.
-- **Maximum reminders per hour** (default 100, 0 = no limit) is the brake for your email provider's rate limit and
-  sender reputation, and caps how many addresses a script could make the shop email. A finder
-  run publishes only what still fits in the hour (sent, plus queued carts whose subscription is still valid), and every reminder checks it again when
-  sending, under a lock (`commercekings_abandoned_cart_hourly`, held only for the count and the claim), so it holds
-  even when a delayed backlog drains after a consumer outage. Carts over it wait for a later hour; none are lost.
+- **Maximum reminders per hour** (the email reminder's; default 100, 0 = no limit) is the brake for your email
+  provider's rate limit and sender reputation, and caps how many addresses a script could make the shop email. A finder
+  run publishes only what still fits in the hour (sent, plus queued carts whose subscription is still valid), and every
+  reminder checks it again when sending, under a lock (`commercekings_abandoned_cart_hourly`, held only for the count
+  and the claim), so it holds even when a delayed backlog drains after a consumer outage. Carts over it wait for a later
+  hour; none are lost.
 - Run the consumer with `--max-messages` (e.g. 1,000): Magento's email template rendering grows a worker by about
   0.17 MB per email.
 
@@ -153,4 +155,4 @@ transports (see *Consumer* above).
 
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 
-`ordered / closed`, `empty`, `no email`, `reminder policy` (already reminded), `quote expired`, `cart recently updated`, `consent withdrawn / expired` (also: older banner/terms revision), `consent purpose / website mismatch`, `disabled`; after a send attempt also Notification's `recipient cooldown`, `recipient changed`, `recipient stopped` and `quiet hours` (the cart waits in `skip_until` until they end; while they last the finder leaves the store out). A subscription or cart that no longer exists logs `subscription N skipped (subscription or cart gone)`; Notification's consumer already skips withdrawn subscriptions (`CommerceKings_Notification: cart_reminder N skipped (no valid subscription)`). A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
+`ordered / closed`, `empty`, `no email`, `reminder policy` (already reminded), `quote expired`, `cart recently updated`, `consent withdrawn / expired` (also: older banner/terms revision), `consent purpose / website mismatch`, `disabled`; after a send attempt also Notification's `recipient cooldown`, `recipient changed`, `recipient stopped` and `quiet hours` (the cart waits in `skip_until` until they end; while they last the finder leaves the store out for a channel without a recipient time-zone provider – with one, each delivery is held on its own). A subscription or cart that no longer exists logs `subscription N skipped (subscription or cart gone)`; Notification's consumer already skips withdrawn subscriptions (`CommerceKings_Notification: cart_reminder N skipped (no valid subscription)`). A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.

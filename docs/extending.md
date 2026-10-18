@@ -7,9 +7,9 @@ preferences on this module's classes, no plugins, nothing changed here. It depen
 per channel in the admin.
 
 Everything except the type's own settings, consent and text is shared: the finder (cron, every minute), the atomic
-claim, retries after a failed send, the recipient cooldown, quiet hours, the hourly limit, the reminder policy and the
-send history (Notification's delivery state, one row per cart and type – so each channel reminds a cart once, also
-after a withdrawal and a new sign-up).
+claim, retries after a failed send, the recipient cooldown, quiet hours, the hourly limit (each type's own), the
+reminder policy and the send history (Notification's delivery state, one row per cart and type – so each channel reminds
+a cart once, also after a withdrawal and a new sign-up).
 
 ## What a channel module provides
 

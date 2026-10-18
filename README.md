@@ -10,14 +10,14 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
   minute, every cart exactly once (see *Where it shines* below).
 - **Your rules.** Opt-in with a cookie banner, or opt-out with an optional checkout notice. Set the delay, hourly limit,
   template, sender and notice text – or plug in your own reminder schedule.
-- **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
-  one.
-- **Respectful by design.** A recipient cooldown, optional quiet hours, no email after a shopper says no, and a
-  "stop these emails" link that suppresses an address someone else signed up.
+- **Back to the cart in one click.** With consent, a signed link restores the saved cart and merges it into the
+  shopper's current one; otherwise the button opens the cart page.
+- **Respectful by design.** A recipient cooldown, quiet hours (on by default for texts, optional for email), no email
+  after a shopper says no, and a "stop these emails" link that suppresses an address someone else signed up.
 
 **Email reminders are built in** and work out of the box. No extra module or provider needed.
 
-- **Text messages and WhatsApp:** add [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider:
+- **Text messages:** add [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider:
   - [Twilio](https://github.com/commercekings/module-notification-twilio) (text, WhatsApp)
   - [Infobip](https://github.com/commercekings/module-notification-infobip) (text, WhatsApp, Viber)
 
@@ -27,7 +27,7 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 - **Optional, consent for email:** send reminders only to shoppers who agree, through a cookie banner. Install
   [privacy-bundle](https://github.com/commercekings/privacy-bundle).
 
-## Installation: text messages and WhatsApp
+## Installation: text messages
 
 Always opt-in: the shopper ticks a checkbox next to their phone
 number. That consent is separate from email and doesn't need the cookie banner. Add
@@ -56,7 +56,8 @@ Then switch it on in the admin – nothing is sent until you do:
 
 1. **Stores > Configuration > CommerceKings > Abandoned Cart > Enabled**: Yes.
 2. Opt-in only: **Stores > Configuration > CommerceKings > Consent > Source**: *Cookie banner (vanilla-cookieconsent)*.
-   Without a source, no shopper has consent and no reminder is sent.
+   Without a source, no shopper has consent and no reminder email is sent (text reminders use the number's
+   checkbox).
 
 | | Opt-out | Opt-in |
 |---|---|---|
@@ -79,7 +80,7 @@ their email.
 |---|---|
 | Enabled (store) | No |
 | Inactivity delay (minutes, global) | 180 |
-| Maximum reminders per hour (global) | 100 – set your email provider's limit; 0 = no limit |
+| Maximum reminders per hour (global) | 100 – the email reminder's; set your email provider's limit; 0 = no limit |
 | Email template (store) | Abandoned Cart Reminder – neutral, for both setups |
 | Sender (store) | General Contact |
 | Show notice (website) | Automatic – Yes without consent, No with consent |
@@ -110,8 +111,8 @@ existing customer cart, the guest address is removed by the nightly cleanup.
 - Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000`, so long-running workers recycle.
 - To scale, run more consumers in parallel. Number of consumers = email provider's limit per second ÷ emails one
   consumer sends per second.
-- Rate-limit the guest subscribe endpoint (without one, a script can make the shop email any address, up to the
-  hourly cap) – in your web server, proxy or CDN first
+- Rate-limit the guest subscribe endpoint (without one, a script can make the shop email any address – or text any
+  number, which costs money – up to the hourly cap) – in your web server, proxy or CDN first
   ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)), then
   module-rate-limit (above) as a second line.
 
@@ -126,7 +127,7 @@ See [Reminders on other channels](docs/extending.md).
 
 Replace any of these with a DI preference:
 
-`Api\ReminderPolicyInterface` – when to send (default: once per cart)
+`Api\ReminderPolicyInterface` – when to send (default: once per cart and reminder type)
 
 `Api\UnsubscribeLinkInterface` – your own unsubscribe page
 
@@ -167,9 +168,9 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 
 ## Limitations
 
-- One reminder per cart; follow-ups need another reminder policy. The restore link shows the cart as it is now and
-  works for 7 days.
-- A worker killed mid-send can leave a cart marked as reminded without an email – it is never sent twice.
+- One reminder per cart and reminder type (email and SMS are two); follow-ups need another reminder policy. The
+  email's restore link (opt-in) shows the cart as it is now and works for 7 days; the text's link is the cart page.
+- A worker killed mid-send can leave a cart marked as reminded without its reminder – it is never sent twice.
 - Restore links are signed with Magento's encryption key: changing the key invalidates links already sent.
 
 ## More
