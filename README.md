@@ -141,6 +141,7 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 - One reminder per cart; follow-ups need another reminder policy. The restore link shows the cart as it is now and
   works for 7 days.
 - A worker killed mid-send can leave a cart marked as reminded without an email – it is never sent twice.
+- Restore links are signed with Magento's encryption key: changing the key invalidates links already sent.
 
 ## More
 
