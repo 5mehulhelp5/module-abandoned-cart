@@ -12,7 +12,8 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
   template, sender and notice text – or plug in your own reminder schedule.
 - **Back to the cart in one click.** A signed link restores the saved cart and merges it into the shopper's current
   one.
-- **Respectful by design.** A recipient cooldown, and no email after a shopper says no.
+- **Respectful by design.** A recipient cooldown, no email after a shopper says no, and a "stop these emails" link
+  that suppresses an address someone else signed up.
 
 ## Installation
 
