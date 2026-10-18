@@ -72,6 +72,9 @@ class CartReminderTest extends TestCase
     private bool $recipientClaimed = false;
     private array $releasedRecipients = [];
     private bool $headerSupport = true;
+    /** every recipient is on the do-not-contact list */
+    private bool $blockAll = false;
+    private array $removedSubscriptions = [];
     private \Symfony\Component\Mime\Email $nativeMessage;
     private string $optoutUrl = 'https://shop.test/ckconsent/optout?c=id&t=signature';
 
@@ -152,7 +155,7 @@ class CartReminderTest extends TestCase
         });
         $provider = new MagentoEmail($builder, new OneClickHeaders(), $this->createStub(\Psr\Log\LoggerInterface::class));
         $mailer = new Sender(new ProviderPool($notificationConfig, [$provider]), $this->emulation, $cooldown, $notificationConfig,
-            null, null, $this->createStub(\CommerceKings\Notification\Api\RecipientBlockInterface::class));
+            null, null, $this->blocks());
         $locks = $this->createStub(\Magento\Framework\Lock\LockManagerInterface::class);
         $locks->method('lock')->willReturnCallback(function ($name, $timeout) {
             $this->lockEvents[] = ['lock', $name, $timeout];
@@ -162,7 +165,7 @@ class CartReminderTest extends TestCase
             $this->lockEvents[] = ['unlock', $name];
             return true;
         });
-        return new CartReminder($this->resource(), $repositories, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks);
+        return new CartReminder($this->resource(), $repositories, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks, $this->removal());
     }
 
     /** No claim, no email: only the cart's `queued_at` mark is cleared, so the finder can queue it again. */
@@ -211,6 +214,37 @@ class CartReminderTest extends TestCase
         $this->assertSame(['CommerceKings_AbandonedCart: cart 42 skipped (permission withdrawn, expired or for another purpose / website)'],
             $this->logs);
         $this->assertSame([['cid-1', 'cart_reminder', 1]], $this->validityChecks, 'checked for this purpose and the cart\'s store');
+    }
+
+    private function blocks(): \CommerceKings\Notification\Api\RecipientBlockInterface
+    {
+        $blocks = $this->createStub(\CommerceKings\Notification\Api\RecipientBlockInterface::class);
+        $blocks->method('isBlocked')->willReturnCallback(fn () => $this->blockAll);
+        return $blocks;
+    }
+
+    private function removal(): \CommerceKings\Notification\Api\SubscriptionRemovalInterface
+    {
+        $removal = $this->createStub(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class);
+        $removal->method('remove')->willReturnCallback(function ($id) { $this->removedSubscriptions[] = $id; return true; });
+        return $removal;
+    }
+
+    public function testBlockedRecipientEndsTheSubscriptionSoTheCartIsNotQueuedAgain(): void
+    {
+        $this->blockAll = true;
+        $this->consumer()->process('42');
+        $this->assertSame(0, $this->sentMessages, 'nothing sent to a blocked address');
+        $this->assertCount(1, $this->removedSubscriptions, 'the subscription ends instead of a retry on every finder run');
+        $this->assertSame([], $this->releasedRecipients, 'no cooldown was claimed');
+    }
+
+    public function testOtherSkipsKeepTheSubscription(): void
+    {
+        $consumer = $this->consumer();
+        $consumer->process('42');
+        $consumer->process('43');   // recipient cooldown
+        $this->assertSame([], $this->removedSubscriptions);
     }
 
     public function testTwoCartsUsingTheSameAddressSendOnlyOnceDuringCooldown(): void

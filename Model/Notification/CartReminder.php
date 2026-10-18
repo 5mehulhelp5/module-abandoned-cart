@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Model\Notification;
 
+use CommerceKings\Notification\Api\SubscriptionRemovalInterface;
+use Magento\Framework\App\ObjectManager;
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Config;
@@ -46,6 +48,8 @@ class CartReminder implements NotificationTypeInterface
     public const CODE = 'cart_reminder';
     private const HOURLY_LOCK = 'commercekings_abandoned_cart_hourly';
 
+    private readonly SubscriptionRemovalInterface $removal;
+
     public function __construct(
         private readonly ResourceConnection $resource,
         private readonly CartRepositoryInterfaceFactory $repositories,
@@ -59,8 +63,10 @@ class CartReminder implements NotificationTypeInterface
         private readonly ReminderEmailResolverInterface $recipients,
         private readonly NotificationConfig $notificationConfig,
         private readonly CartTable $carts,
-        private readonly LockManagerInterface $locks
+        private readonly LockManagerInterface $locks,
+        ?SubscriptionRemovalInterface $removal = null
     ) {
+        $this->removal = $removal ?? ObjectManager::getInstance()->get(SubscriptionRemovalInterface::class);
     }
 
     public function process(string $reference): void
@@ -205,6 +211,11 @@ class CartReminder implements NotificationTypeInterface
                 ? sprintf('CommerceKings_AbandonedCart: cart %d send failed (%d), next try in %d minutes', $id, $failed, $retry)
                 : sprintf('CommerceKings_AbandonedCart: cart %d send failed %d times, no further reminder', $id, $failed));
             throw $e;
+        }
+        if ($status === SenderInterface::BLOCKED) {
+            // the address is on the do-not-contact list: this subscription ends here, so the finder never queues the
+            // cart again (a "retry later" would re-queue it on every run until the block lifts)
+            $this->removal->remove((int)$row['subscription_id']);
         }
         if ($status !== SenderInterface::SENT) {
             $restore();
