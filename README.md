@@ -6,16 +6,18 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 **Everyday reliable, never slows your store.** A well-timed email for every abandoned cart.
 
-Email reminders are built in and work out of the box – no extra module or provider needed. **Add text messages,
-WhatsApp and consent:**
+**Email reminders are built in** and work out of the box. No extra module or provider needed.
 
-- [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) – text-message reminders next to the email, with consent per number, quiet hours and STOP replies.
-- [module-notification-twilio](https://github.com/commercekings/module-notification-twilio) – sends text and WhatsApp messages through Twilio.
-- [module-notification-infobip](https://github.com/commercekings/module-notification-infobip) – sends text, WhatsApp and Viber messages through Infobip.
-- [module-consent-notification](https://github.com/commercekings/module-consent-notification) with [module-consent](https://github.com/commercekings/module-consent) and [module-consent-vanilla](https://github.com/commercekings/module-consent-vanilla) – GDPR consent for reminders, with a cookie banner; or [privacy-bundle](https://github.com/commercekings/privacy-bundle) for the whole set.
-- [module-rate-limit](https://github.com/commercekings/module-rate-limit) – recommended: limits the public sign-up endpoints and the restore link (Magento 2.4.7+).
+**Text messages and WhatsApp:** add [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider:
+[Twilio](https://github.com/commercekings/module-notification-twilio) (text, WhatsApp) or [Infobip](https://github.com/commercekings/module-notification-infobip) (text,
+WhatsApp, Viber). Consent for a phone number is a checkbox next to the number at checkout, built in.
 
-Pick one provider per channel; reminders work with any of them.
+**Recommended:** [module-rate-limit](https://github.com/commercekings/module-rate-limit). Limits the public sign-up endpoints and the restore link
+(Magento 2.4.7+).
+
+**Optional, consent for email:** send reminders only to shoppers who agree, through a cookie banner. Install
+[privacy-bundle](https://github.com/commercekings/privacy-bundle) (or its parts: [module-consent-notification](https://github.com/commercekings/module-consent-notification),
+[module-consent](https://github.com/commercekings/module-consent), [module-consent-vanilla](https://github.com/commercekings/module-consent-vanilla)).
 
 - **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
   minute, every cart exactly once (see *Where it shines* below).
