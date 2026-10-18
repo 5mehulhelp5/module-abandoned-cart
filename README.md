@@ -27,18 +27,16 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 - **Optional, consent for email:** send reminders only to shoppers who agree, through a cookie banner. Install
   [privacy-bundle](https://github.com/commercekings/privacy-bundle).
 
-## Installation
+## Installation: text messages and WhatsApp
 
-### Text messages and WhatsApp: always opt-in
-
-The shopper ticks a checkbox next to their phone
+Always opt-in: the shopper ticks a checkbox next to their phone
 number. That consent is separate from email and doesn't need the cookie banner. Add
 [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider (see the
 add-ons above).
 
----
+## Installation: email
 
-### Email: choose one mode
+Choose one mode.
 
 **Opt-out** – a reminder email for every shopper who enters an email at checkout:
 
