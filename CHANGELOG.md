@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The one-click unsubscribe header uses the consent withdrawal link, or in opt-out mode the "Stop these emails"
+  link.
 - Reminders carry Notification's "Didn't start this cart? Stop these emails to this address" link (`block_url`).
 - Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`): Magento 2.4.0–2.4.3 do not run on PHP 8.1.
 - `cart_reminder` declares its banner category itself (`category = personalization`).

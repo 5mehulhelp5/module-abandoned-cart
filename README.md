@@ -42,7 +42,7 @@ Then switch it on in the admin – nothing is sent until you do:
 | Who gets a reminder | every shopper who entered an email | only with consent for `cart_reminder` |
 | Checkout notice | on, optional | off |
 | Email button | opens the cart page | restores the saved cart, only in the browser that consented |
-| Unsubscribe link | **none – you must add your own** ([how](#your-own-unsubscribe-page)) | signed link, optional one-click headers |
+| Unsubscribe | the "Stop these emails" link, always on; optional one-click headers; or [your own page](#your-own-unsubscribe-page) | signed link, optional one-click headers |
 | Consent tables | none | created |
 
 To move a shop from opt-in to opt-out, uninstall the **consent bridge**, the **cookie banner** and **Consent** with
@@ -88,7 +88,8 @@ existing customer cart, the guest address is removed by the nightly cleanup.
 - Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000`, so long-running workers recycle.
 - To scale, run more consumers in parallel. Number of consumers = email provider's limit per second ÷ emails one
   consumer sends per second.
-- Rate-limit the guest subscribe endpoint in your web server, proxy or CDN – the first line of defense
+- Rate-limit the guest subscribe endpoint (without one, a script can make the shop email any address, up to the
+  hourly cap) – in your web server, proxy or CDN first
   ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)). Optional
   second line: [commercekings/module-rate-limit](https://github.com/commercekings/module-rate-limit) (Magento 2.4.7+), which also covers the restore link.
 
@@ -128,7 +129,8 @@ $this->subscriptionRemoval->remove($id); // CommerceKings\Notification\Api\Subsc
 ```
 
 Sign the link (e.g. an HMAC of the id), so nobody can unsubscribe someone else. If you turn on *One-click
-unsubscribe*, your page must also accept the mail client's POST.
+unsubscribe*, your page must also accept the mail client's POST. Without your own page, opt-out reminders use the
+"Stop these emails" link for both the visible link and the one-click header.
 
 ## Where it shines
 

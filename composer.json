@@ -25,7 +25,8 @@
         "magento/module-email": "^101.1"
     },
     "suggest": {
-        "commercekings/module-consent-notification": "Consent-based reminders (setup with a consent banner); leave it out for opt-out"
+        "commercekings/module-consent-notification": "Consent-based reminders (setup with a consent banner); leave it out for opt-out",
+        "commercekings/module-rate-limit": "Rate limits for the subscribe endpoint and the restore link in the admin (Magento 2.4.7+); a web server or CDN rule works too"
     },
     "autoload": {
         "files": [

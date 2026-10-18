@@ -177,10 +177,10 @@ class CartReminder implements NotificationTypeInterface
                 }
                 $vars = $this->reminderData->build($quote, (string)$row['permission_ref'],
                     ['subscription_id' => (int)$row['subscription_id'], 'email' => $email]);
+                // one-click: the consent withdrawal link (opt-in), else the stop link (opt-out); only with a link
+                $oneClick = (string)(($vars['optout_url'] ?? '') ?: ($vars['block_url'] ?? ''));
                 return new DeliveryContent($vars, $vars['customer_name'] ?? null,
-                    // one-click only with a link to put in the header
-                    ($vars['optout_url'] ?? '') !== '' && $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId)
-                        ? $vars['optout_url'] : null);
+                    $oneClick !== '' && $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId) ? $oneClick : null);
             },
             true,
             // A replaced resolver may read an external recipient source. Recheck it after claiming too.

@@ -61,6 +61,7 @@ class CartReminderTest extends TestCase
     private array $validityChecks = [];
     private ?array $recipientSequence = null;
     private bool $oneClick = false;
+    private string $blockUrl = '';
     /** Notification's "One-click unsubscribe" per store; null = $oneClick everywhere */
     private ?array $oneClickStores = null;
     /** the stores the setting was read for */
@@ -107,7 +108,7 @@ class CartReminderTest extends TestCase
         $data->method('build')->willReturnCallback(function (...$args) {
             $this->built = $args;
             $this->quotesBuilt[] = $args[0];
-            return ['customer_name' => 'Jane', 'items_html' => '', 'optout_url' => $this->optoutUrl];
+            return ['customer_name' => 'Jane', 'items_html' => '', 'optout_url' => $this->optoutUrl, 'block_url' => $this->blockUrl];
         });
         $this->emulation = $this->createMock(Emulation::class);
         $lifetime = $this->createStub(QuoteLifetime::class);
@@ -504,6 +505,21 @@ class CartReminderTest extends TestCase
         $this->assertSame(1, substr_count($this->nativeMessage->toString(), 'List-Unsubscribe:'));
         $this->assertSame($originalVars, $this->mail['setTemplateVars']);
         $this->assertSame(2, $this->sentMessages);
+    }
+
+    /** Opt-out mode has no withdrawal link: the stop link is the one-click URL; with both, the withdrawal link wins. */
+    public function testOneClickUsesTheStopLinkWhenThereIsNoWithdrawalLink(): void
+    {
+        $this->oneClick = true;
+        $this->optoutUrl = '';
+        $this->blockUrl = 'https://shop.test/cknotification/block/?r=enc&s=sig';
+        $this->consumer()->process('42');
+        $this->assertSame('<' . $this->blockUrl . '>', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe'));
+
+        $this->optoutUrl = 'https://shop.test/ckconsent/optout/?c=cid&t=tok';
+        $this->recipientClaimed = false;
+        $this->consumer()->process('42');
+        $this->assertSame('<' . $this->optoutUrl . '>', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe'));
     }
 
     /** The switch is Notification's, per website: each cart uses the setting of its own store. */
