@@ -6,7 +6,8 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 **Everyday reliable, never slows your store.** A well-timed email for every abandoned cart.
 
-**Add text messages, WhatsApp and consent:**
+Email reminders are built in and work out of the box – no extra module or provider needed. **Add text messages,
+WhatsApp and consent:**
 
 - [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) – text-message reminders next to the email, with consent per number, quiet hours and STOP replies.
 - [module-notification-twilio](https://github.com/commercekings/module-notification-twilio) – sends text and WhatsApp messages through Twilio.
