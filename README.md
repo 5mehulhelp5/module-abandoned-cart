@@ -6,6 +6,16 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 **Everyday reliable, never slows your store.** A well-timed email for every abandoned cart.
 
+**Add text messages, WhatsApp and consent:**
+
+- [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) – text-message reminders next to the email, with consent per number, quiet hours and STOP replies.
+- [module-notification-twilio](https://github.com/commercekings/module-notification-twilio) – sends text and WhatsApp messages through Twilio.
+- [module-notification-infobip](https://github.com/commercekings/module-notification-infobip) – sends text, WhatsApp and Viber messages through Infobip.
+- [module-consent-notification](https://github.com/commercekings/module-consent-notification) with [module-consent](https://github.com/commercekings/module-consent) and [module-consent-vanilla](https://github.com/commercekings/module-consent-vanilla) – GDPR consent for reminders, with a cookie banner; or [privacy-bundle](https://github.com/commercekings/privacy-bundle) for the whole set.
+- [module-rate-limit](https://github.com/commercekings/module-rate-limit) – recommended: limits the public sign-up endpoints and the restore link (Magento 2.4.7+).
+
+Pick one provider per channel; reminders work with any of them.
+
 - **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
   minute, every cart exactly once (see *Where it shines* below).
 - **Your rules.** Opt-in with a cookie banner, or opt-out with an optional checkout notice. Set the delay, hourly limit,
@@ -91,8 +101,8 @@ existing customer cart, the guest address is removed by the nightly cleanup.
   consumer sends per second.
 - Rate-limit the guest subscribe endpoint (without one, a script can make the shop email any address, up to the
   hourly cap) – in your web server, proxy or CDN first
-  ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)). Optional
-  second line: [commercekings/module-rate-limit](https://github.com/commercekings/module-rate-limit) (Magento 2.4.7+), which also covers the restore link.
+  ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)), then
+  module-rate-limit (above) as a second line.
 
 **Note:** If you turn on the optional *One-click unsubscribe*, send from a no-reply address whose domain DKIM-signs
 the unsubscribe headers, as [RFC 8058](https://www.rfc-editor.org/rfc/rfc8058) requires.
@@ -150,8 +160,6 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
   works for 7 days.
 - A worker killed mid-send can leave a cart marked as reminded without an email – it is never sent twice.
 - Restore links are signed with Magento's encryption key: changing the key invalidates links already sent.
-- Reminders are email only. SMS or WhatsApp reminders need their own subscription types (with Notification's
-  address consent) and a phone field at checkout – Notification already handles the channels.
 
 ## More
 
