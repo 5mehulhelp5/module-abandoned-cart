@@ -265,7 +265,8 @@ class ReminderPolicyTest extends TestCase
             $this->om->get(ReminderEmailResolverInterface::class),
             $this->notificationConfig(), $this->om->get(CartTable::class),
             $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class),
-            $this->om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class));
+            $this->om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class),
+        $this->om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class));
     }
 
     private function withRecipients(CartReminder $consumer, ReminderEmailResolverInterface $recipients): CartReminder

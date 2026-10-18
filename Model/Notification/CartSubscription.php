@@ -39,6 +39,12 @@ class CartSubscription implements SubscriptionTypeInterface
         return true;
     }
 
+    /** A cart reminder is marketing: the recipient can stop it. */
+    public function isStoppable(): bool
+    {
+        return true;
+    }
+
     public function authorize(string $reference, int $customerId): ?Target
     {
         $quoteId = $customerId ? $this->quoteId($reference) : $this->maskedQuoteId($reference);

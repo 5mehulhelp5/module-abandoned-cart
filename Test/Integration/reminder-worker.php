@@ -120,7 +120,8 @@ if ($mode === 'finder') {
         $mailer, $config, $guard, new OncePerCart(), new NullLogger(),
         $lifetime, $recipients, $om->get(NotificationConfig::class),
         $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class), $om->get(\Magento\Framework\Lock\LockManagerInterface::class),
-        $om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class));
+        $om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class),
+        $om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class));
     $db = $resource->getConnection();
     foreach ($ids as $id) {
         // the queue message carries the cart's subscription id

@@ -62,6 +62,7 @@ class CartReminderTest extends TestCase
     private ?array $recipientSequence = null;
     private bool $oneClick = false;
     private string $blockUrl = '';
+    private bool $stoppable = true;
     /** Notification's "One-click unsubscribe" per store; null = $oneClick everywhere */
     private ?array $oneClickStores = null;
     /** the stores the setting was read for */
@@ -166,7 +167,8 @@ class CartReminderTest extends TestCase
             $this->lockEvents[] = ['unlock', $name];
             return true;
         });
-        return new CartReminder($this->resource(), $repositories, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks, $this->removal());
+        return new CartReminder($this->resource(), $repositories, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks, $this->removal(),
+            $this->subscriptionType());
     }
 
     /** No claim, no email: only the cart's `queued_at` mark is cleared, so the finder can queue it again. */
@@ -221,7 +223,16 @@ class CartReminderTest extends TestCase
     {
         $blocks = $this->createStub(\CommerceKings\Notification\Api\RecipientBlockInterface::class);
         $blocks->method('isBlocked')->willReturnCallback(fn () => $this->blockAll);
+        // Notification's own way out: the stop link becomes the one-click URL when there is no other
+        $blocks->method('getBlockUrl')->willReturnCallback(fn () => $this->blockUrl);
         return $blocks;
+    }
+
+    private function subscriptionType(): \CommerceKings\AbandonedCart\Model\Notification\CartSubscription
+    {
+        $type = $this->createStub(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class);
+        $type->method('isStoppable')->willReturnCallback(fn () => $this->stoppable);
+        return $type;
     }
 
     private function removal(): \CommerceKings\Notification\Api\SubscriptionRemovalInterface
@@ -240,6 +251,18 @@ class CartReminderTest extends TestCase
         $this->assertSame([], $this->releasedRecipients, 'no cooldown was claimed');
     }
 
+    /** A skipped send (here: the recipient cooldown) keeps the failure count, so a bad address is still given up. */
+    public function testASkipKeepsTheFailureCountOfEarlierAttempts(): void
+    {
+        $consumer = $this->consumer();
+        $consumer->process('42');
+        $this->updates = [];
+        $this->consumer(['failed_sends' => '3'] + self::ROW)->process('43');   // recipient cooldown
+        $restore = array_values(array_filter($this->updates, fn ($u) => array_key_exists('failed_sends', $u['data'])
+            && !array_key_exists('c.failed_sends', $u['data'])));
+        $this->assertSame(3, end($restore)['data']['failed_sends'], 'not reset by the claim of a send that did not happen');
+    }
+
     public function testOtherSkipsKeepTheSubscription(): void
     {
         $consumer = $this->consumer();
@@ -255,7 +278,8 @@ class CartReminderTest extends TestCase
         $consumer->process('43');
         $this->assertSame(1, $this->sentMessages);
         $this->assertNull($this->updates[2]['data']['reminded_at']);
-        $this->assertSame(['reminded_at'], array_keys($this->updates[2]['data']));
+        $this->assertSame(['reminded_at', 'failed_sends'], array_keys($this->updates[2]['data']),
+            'the prior reminder state and failure count come back');
         $this->assertSame([], $this->releasedRecipients);
     }
 
@@ -453,7 +477,7 @@ class CartReminderTest extends TestCase
         $this->assertSame([], $this->mail);
         $this->assertCount(2, $this->updates);
         $this->assertNull($this->updates[1]['data']['reminded_at']);
-        $this->assertSame(['reminded_at'], array_keys($this->updates[1]['data']));
+        $this->assertSame(['reminded_at', 'failed_sends'], array_keys($this->updates[1]['data']));
     }
 
     public function testCustomerUsesMagentoEmailAndIgnoresOldGuestCapture(): void
@@ -527,14 +551,14 @@ class CartReminderTest extends TestCase
     {
         $this->oneClickStores = [1];
         $this->consumer(['store_id' => '2'] + self::ROW)->process('42');
-        $this->assertSame([2], $this->oneClickAsked, 'read for the cart\'s store, not the default');
+        $this->assertSame([2], array_values(array_unique($this->oneClickAsked)), 'read for the cart\'s store, not the default');
         $this->assertNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'off in store 2');
         $this->assertSame(1, $this->sentMessages, 'the email still goes out, with its visible unsubscribe link');
 
         $this->oneClickAsked = [];
         $this->recipientClaimed = false;
         $this->consumer()->process('42');
-        $this->assertSame([1], $this->oneClickAsked);
+        $this->assertSame([1], array_values(array_unique($this->oneClickAsked)));
         $this->assertSame('<' . $this->optoutUrl . '>', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe'),
             'on in store 1: the header carries the same unsubscribe link as the email');
     }

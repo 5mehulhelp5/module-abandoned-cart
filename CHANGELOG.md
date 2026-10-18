@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A skipped send (cooldown, block, changed recipient) keeps the failure count, so a bad address is still given up.
+- The restore page sends no Referer (the signed link is in its URL); restore links are signed with a
+  `commercekings_abandoned_cart_` prefix like the suite's other keyed hashes.
 - The one-click unsubscribe header uses the consent withdrawal link, or in opt-out mode the "Stop these emails"
   link.
 - Reminders carry Notification's "Didn't start this cart? Stop these emails to this address" link (`block_url`).

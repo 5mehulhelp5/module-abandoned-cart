@@ -61,7 +61,8 @@ class CartReminder implements NotificationTypeInterface
         private readonly NotificationConfig $notificationConfig,
         private readonly CartTable $carts,
         private readonly LockManagerInterface $locks,
-        private readonly SubscriptionRemovalInterface $removal
+        private readonly SubscriptionRemovalInterface $removal,
+        private readonly CartSubscription $subscriptionType
     ) {
     }
 
@@ -160,8 +161,9 @@ class CartReminder implements NotificationTypeInterface
             return;
         }
         $storeId = (int)$row['store_id'];
+        // a send that did not happen (cooldown, block, changed recipient) keeps the failure count of earlier attempts
         $restore = fn () => $db->update($this->carts->name(),
-            ['reminded_at' => $row['reminded_at']],
+            ['reminded_at' => $row['reminded_at'], 'failed_sends' => (int)($row['failed_sends'] ?? 0)],
             // Never undo a newer delivery or decrease the version; a newer queued mark must stay too.
             ['quote_id = ?' => $id, 'delivery_version = ?' => $deliveryVersion]);
         $message = new Delivery(
@@ -177,14 +179,15 @@ class CartReminder implements NotificationTypeInterface
                 }
                 $vars = $this->reminderData->build($quote, (string)$row['permission_ref'],
                     ['subscription_id' => (int)$row['subscription_id'], 'email' => $email]);
-                // one-click: the consent withdrawal link (opt-in), else the stop link (opt-out); only with a link
-                $oneClick = (string)(($vars['optout_url'] ?? '') ?: ($vars['block_url'] ?? ''));
+                // one-click: the consent withdrawal link (opt-in); without one, Notification uses the stop link
                 return new DeliveryContent($vars, $vars['customer_name'] ?? null,
-                    $oneClick !== '' && $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId) ? $oneClick : null);
+                    ($vars['optout_url'] ?? '') !== '' && $this->notificationConfig->isOneClickUnsubscribeEnabled($storeId)
+                        ? $vars['optout_url'] : null);
             },
             true,
             // A replaced resolver may read an external recipient source. Recheck it after claiming too.
-            fn (): bool => $this->recipients->resolve($id) === $email
+            fn (): bool => $this->recipients->resolve($id) === $email,
+            stoppable: $this->subscriptionType->isStoppable()
         );
         try {
             $status = $this->sender->send($message);

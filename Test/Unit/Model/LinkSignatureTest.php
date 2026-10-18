@@ -79,7 +79,7 @@ class LinkSignatureTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('invalidKeys')]
     public function testInvalidDeploymentKeyCannotValidateAPredictableSignature(mixed $key): void
     {
-        $predictable = substr(hash_hmac('sha256', 'restore|10', (string)$key), 0, 32);
+        $predictable = substr(hash_hmac('sha256', 'commercekings_abandoned_cart_restore|10', (string)$key), 0, 32);
         $this->assertFalse($this->signer($key)->isValid('restore', 10, $predictable));
     }
 
@@ -93,7 +93,7 @@ class LinkSignatureTest extends TestCase
         $config = $this->createStub(DeploymentConfig::class);
         $config->method('get')->willReturn('secret');
         $encryptor = $this->createMock(EncryptorInterface::class);
-        $encryptor->expects($this->once())->method('hash')->with('restore|10')->willReturn(str_repeat('a', 64));
+        $encryptor->expects($this->once())->method('hash')->with('commercekings_abandoned_cart_restore|10')->willReturn(str_repeat('a', 64));
         $encryptor->expects($this->never())->method('validateHash');
         $this->assertSame(str_repeat('a', 32), (new LinkSignature($config, $encryptor))->sign('restore', 10));
     }
@@ -102,8 +102,8 @@ class LinkSignatureTest extends TestCase
     {
         $key = "old-key\nnew-key";
         $signer = $this->signer($key);
-        $native = substr(hash_hmac('sha256', 'restore|10', 'new-key'), 0, 32);
-        $legacy = substr(hash_hmac('sha256', 'restore|10', $key), 0, 32);
+        $native = substr(hash_hmac('sha256', 'commercekings_abandoned_cart_restore|10', 'new-key'), 0, 32);
+        $legacy = substr(hash_hmac('sha256', 'commercekings_abandoned_cart_restore|10', $key), 0, 32);
         $this->assertSame($native, $signer->sign('restore', 10));
         $this->assertNotSame($native, $legacy);
         $this->assertTrue($signer->isValid('restore', 10, $native));
@@ -111,7 +111,7 @@ class LinkSignatureTest extends TestCase
         $this->assertFalse($signer->isValid('restore', 11, $native));
         $this->assertFalse($signer->isValid('other-purpose', 10, $native));
         $this->assertFalse($this->signer('different-key')->isValid('restore', 10, $native));
-        $this->assertFalse($signer->isValid('restore', 10, substr(hash_hmac('sha256', 'restore|10', 'old-key'), 0, 32)));
+        $this->assertFalse($signer->isValid('restore', 10, substr(hash_hmac('sha256', 'commercekings_abandoned_cart_restore|10', 'old-key'), 0, 32)));
     }
 
     public function testEncodedKeyUsesNativeDecodingAndRejectsRawKeySignature(): void
@@ -122,8 +122,8 @@ class LinkSignatureTest extends TestCase
         $decoded = str_repeat('k', 32);
         $key = 'base64' . base64_encode($decoded);
         $signer = $this->signer($key);
-        $native = substr(hash_hmac('sha256', 'restore|10', $decoded), 0, 32);
-        $legacy = substr(hash_hmac('sha256', 'restore|10', $key), 0, 32);
+        $native = substr(hash_hmac('sha256', 'commercekings_abandoned_cart_restore|10', $decoded), 0, 32);
+        $legacy = substr(hash_hmac('sha256', 'commercekings_abandoned_cart_restore|10', $key), 0, 32);
         $this->assertSame($native, $signer->sign('restore', 10));
         $this->assertNotSame($native, $legacy);
         $this->assertTrue($signer->isValid('restore', 10, $native));
@@ -133,7 +133,7 @@ class LinkSignatureTest extends TestCase
     public function testPublicHashesPasswordHashesAndMalformedTokensCannotAuthorizeRecovery(): void
     {
         $signer = $this->signer();
-        $payload = 'restore|10';
+        $payload = 'commercekings_abandoned_cart_restore|10';
         foreach ([substr(hash('sha256', $payload), 0, 32), hash('sha256', $payload),
             hash('sha256', 'salt' . $payload) . ':salt:1', str_repeat('A', 32),
             str_repeat('0', 32), $signer->sign('restore', 10) . "\n"] as $token) {
@@ -148,7 +148,7 @@ class LinkSignatureTest extends TestCase
         $encryptor = $this->createStub(EncryptorInterface::class);
         $encryptor->method('hash')->willThrowException(new \RuntimeException('No key available'));
         $signer = new LinkSignature($config, $encryptor);
-        $legacy = substr(hash_hmac('sha256', 'restore|10', 'secret'), 0, 32);
+        $legacy = substr(hash_hmac('sha256', 'commercekings_abandoned_cart_restore|10', 'secret'), 0, 32);
         $this->assertFalse($signer->isValid('restore', 10, $legacy));
         $this->expectException(\RuntimeException::class);
         $signer->sign('restore', 10);

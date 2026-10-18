@@ -32,6 +32,7 @@ use PHPUnit\Framework\TestCase;
 
 class RestoreTest extends TestCase
 {
+    private array $headers = [];
     use DbTestTrait;
 
     private ?string $path = null;
@@ -132,6 +133,10 @@ class RestoreTest extends TestCase
         $pageConfig->method('getTitle')->willReturn($title);
         $page = $this->createStub(Page::class);
         $page->method('getConfig')->willReturn($pageConfig);
+        $page->method('setHeader')->willReturnCallback(function ($name, $value) use ($page) {
+            $this->headers[$name] = $value;
+            return $page;
+        });
         $pages = $this->createStub(PageFactory::class);
         $pages->method('create')->willReturn($page);
         $validator = $this->createStub(Validator::class);
@@ -207,6 +212,8 @@ class RestoreTest extends TestCase
         $this->assertInstanceOf(Page::class, $this->result);
         $this->assertSame([], $this->restores);
         $this->assertSame([], $this->replaced);
+        $this->assertSame('no-referrer', $this->headers['Referrer-Policy'] ?? null,
+            'the signed link in the URL is not handed to other sites');
     }
 
     public function testInvalidFormKeyDoesNotRestore(): void

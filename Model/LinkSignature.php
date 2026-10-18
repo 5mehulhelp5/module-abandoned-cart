@@ -24,7 +24,8 @@ class LinkSignature
     public function sign(string $purpose, int $quoteId): string
     {
         $this->assertDeploymentKey();
-        return substr($this->encryptor->hash($purpose . '|' . $quoteId), 0, 32);
+        // purpose-separated from every other keyed hash in the suite, which all use a commercekings_ prefix
+        return substr($this->encryptor->hash('commercekings_abandoned_cart_' . $purpose . '|' . $quoteId), 0, 32);
     }
 
     public function isValid(string $purpose, int $quoteId, string $signature): bool

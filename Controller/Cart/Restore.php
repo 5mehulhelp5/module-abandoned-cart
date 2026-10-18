@@ -93,6 +93,8 @@ class Restore extends Action implements HttpGetActionInterface, HttpPostActionIn
             $page = $this->pageFactory->create();
             $page->getConfig()->getTitle()->set((string)__('Restore your saved cart'));
             $page->getConfig()->setRobots('NOINDEX,NOFOLLOW');
+            // the signed link is in the URL: don't hand it to scripts or images from other sites
+            $page->setHeader('Referrer-Policy', 'no-referrer', true);
             return $page;
         }
         try {
