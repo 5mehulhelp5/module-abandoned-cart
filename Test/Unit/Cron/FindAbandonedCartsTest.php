@@ -21,6 +21,8 @@ use Psr\Log\LoggerInterface;
 
 class FindAbandonedCartsTest extends TestCase
 {
+    private bool $quiet = false;
+    private array $quietAsked = [];
     use DbTestTrait;
 
     private array $published = [];
@@ -61,7 +63,34 @@ class FindAbandonedCartsTest extends TestCase
         $cooldown = $this->createStub(CooldownInterface::class);
         $cooldown->method('isRecent')->willReturnCallback(fn () => $this->recent);
         return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue,
-            $this->policy ?? new OncePerCart(), $lifetime, $stores, $logger, $recipients, $cooldown, $this->carts());
+            $this->policy ?? new OncePerCart(), $lifetime, $stores, $logger, $recipients, $cooldown, $this->carts(),
+            $this->quietHours(), $this->subscriptionType());
+    }
+
+    private function quietHours(): \CommerceKings\Notification\Api\QuietHoursInterface
+    {
+        $quiet = $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class);
+        $quiet->method('isQuiet')->willReturnCallback(function ($storeId, $channel) {
+            $this->quietAsked[] = [$storeId, $channel];
+            return $this->quiet;
+        });
+        return $quiet;
+    }
+
+    private function subscriptionType(): \CommerceKings\AbandonedCart\Model\Notification\CartSubscription
+    {
+        $type = $this->createStub(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class);
+        $type->method('getChannel')->willReturn('email');
+        return $type;
+    }
+
+    /** A store in quiet hours for the reminder's channel queues nothing while they last. */
+    public function testAStoreInQuietHoursQueuesNothing(): void
+    {
+        $this->quiet = true;
+        $this->assertSame(0, $this->finder()->execute());
+        $this->assertSame([], $this->updates);
+        $this->assertSame('email', $this->quietAsked[0][1], 'asked for the reminder\'s channel');
     }
 
     public function testDisabledStoresDoNothing(): void

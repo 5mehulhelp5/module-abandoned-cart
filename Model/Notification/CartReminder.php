@@ -14,6 +14,7 @@ use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Api\Data\ReminderState;
 use CommerceKings\Notification\Api\Data\Delivery;
 use CommerceKings\Notification\Api\Data\DeliveryContent;
+use CommerceKings\Notification\Api\QuietHoursInterface;
 use CommerceKings\Notification\Api\SenderInterface;
 use CommerceKings\Notification\Api\NotificationTypeInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
@@ -62,7 +63,8 @@ class CartReminder implements NotificationTypeInterface
         private readonly CartTable $carts,
         private readonly LockManagerInterface $locks,
         private readonly SubscriptionRemovalInterface $removal,
-        private readonly CartSubscription $subscriptionType
+        private readonly CartSubscription $subscriptionType,
+        private readonly QuietHoursInterface $quietHours
     ) {
     }
 
@@ -218,6 +220,16 @@ class CartReminder implements NotificationTypeInterface
         }
         if ($status !== SenderInterface::SENT) {
             $restore();
+            if ($status === SenderInterface::QUIET_HOURS) {
+                // held, not dropped: the finder leaves the cart out until the quiet window ends, then queues it again
+                $until = $this->quietHours->nextAllowedAt($storeId, $this->subscriptionType->getChannel());
+                // null: the window ended since the send; the next run simply queues the cart again
+                if ($until !== null) {
+                    // UTC, like the finder's NOW() on Magento's database session
+                    $db->update($this->carts->name(), ['skip_until' => gmdate('Y-m-d H:i:s', $until->getTimestamp())],
+                        ['quote_id = ?' => $id, 'delivery_version = ?' => $deliveryVersion]);
+                }
+            }
             $this->logger->info(sprintf('CommerceKings_AbandonedCart: cart %d skipped (%s)', $id, $status));
             return;
         }

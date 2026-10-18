@@ -10,7 +10,9 @@ use CommerceKings\AbandonedCart\Api\Data\ReminderQuery;
 use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
+use CommerceKings\AbandonedCart\Model\Notification\CartSubscription;
 use CommerceKings\Notification\Api\CooldownInterface;
+use CommerceKings\Notification\Api\QuietHoursInterface;
 use CommerceKings\Notification\Api\QueueInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use Magento\Framework\App\ResourceConnection;
@@ -34,7 +36,8 @@ use Psr\Log\LoggerInterface;
  *
  * "Maximum reminders per hour": a run only publishes what still fits in the hour (sent plus validly queued); the reminder
  * checks it again when sending. Recipient cooldown suppresses recent addresses; such a cart is left out for an hour
- * (skip_until) instead of being scanned again on every run. Store settings and policy
+ * (skip_until) instead of being scanned again on every run. A store in quiet hours for the reminder's channel is left
+ * out while they last; a reminder held by them waits in skip_until until they end. Store settings and policy
  * conditions are repeated in the queue claim so a stale selection cannot authorize delivery.
  */
 class FindAbandonedCarts
@@ -56,7 +59,9 @@ class FindAbandonedCarts
         private readonly LoggerInterface $logger,
         private readonly ReminderEmailResolverInterface $recipients,
         private readonly CooldownInterface $cooldown,
-        private readonly CartTable $carts
+        private readonly CartTable $carts,
+        private readonly QuietHoursInterface $quietHours,
+        private readonly CartSubscription $subscriptionType
     ) {
     }
 
@@ -201,7 +206,9 @@ class FindAbandonedCarts
         $branches = [];
         foreach ($this->stores->getStores() as $store) {
             $id = (int)$store->getId();
-            if (!$this->config->isEnabled($id)) {
+            // a store in quiet hours for the reminder's channel queues nothing until they end
+            if (!$this->config->isEnabled($id)
+                || $this->quietHours->isQuiet($id, $this->subscriptionType->getChannel())) {
                 continue;
             }
             $delay = $this->config->getDelayMinutes($id);

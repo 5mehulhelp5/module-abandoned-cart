@@ -65,7 +65,8 @@ namespace CommerceKings\AbandonedCart\Test\Unit\Cron {
             });
             return new FindAbandonedCarts($config, $this->resource(), $this->guard(), $queue, new OncePerCart(), $lifetime,
                 $stores, $this->createStub(LoggerInterface::class), $recipients, $this->createStub(CooldownInterface::class),
-                $this->carts());
+                $this->carts(), $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class),
+                $this->createStub(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class));
         }
 
         private static function page(array $ids): array

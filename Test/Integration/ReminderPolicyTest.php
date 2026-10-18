@@ -235,7 +235,8 @@ class ReminderPolicyTest extends TestCase
         });
         return new FindAbandonedCarts($this->config(), $this->resource, $this->guard(), $queue,
             $this->policy ?? new OncePerCart(), $this->lifetime(), $stores, $this->createStub(LoggerInterface::class),
-            $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class));
+            $this->om->get(ReminderEmailResolverInterface::class), $this->cooldown(), $this->om->get(CartTable::class),
+            $this->quietHours(), $this->om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class));
     }
 
     private function consumer(?callable $send = null, int $cooldownDays = 7, ?ReminderData $data = null): CartReminder
@@ -258,7 +259,8 @@ class ReminderPolicyTest extends TestCase
         $notificationConfig = $this->notificationConfig($cooldownDays);
         $mailer = new Sender(new ProviderPool($notificationConfig, [new MagentoEmail($builder, new OneClickHeaders(),
             $this->createStub(\Psr\Log\LoggerInterface::class))]), $this->createStub(Emulation::class), $this->cooldown(), $notificationConfig,
-            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->om->get(\CommerceKings\Notification\Api\StopListInterface::class));
+            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->om->get(\CommerceKings\Notification\Api\StopListInterface::class),
+            $this->quietHours());
         return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class),
             $data, $mailer, $this->config(), $this->guard(),
             $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->lifetime(),
@@ -266,7 +268,13 @@ class ReminderPolicyTest extends TestCase
             $this->notificationConfig(), $this->om->get(CartTable::class),
             $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class),
             $this->om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class),
-        $this->om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class));
+        $this->om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class), $this->quietHours());
+    }
+
+    /** Quiet hours never hold these fixtures: the store's own settings stay out of the policy checks. */
+    private function quietHours(): \CommerceKings\Notification\Api\QuietHoursInterface
+    {
+        return $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class);
     }
 
     private function withRecipients(CartReminder $consumer, ReminderEmailResolverInterface $recipients): CartReminder

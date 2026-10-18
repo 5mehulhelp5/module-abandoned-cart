@@ -76,6 +76,8 @@ class CartReminderTest extends TestCase
     private bool $headerSupport = true;
     /** every recipient is on the do-not-contact list */
     private bool $stopAll = false;
+    /** quiet hours: the window's end, or null when not quiet */
+    private ?\DateTimeImmutable $quietUntil = null;
     private array $removedSubscriptions = [];
     private \Symfony\Component\Mime\Email $nativeMessage;
     private string $optoutUrl = 'https://shop.test/ckconsent/optout?c=id&t=signature';
@@ -157,7 +159,8 @@ class CartReminderTest extends TestCase
         });
         $provider = new MagentoEmail($builder, new OneClickHeaders(), $this->createStub(\Psr\Log\LoggerInterface::class));
         $mailer = new Sender(new ProviderPool($notificationConfig, [$provider]), $this->emulation, $cooldown, $notificationConfig,
-            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->stopList());
+            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->stopList(),
+            $this->quietHours());
         $locks = $this->createStub(\Magento\Framework\Lock\LockManagerInterface::class);
         $locks->method('lock')->willReturnCallback(function ($name, $timeout) {
             $this->lockEvents[] = ['lock', $name, $timeout];
@@ -168,7 +171,15 @@ class CartReminderTest extends TestCase
             return true;
         });
         return new CartReminder($this->resource(), $repositories, $data, $mailer, $config, $permission, $this->policy ?? new OncePerCart(), $logger, $lifetime, $recipients, $notificationConfig, $this->carts(), $locks, $this->removal(),
-            $this->subscriptionType());
+            $this->subscriptionType(), $this->quietHours());
+    }
+
+    private function quietHours(): \CommerceKings\Notification\Api\QuietHoursInterface
+    {
+        $quiet = $this->createStub(\CommerceKings\Notification\Api\QuietHoursInterface::class);
+        $quiet->method('isQuiet')->willReturnCallback(fn () => $this->quietUntil !== null);
+        $quiet->method('nextAllowedAt')->willReturnCallback(fn () => $this->quietUntil);
+        return $quiet;
     }
 
     /** No claim, no email: only the cart's `queued_at` mark is cleared, so the finder can queue it again. */
@@ -232,6 +243,7 @@ class CartReminderTest extends TestCase
     {
         $type = $this->createStub(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class);
         $type->method('isStoppable')->willReturnCallback(fn () => $this->stoppable);
+        $type->method('getChannel')->willReturn('email');
         return $type;
     }
 
@@ -249,6 +261,20 @@ class CartReminderTest extends TestCase
         $this->assertSame(0, $this->sentMessages, 'nothing sent to a stopped address');
         $this->assertCount(1, $this->removedSubscriptions, 'the subscription ends instead of a retry on every finder run');
         $this->assertSame([], $this->releasedRecipients, 'no cooldown was claimed');
+    }
+
+    /** Held by quiet hours, not dropped: the claim is restored and the cart waits until the window ends. */
+    public function testQuietHoursHoldTheReminderUntilTheyEnd(): void
+    {
+        $this->quietUntil = new \DateTimeImmutable('2026-10-19 06:00:00', new \DateTimeZone('UTC'));
+        $this->consumer(['failed_sends' => '2'] + self::ROW)->process('42');
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertSame([], $this->releasedRecipients, 'no cooldown was claimed');
+        $this->assertSame([], $this->removedSubscriptions, 'the subscription stays');
+        $data = array_merge(...array_map(fn ($u) => $u['data'], array_slice($this->updates, 1)));
+        $this->assertSame([null, 2, '2026-10-19 06:00:00'],
+            [$data['reminded_at'], $data['failed_sends'], $data['skip_until']], 'restored, failures kept, retry after the window');
+        $this->assertStringContainsString('skipped (quiet hours)', implode(' ', $this->logs));
     }
 
     /** A skipped send (here: the recipient cooldown) keeps the failure count, so a bad address is still given up. */

@@ -110,18 +110,22 @@ while (!is_file($barrier . '.go')) {
 }
 if ($mode === 'finder') {
     (new FindAbandonedCarts($config, $resource, $guard, $queue, new OncePerCart(), $lifetime,
-        $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class), $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class)))->execute();
+        $stores, new NullLogger(), $recipients, $om->get(CooldownInterface::class), $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class),
+        $om->get(\CommerceKings\Notification\Api\QuietHoursInterface::class),
+        $om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class)))->execute();
 } else {
     $mailer = new Sender(new ProviderPool($om->get(NotificationConfig::class), [new MagentoEmail($builder, new OneClickHeaders(),
         new \Psr\Log\NullLogger())]), $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class),
         new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(),
-        $om->get(\CommerceKings\Notification\Api\StopListInterface::class));
+        $om->get(\CommerceKings\Notification\Api\StopListInterface::class),
+        $om->get(\CommerceKings\Notification\Api\QuietHoursInterface::class));
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class), $data,
         $mailer, $config, $guard, new OncePerCart(), new NullLogger(),
         $lifetime, $recipients, $om->get(NotificationConfig::class),
         $om->get(\CommerceKings\AbandonedCart\Model\CartTable::class), $om->get(\Magento\Framework\Lock\LockManagerInterface::class),
         $om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class),
-        $om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class));
+        $om->get(\CommerceKings\AbandonedCart\Model\Notification\CartSubscription::class),
+        $om->get(\CommerceKings\Notification\Api\QuietHoursInterface::class));
     $db = $resource->getConnection();
     foreach ($ids as $id) {
         // the queue message carries the cart's subscription id
