@@ -57,11 +57,11 @@ their email.
 | Field | Default |
 |---|---|
 | Enabled (store) | No |
-| Inactivity delay (minutes) | 180 |
-| Maximum reminders per hour | 0 = no limit – set your email provider's limit |
+| Inactivity delay (minutes, global) | 180 |
+| Maximum reminders per hour (global) | 0 = no limit – set your email provider's limit |
 | Email template (store) | Abandoned Cart Reminder – neutral, for both setups |
 | Sender (store) | General Contact |
-| Show notice | Automatic – Yes without consent, No with consent |
+| Show notice (website) | Automatic – Yes without consent, No with consent |
 | Notice text (store) | If you leave your cart, we may email you one reminder about it. |
 
 Carts expire with Magento's *Quote Lifetime* (normally 30 days). The recipient cooldown (7 days per address) and the
@@ -88,7 +88,7 @@ existing customer cart, the guest address is removed by the nightly cleanup.
 - Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000`, so long-running workers recycle.
 - To scale, run more consumers in parallel. Number of consumers = email provider's limit per second ÷ emails one
   consumer sends per second.
-- Rate-limit the guest subscribe endpoint in your web server, proxy or CDN – the first line of defence
+- Rate-limit the guest subscribe endpoint in your web server, proxy or CDN – the first line of defense
   ([how](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting)). Optional
   second line: [commercekings/module-rate-limit](https://github.com/commercekings/module-rate-limit) (Magento 2.4.7+), which also covers the restore link.
 

@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-First release. Features:
-
 - Reminders carry Notification's "Didn't start this cart? Stop these emails to this address" link (`block_url`).
 - Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`): Magento 2.4.0–2.4.3 do not run on PHP 8.1.
 - `cart_reminder` declares its banner category itself (`category = personalization`).
@@ -16,16 +14,14 @@ First release. Features:
 - The `cart_reminder` consent purpose is active only with the consent bridge, so a banner in the opt-out setup shows
   no reminder switch.
 - **Opt-out without an extra module:** installed alone, abandoned cart runs opt-out. The checkout notice under the
-  guest email field moved in from the retired `module-abandoned-cart-optout`, with *Show notice* (Automatic / Yes /
+  guest email field has *Show notice* (Automatic / Yes /
   No, website) and *Notice text* (store view) under *Checkout notice*. One neutral email template for both setups.
 - Use Magento's native customer-data section invalidation for cart recovery; remove controller-owned cookie writes.
 - Load a fresh quote repository for each delivery attempt so retries in a resident consumer use current cart content.
   Cover retry freshness with native SQL and customer-data behavior with Magento's actual frontend modules.
-
 - Cover failed and uncertain queue publishes through stale-claim recovery, and customer checkout request
   failures/refusals and dependency-loading errors. Recheck the cart, login and consent after asynchronous
   checkout dependencies load; a failed load leaves capture unstored without interrupting checkout.
-
 - **Two setups:** one reminder email per abandoned cart. With `commercekings/module-consent-notification`, only
   with a valid `cart_reminder` consent from `commercekings/module-consent` (not withdrawn, expired or from an
   older revision), checked in PHP and repeated inside every atomic SQL claim, so a withdrawal at the same moment

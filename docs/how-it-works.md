@@ -13,7 +13,7 @@ Sections describe the consent setup unless they say otherwise.
    - Stored by Notification: the cart's subscription (guest contact or customer, the consent id as `permission_ref`, `captured_at`) in one INSERT that also checks the consent is still valid and the cart is still the authorized one (active, same store, same guest or customer) – a request still on its way can't undo a withdrawal. Magento's quote is not written.
 3. **Finder** (cron `commercekings_abandoned_cart_find`, every minute) publishes the carts that became due; the queue holds the backlog and the consumers set the pace (see *Flash sales* below). It selects active, nonempty carts with a subscription whose consent is valid, untouched for the configured delay and still within Magento's quote lifetime for their store. `ReminderPolicyInterface` supplies the frequency rule; `OncePerCart` permits only carts never reminded. Each cart is claimed (`ck_abandoned_cart.queued_at`) and published to Notification's shared topic `commercekings.notification.send` as `cart_reminder|<subscription id>`. Recent recipients are skipped, and such a cart is left out of the selection for an hour (`skip_until`), so carts that cannot be sent yet do not take every run's time ahead of newer ones; an atomic recipient claim in the consumer also suppresses parallel same-address deliveries.
 4. **Consumer** `commerceKingsNotificationSend` (`commercekings/module-notification`, shared by all notifications) hands the subscription to the `cart_reminder` type (`Model\Notification\CartReminder`) only while it still exists with a valid consent. The type re-checks the policy, store, consent, inactivity delay and quote expiry, then claims the cart atomically and sends in store emulation. Selection and claim share the policy's SQL condition. A failed send restores its prior reminder timestamp only while its delivery version still matches, preserving newer work; the cart is tried again after 1 hour, 4 hours, 1 day and 1 day (`skip_until`, `failed_sends`), then given up. Duplicate messages cannot claim the same state twice.
-5. **Email** – the module ships a **neutral English default** (`view/frontend/email/reminder.html`, "Abandoned Cart Reminder"). Use your own: **Marketing > Email Templates > Add New Template**, load "Abandoned Cart Reminder", change text and design, select it in **Abandoned Cart > Email template**. Variables: `customer_name`, `items_html` (ready-made rows: picture, the store's predefined options only, qty × price), `grand_total`, `restore_url`, `optout_url`, `contact_url`, `store_url`; the footer gets `cart_reminder_email="1"` for a label. Sender defaults to **General Contact** – use a no-reply address.
+5. **Email** – the module ships a **neutral English default** (`view/frontend/email/reminder.html`, "Abandoned Cart Reminder"). Use your own: **Marketing > Email Templates > Add New Template**, load "Abandoned Cart Reminder", change text and design, select it in **Abandoned Cart > Email template**. Variables: `customer_name`, `items_html` (ready-made rows: picture, the store's predefined options only, qty × price), `grand_total`, `restore_url`, `optout_url`, `block_url` (Do not contact link), `contact_url`, `store_url`; the footer gets `cart_reminder_email="1"` for a label. Sender defaults to **General Contact** – use a no-reply address.
 
 ## Data
 
@@ -30,10 +30,11 @@ deleted with the quote by Magento's cart cleanup):
 | `queued_at` | waiting in the queue; cleared when the reminder is sent or skipped, so the cart can be found again |
 | `reminded_at` | last reminder sent (`OncePerCart` sends one per cart) |
 | `delivery_version` | increasing delivery claim number; prevents an older failure from undoing a newer delivery |
+| `skip_until` | the finder skips the cart until then (recipient cooldown, failed send) |
+| `failed_sends` | failed send attempts in a row; the cart is given up after four retries |
 
 Each atomic delivery claim increments `delivery_version`, starting from zero. Rollback checks that version before
-restoring `reminded_at`, keeps the version and leaves any newer `queued_at` mark untouched. Existing rows receive
-version zero through `setup:upgrade`; queue message references and the reminder policy contract stay the same.
+restoring `reminded_at`, keeps the version and leaves any newer `queued_at` mark untouched.
 
 Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. A guest's address is stored once as a Notification contact; the module keeps no email history, and Notification removes contacts nothing uses any more. Magento's `quote.customer_email` and `quote.updated_at` are never touched. The reminder delay uses the later of cart activity (`quote.updated_at`) and subscription activity (`captured_at`, guests and customers); quote expiry still uses Magento's cart timestamp. A withdrawal deletes the subscription but keeps `queued_at`/`reminded_at`, so opting in again never causes a second reminder. Every claim is one UPDATE over `ck_abandoned_cart` joined to `quote` and the subscription (`Model\CartTable::joined()`), so cart, consent and send history are still checked in the same statement.
 
@@ -44,8 +45,6 @@ DI to choose another source. Finder scans candidate pages so unresolved recipien
 later eligible carts. Delivery compares the subscription it checked in its atomic claim
 and resolves again afterward, releasing the claim if the recipient changed. Email updates never
 reset `reminded_at`: the default remains one reminder per cart.
-
-Carts subscribed before this version need checkout capture again; nothing is migrated before the first release.
 
 ## Delivery policy and quote lifetime
 
@@ -86,7 +85,7 @@ expiry. A reminder sent near expiry can therefore have a shorter restore window.
 quote lifetime affects pending delivery and restore checks; this module never extends retention.
 
 Each cart can receive one reminder. A separate recipient cooldown also limits sends across
-all carts and stores sharing an email address. **Email cooldown (days)** is a global admin
+all carts and stores sharing an email address. **Cooldown (days)** is a global admin
 setting, default **7** (**0** turns it off), under CommerceKings > Notifications – it belongs to
 `commercekings/module-notification` and is shared with every notification that uses it. Deferred carts
 remain unsent and may become eligible after the cooldown if their quote and consent are still valid.
@@ -106,7 +105,7 @@ recipient claim; successful or interrupted handoffs retain it conservatively.
   - Magento checkout email is preserved for guests and customers.
   - retries use the original consent IDs, so a later grant/subscription remains untouched;
   - clearing a checkout email only removes that cart's subscription; it does not withdraw browser consent.
-- **Opt-out** ("Unsubscribe") withdraws the cart's consent (`ConsentInterface::withdraw($id, 'email')` – with every other active reminder consent of that browser). That browser's old choice is refused (e.g. opted out on the phone, the old "yes" is still on the laptop – also after re-saving the banner for another category); switching the choice mapped to `cart_reminder` on again is a new consent. The address is never blocked.
+- **Unsubscribe link** (opt-in setup) withdraws the cart's consent (`ConsentInterface::withdraw($id, 'email')` – with every other active reminder consent of that browser). That browser's old choice is refused (e.g. opted out on the phone, the old "yes" is still on the laptop – also after re-saving the banner for another category); switching the choice mapped to `cart_reminder` on again is a new consent. The address is never blocked.
 - **Source revision raised** (Consent → Source revision) or **purpose terms revision raised** (`etc/di.xml`, `terms_revision`): every consent given before stops being valid – waiting reminders are not sent; the visitor is asked again.
 
 ## Flash sales
@@ -144,8 +143,8 @@ allowlist are in [module-notification's operations guide](https://github.com/com
 Keep Magento cron running for cart discovery.
 
 A failed send releases the cart claim. Magento rejects that message; a later finder run
-can publish a new one if the cart is still eligible. This is the same policy on both
-transports; switching to SQL does not add a per-cart retry limit or delivery backoff.
+can publish a new one if the cart is still eligible. Failed sends back off and give up the same way on both
+transports (see *Consumer* above).
 
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 

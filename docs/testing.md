@@ -46,7 +46,7 @@ The quote integration tests require a **development database with Magento demo d
 MAGENTO_ROOT="$PWD" vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php vendor/commercekings/module-abandoned-cart/Test/Integration/CartRestoreTest.php
 ```
 
-`CartSubscriptionTest.php` adds ten real SQL regressions through Notification's subscribe service with this
+`CartSubscriptionTest.php` adds eleven real SQL regressions through Notification's subscribe service with this
 module's `CartSubscription`, empty quotes and a temporary second website: cross-website subscribe/unsubscribe,
 allowed subscribe/retry/unsubscribe, a disabled store, a store change after authorization, wrong consent scope,
 refused-write acknowledgements and a customer's own cart. It also checks guest/customer recipient selection,
@@ -104,7 +104,7 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 - Source revision raised → banner asks again; the old consent is invalid but not marked withdrawn; waiting reminders are not sent; accepting again → new consent.
 
 **Sending**
-- Cart with consent untouched past the delay → `published: 1`; email from no-reply with items, predefined options only, total, footnote, opt-out, footer label; greeted by a sanitised first name.
+- Cart with consent untouched past the delay → `published: 1`; email from no-reply with items, predefined options only, total, footnote, opt-out, footer label; greeted by a sanitized first name.
 - Two carts with the same address → one sends during the recipient cooldown; the other waits and may receive its first reminder afterward. Duplicate deliveries do not send again.
 - No consent / withdrawn or expired after queuing / older revision → consumer skips.
 - Second finder run → `published: 0`; ordered carts, carts touched within the delay and carts expired under their store's Magento quote lifetime are not queued. The consumer repeats the delay and expiry checks after queuing.
@@ -118,9 +118,9 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 - Owner emptied the cart → "This reminder link is no longer available. You can continue shopping with your current cart."
 - Customer cart: logged in → cart page; logged out → login page with notice.
 
-**Opt-out**
+**Unsubscribe link** (opt-in setup)
 - Link → confirmation page; the cart's subscription (guest reminder email + consent) removed, Magento checkout email preserved; `ck_consent` row withdrawn via `email`, no email address stored anywhere in the consent tables.
-- Same link again → confirmation, with a later explicit consent preserved. Forged signature → homepage.
+- Same link again → confirmation, with a later explicit consent preserved. Forged signature → "Link expired", nothing changed.
 - Original cart deleted → the Consent link still withdraws.
 - Opted out on phone → laptop's old consent refused, also after changing an unrelated purpose; the choice mapped to `cart_reminder` off+on → stored again; other browser with fresh consent and same email → stored.
 - Same browser → banner switches the choice mapped to `cart_reminder` off if its current choice was withdrawn, preserving other categories and later explicit choices.
