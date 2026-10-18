@@ -30,6 +30,13 @@ vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
 They verify recipient cooldown, same-address concurrency, expiry, owned release, failed-send retry, duplicate claims, store-specific lifetime,
 late queue delivery, read-only admin scope and restore expiry before physical quote deletion.
 
+The two hourly-limit tests (`testHourlyLimitHoldsWhenADelayedBacklogDrains`,
+`testAWithdrawnQueuedCartDoesNotTakeAPlaceInTheHour`) count every cart reminder sent in the last hour, as the limit
+does, so they fail when an E2E run or a manual send happened on the same database within the hour. Wait for the hour
+to pass, or run Notification's delivery-state cleanup (`commercekings_notification_delivery_state_cleanup`), which
+removes the history of carts that were deleted since (e.g. the E2E fixtures); a send to a cart that still exists
+counts until its hour is over.
+
 `Test/Unit` uses `DbTestTrait`, a recording fake of the DB adapter (every update/insert/delete with its WHERE conditions). Covered: link signatures, cart subscription authorization (guest masked id, customer's own quote, the repeated cart condition), reminder policy, quote lifetime, finder (subscription ids, guarded queue claim), consumer skips/claim (incl. the guarded claim losing to a withdrawal)/send/release, fresh quote loading on retries, email data (signed links, options, escaping), and restore (every branch incl. other browser and merge). Email rules, consent, subscription storage and withdrawal are tested in Notification; shared withdrawal links, confirmation and preference sync in Consent.
 
 JavaScript tests exercise guest capture, the Magento email-field mixin and customer checkout subscription:
