@@ -79,8 +79,8 @@ token; the customer id is never taken from the request body.
 | `GET /ckconsent/optout?c=&t=` (Consent module) | email | show read-only withdrawal confirmation |
 | `POST /ckconsent/optout` (form key, `c`, `t`) | confirmation form | withdraw consent and apply owned-browser preferences |
 
-Guest capture sends `{"type":"cart_reminder","reference":"<masked cart id>","email":"visitor@example.test"}`;
-an explicit `"email":""` unsubscribes. Notification validates the email (missing, non-string, invalid format
+Guest capture sends `{"type":"cart_reminder","reference":"<masked cart id>","recipient":"visitor@example.test"}`;
+an explicit `"recipient":""` unsubscribes. Notification validates the email (missing, non-string, invalid format
 or over 255 characters → Magento's standard 400 input error, without echoing the address) before the cart is
 authorized, so invalid input leaves an existing subscription intact. See [module-notification](https://github.com/commercekings/module-notification/blob/main/docs/how-it-works.md#subscribe).
 

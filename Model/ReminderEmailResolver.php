@@ -21,7 +21,7 @@ class ReminderEmailResolver implements ReminderEmailResolverInterface
     {
         $db = $this->resource->getConnection();
         $email = $db->fetchOne($this->carts->select([], [
-            'email' => new Expression((string)$db->getCheckSql('q.customer_id IS NULL', 'n.email', 'q.customer_email')),
+            'email' => new Expression((string)$db->getCheckSql('q.customer_id IS NULL', 'n.recipient', 'q.customer_email')),
         ])->where('q.entity_id = ?', $quoteId));
         return $email ? (string)$email : null;
     }

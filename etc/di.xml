@@ -41,4 +41,20 @@
             </argument>
         </arguments>
     </type>
+    <!-- the cart reminder's permission: its type's own, else the shop-wide one (Notification's TypePermission) -->
+    <virtualType name="CommerceKingsCartReminderPermission" type="CommerceKings\Notification\Model\TypePermission">
+        <arguments>
+            <argument name="typeCode" xsi:type="string">cart_reminder</argument>
+        </arguments>
+    </virtualType>
+    <type name="CommerceKings\AbandonedCart\Model\Notification\CartReminder">
+        <arguments>
+            <argument name="permission" xsi:type="object">CommerceKingsCartReminderPermission</argument>
+        </arguments>
+    </type>
+    <type name="CommerceKings\AbandonedCart\Cron\FindAbandonedCarts">
+        <arguments>
+            <argument name="permission" xsi:type="object">CommerceKingsCartReminderPermission</argument>
+        </arguments>
+    </type>
 </config>

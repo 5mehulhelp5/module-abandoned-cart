@@ -75,7 +75,7 @@ class CartReminderTest extends TestCase
     private array $releasedRecipients = [];
     private bool $headerSupport = true;
     /** every recipient is on the do-not-contact list */
-    private bool $blockAll = false;
+    private bool $stopAll = false;
     private array $removedSubscriptions = [];
     private \Symfony\Component\Mime\Email $nativeMessage;
     private string $optoutUrl = 'https://shop.test/ckconsent/optout?c=id&t=signature';
@@ -109,7 +109,7 @@ class CartReminderTest extends TestCase
         $data->method('build')->willReturnCallback(function (...$args) {
             $this->built = $args;
             $this->quotesBuilt[] = $args[0];
-            return ['customer_name' => 'Jane', 'items_html' => '', 'optout_url' => $this->optoutUrl, 'block_url' => $this->blockUrl];
+            return ['customer_name' => 'Jane', 'items_html' => '', 'optout_url' => $this->optoutUrl, 'stop_url' => $this->blockUrl];
         });
         $this->emulation = $this->createMock(Emulation::class);
         $lifetime = $this->createStub(QuoteLifetime::class);
@@ -157,7 +157,7 @@ class CartReminderTest extends TestCase
         });
         $provider = new MagentoEmail($builder, new OneClickHeaders(), $this->createStub(\Psr\Log\LoggerInterface::class));
         $mailer = new Sender(new ProviderPool($notificationConfig, [$provider]), $this->emulation, $cooldown, $notificationConfig,
-            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->blocks());
+            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->stopList());
         $locks = $this->createStub(\Magento\Framework\Lock\LockManagerInterface::class);
         $locks->method('lock')->willReturnCallback(function ($name, $timeout) {
             $this->lockEvents[] = ['lock', $name, $timeout];
@@ -219,13 +219,13 @@ class CartReminderTest extends TestCase
         $this->assertSame([['cid-1', 'cart_reminder', 1]], $this->validityChecks, 'checked for this purpose and the cart\'s store');
     }
 
-    private function blocks(): \CommerceKings\Notification\Api\RecipientBlockInterface
+    private function stopList(): \CommerceKings\Notification\Api\StopListInterface
     {
-        $blocks = $this->createStub(\CommerceKings\Notification\Api\RecipientBlockInterface::class);
-        $blocks->method('isBlocked')->willReturnCallback(fn () => $this->blockAll);
+        $stopList = $this->createStub(\CommerceKings\Notification\Api\StopListInterface::class);
+        $stopList->method('isStopped')->willReturnCallback(fn () => $this->stopAll);
         // Notification's own way out: the stop link becomes the one-click URL when there is no other
-        $blocks->method('getBlockUrl')->willReturnCallback(fn () => $this->blockUrl);
-        return $blocks;
+        $stopList->method('getStopUrl')->willReturnCallback(fn () => $this->blockUrl);
+        return $stopList;
     }
 
     private function subscriptionType(): \CommerceKings\AbandonedCart\Model\Notification\CartSubscription
@@ -242,11 +242,11 @@ class CartReminderTest extends TestCase
         return $removal;
     }
 
-    public function testBlockedRecipientEndsTheSubscriptionSoTheCartIsNotQueuedAgain(): void
+    public function testStoppedRecipientEndsTheSubscriptionSoTheCartIsNotQueuedAgain(): void
     {
-        $this->blockAll = true;
+        $this->stopAll = true;
         $this->consumer()->process('42');
-        $this->assertSame(0, $this->sentMessages, 'nothing sent to a blocked address');
+        $this->assertSame(0, $this->sentMessages, 'nothing sent to a stopped address');
         $this->assertCount(1, $this->removedSubscriptions, 'the subscription ends instead of a retry on every finder run');
         $this->assertSame([], $this->releasedRecipients, 'no cooldown was claimed');
     }
@@ -536,7 +536,7 @@ class CartReminderTest extends TestCase
     {
         $this->oneClick = true;
         $this->optoutUrl = '';
-        $this->blockUrl = 'https://shop.test/cknotification/block/?r=enc&s=sig';
+        $this->blockUrl = 'https://shop.test/cknotification/stop/?r=enc&s=sig';
         $this->consumer()->process('42');
         $this->assertSame('<' . $this->blockUrl . '>', $this->nativeMessage->getHeaders()->getHeaderBody('List-Unsubscribe'));
 

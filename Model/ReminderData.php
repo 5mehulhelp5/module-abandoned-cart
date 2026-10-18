@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Model;
 
 use CommerceKings\Notification\Api\Channel;
-use CommerceKings\Notification\Api\RecipientBlockInterface;
+use CommerceKings\Notification\Api\StopListInterface;
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
 use CommerceKings\Notification\Api\SubscriberInterface;
@@ -52,7 +52,7 @@ class ReminderData
         private readonly UnsubscribeLinkInterface $unsubscribeLinks,
         private readonly LinkSignature $signature,
         private readonly SubscriberInterface $subscriber,
-        private readonly RecipientBlockInterface $blocks
+        private readonly StopListInterface $stopList
     ) {
     }
 
@@ -74,8 +74,8 @@ class ReminderData
                 $context + ['quote_id' => (int)$quote->getId(),
                     'customer_id' => $quote->getCustomerId() ? (int)$quote->getCustomerId() : null])),
             // Notification's "stop these emails" link (do not contact); '' when the shop turned it off
-            'block_url' => isset($context['email']) && is_string($context['email'])
-                ? $this->blocks->getBlockUrl(Channel::EMAIL, $context['email'], (int)$quote->getStoreId()) : '',
+            'stop_url' => isset($context['email']) && is_string($context['email'])
+                ? $this->stopList->getStopUrl(Channel::EMAIL, $context['email'], (int)$quote->getStoreId()) : '',
         ];
     }
 

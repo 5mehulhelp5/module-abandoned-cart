@@ -89,14 +89,14 @@ class ReminderPolicyTest extends TestCase
         $db = $this->resource->getConnection();
         if ($this->quoteIds) {
             $emails = $db->fetchCol($db->select()->from(['s' => $this->table(SubscriptionManagement::TABLE)], [])
-                ->join(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', 'email')
+                ->join(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email' => 'recipient'])
                 ->where('s.type = ?', CartReminder::CODE)->where('s.reference_id IN (?)', $this->quoteIds));
             $hashes = array_map(fn ($email) => $this->cooldown()->hash($email), array_filter($emails));
             if ($hashes) { $db->delete($this->table('ck_notification_cooldown'), ['recipient_hash IN (?)' => $hashes]); }
             $db->delete($this->table(SubscriptionManagement::TABLE),
                 ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quoteIds]);
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quoteIds]);
-            if ($emails) { $db->delete($this->table('ck_notification_contact'), ['email IN (?)' => $emails]); }
+            if ($emails) { $db->delete($this->table('ck_notification_contact'), ['recipient IN (?)' => $emails]); }
         }
         if ($this->storeIds) { $db->delete($this->table('store'), ['store_id IN (?)' => array_values($this->storeIds)]); }
         $this->stores->reinitStores();
@@ -162,7 +162,7 @@ class ReminderPolicyTest extends TestCase
                 ['subscription_id', 'contact_id', 'permission_ref', 'captured_at'])
             ->joinLeft(['c' => $this->table('ck_abandoned_cart')], 'c.quote_id = q.entity_id',
                 ['queued_at', 'reminded_at', 'delivery_version', 'skip_until'])
-            ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email'])
+            ->joinLeft(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email' => 'recipient'])
             ->where('q.entity_id = ?', $id));
     }
 
@@ -258,7 +258,7 @@ class ReminderPolicyTest extends TestCase
         $notificationConfig = $this->notificationConfig($cooldownDays);
         $mailer = new Sender(new ProviderPool($notificationConfig, [new MagentoEmail($builder, new OneClickHeaders(),
             $this->createStub(\Psr\Log\LoggerInterface::class))]), $this->createStub(Emulation::class), $this->cooldown(), $notificationConfig,
-            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->om->get(\CommerceKings\Notification\Api\RecipientBlockInterface::class));
+            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->om->get(\CommerceKings\Notification\Api\StopListInterface::class));
         return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class),
             $data, $mailer, $this->config(), $this->guard(),
             $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->lifetime(),

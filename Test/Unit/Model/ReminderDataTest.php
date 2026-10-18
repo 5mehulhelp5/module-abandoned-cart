@@ -93,7 +93,7 @@ class ReminderDataTest extends TestCase
         $tax->method('displayCartPricesBoth')->willReturnCallback(fn () => $this->cartPriceDisplay === 3);
         return new ReminderData($image, $configuration, $price, $currencies, $tax, $url, $escaper,
             $this->unsubscribe ?? new SubscriberUnsubscribeLink($subscriptions, $subscriber), $signature, $subscriber,
-            $this->createStub(\CommerceKings\Notification\Api\RecipientBlockInterface::class));
+            $this->createStub(\CommerceKings\Notification\Api\StopListInterface::class));
     }
 
     private function quote(array $items = [], ?string $firstname = 'Jane', ?string $billingName = null): Quote

@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-- A skipped send (cooldown, block, changed recipient) keeps the failure count, so a bad address is still given up.
+- Follows Notification's "stop" naming: the template variable is `stop_url`; reminders declare `getChannel()` email.
+- A skipped send (cooldown, stop, changed recipient) keeps the failure count, so a bad address is still given up.
 - The restore page sends no Referer (the signed link is in its URL); restore links are signed with a
   `commercekings_abandoned_cart_` prefix like the suite's other keyed hashes.
 - The one-click unsubscribe header uses the consent withdrawal link, or in opt-out mode the "Stop these emails"
   link.
-- Reminders carry Notification's "Didn't start this cart? Stop these emails to this address" link (`block_url`).
+- Reminders carry Notification's "Didn't start this cart? Stop these emails to this address" link (`stop_url`).
 - Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`): Magento 2.4.0–2.4.3 do not run on PHP 8.1.
 - `cart_reminder` declares its banner category itself (`category = personalization`).
 - A send that keeps failing (e.g. a rejected address) is tried again after 1 hour, 4 hours, 1 day and 1 day, then

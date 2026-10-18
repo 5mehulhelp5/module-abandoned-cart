@@ -115,7 +115,7 @@ if ($mode === 'finder') {
     $mailer = new Sender(new ProviderPool($om->get(NotificationConfig::class), [new MagentoEmail($builder, new OneClickHeaders(),
         new \Psr\Log\NullLogger())]), $emulation, $om->get(CooldownInterface::class), $om->get(NotificationConfig::class),
         new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(),
-        $om->get(\CommerceKings\Notification\Api\RecipientBlockInterface::class));
+        $om->get(\CommerceKings\Notification\Api\StopListInterface::class));
     $consumer = new CartReminder($resource, $om->get(CartRepositoryInterfaceFactory::class), $data,
         $mailer, $config, $guard, new OncePerCart(), new NullLogger(),
         $lifetime, $recipients, $om->get(NotificationConfig::class),

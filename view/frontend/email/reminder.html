@@ -7,7 +7,7 @@
 "var store_url":"Store URL",
 "var contact_url":"Contact page URL",
 "var optout_url":"Opt-out link",
-"var block_url":"Stop these emails link (do not contact)"
+"var stop_url":"Stop these emails link (do not contact)"
 } @-->
 <!--
 Neutral default. Make your own: Marketing > Email Templates > Add New Template > Load "Abandoned Cart
@@ -36,8 +36,8 @@ Cart > Email template. Variables above; items_html is ready-made HTML rows.
 {{depend optout_url}}
 <p style="margin: 12px 0 0; font-size: 12px; line-height: 18px; color: #999999;">{{trans "You get this one-time reminder about the cart you left in our store. Don't want reminders? <a href=\"%url\" style=\"color: #999999;\">Unsubscribe</a>." url=$optout_url|raw}}</p>
 {{/depend}}
-{{depend block_url}}
-<p style="margin: 8px 0 0; font-size: 12px; line-height: 18px; color: #999999;">{{trans "Didn't start this cart? <a href=\"%url\" style=\"color: #999999;\">Stop these emails to this address</a>." url=$block_url|raw}}</p>
+{{depend stop_url}}
+<p style="margin: 8px 0 0; font-size: 12px; line-height: 18px; color: #999999;">{{trans "Didn't start this cart? <a href=\"%url\" style=\"color: #999999;\">Stop these emails to this address</a>." url=$stop_url|raw}}</p>
 {{/depend}}
 </td></tr>
 </table>

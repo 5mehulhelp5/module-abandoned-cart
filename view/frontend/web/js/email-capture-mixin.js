@@ -26,7 +26,7 @@ define([
     function send(cartId, email) {
         return storage.post(
             urlBuilder.createUrl('/ck-notification/subscriptions', {}),
-            JSON.stringify({type: PURPOSE, reference: cartId, email: email}),
+            JSON.stringify({type: PURPOSE, reference: cartId, recipient: email}),
             false
         );
     }

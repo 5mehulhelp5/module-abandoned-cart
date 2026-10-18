@@ -134,9 +134,9 @@ test('checkout mixin captures prefilled input, debounces edits and removes its o
         'mage/storage': {post: (url, body) => {
             const data = JSON.parse(body);
             assert.equal(url, '/ck-notification/subscriptions');
-            assert.deepEqual(Object.keys(data), ['type', 'reference', 'email']);
+            assert.deepEqual(Object.keys(data), ['type', 'reference', 'recipient']);
             assert.equal(data.type, 'cart_reminder');
-            return f.transport(data.reference, data.email);
+            return f.transport(data.reference, data.recipient);
         }},
         'Magento_Checkout/js/model/quote': {getQuoteId: () => 'cart-1'},
         'Magento_Checkout/js/model/url-builder': {createUrl: url => url},

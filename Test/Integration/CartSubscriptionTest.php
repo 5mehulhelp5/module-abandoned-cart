@@ -99,7 +99,7 @@ class CartSubscriptionTest extends TestCase
                 ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quotes]);
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quotes]);
             $contacts = array_merge($contacts, $db->fetchCol($db->select()->from($this->table(ContactRepository::TABLE), 'contact_id')
-                ->where('email IN (?)', ['captured@example.test', 'new@example.test', 'changed@example.test'])));
+                ->where('recipient IN (?)', ['captured@example.test', 'new@example.test', 'changed@example.test'])));
             if ($contacts) { $db->delete($this->table(ContactRepository::TABLE), ['contact_id IN (?)' => $contacts]); }
         }
         $registry = $this->om->get(Registry::class);
@@ -162,7 +162,7 @@ class CartSubscriptionTest extends TestCase
                 $db->quoteInto('s.type = ? AND s.reference_id = q.entity_id', CartReminder::CODE),
                 ['captured_at', 'permission_ref', 'customer_id'])
             ->joinLeft(['c' => $this->table(CartTable::TABLE)], 'c.quote_id = q.entity_id', ['reminded_at'])
-            ->joinLeft(['n' => $this->table(ContactRepository::TABLE)], 'n.contact_id = s.contact_id', ['email'])
+            ->joinLeft(['n' => $this->table(ContactRepository::TABLE)], 'n.contact_id = s.contact_id', ['email' => 'recipient'])
             ->where('q.entity_id = ?', $id));
     }
 
@@ -184,13 +184,15 @@ class CartSubscriptionTest extends TestCase
         $config->method('isEnabled')->willReturn($enabled);
         $type = new CartSubscription($this->om->get(QuoteIdMaskFactory::class), $this->om->get(QuoteIdMask::class),
             $scope ?? $this->om->get(QuoteScope::class), $config, $this->resource);
-        return new SubscriptionManagement($this->resource, new SubscriptionTypePool([CartReminder::CODE => $type]),
-            new ConsentPermission($consent ?? $this->consent(), $guard, $this->stores,
-                $this->createStub(BrowserIdentityInterface::class), $this->createStub(ConsentStore::class),
-                $this->createStub(\CommerceKings\Consent\Api\WithdrawalLinkInterface::class)),
+        $types = new SubscriptionTypePool([CartReminder::CODE => $type]);
+        return new SubscriptionManagement($this->resource, $types,
+            new \CommerceKings\Notification\Model\PermissionResolver(new ConsentPermission($consent ?? $this->consent(), $guard,
+                $this->stores, $this->createStub(BrowserIdentityInterface::class), $this->createStub(ConsentStore::class),
+                $this->createStub(\CommerceKings\Consent\Api\WithdrawalLinkInterface::class)), $types),
             $this->om->get(ContactRepositoryInterface::class), $this->stores,
             new EmailAddress(), new StringLength(['max' => 255]), $this->om->create(FilterManager::class),
-            $this->om->get(\CommerceKings\Notification\Api\RecipientBlockInterface::class), $this->om->get(\Magento\Customer\Api\CustomerRepositoryInterface::class));
+            $this->om->get(\CommerceKings\Notification\Api\StopListInterface::class), $this->om->get(\Magento\Customer\Api\CustomerRepositoryInterface::class),
+            $this->om->get(\CommerceKings\Notification\Model\RecipientNormalizerPool::class));
     }
 
     private function customer(): int

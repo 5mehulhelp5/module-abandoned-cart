@@ -211,7 +211,7 @@ class CartReminder implements NotificationTypeInterface
                 : sprintf('CommerceKings_AbandonedCart: cart %d send failed %d times, no further reminder', $id, $failed));
             throw $e;
         }
-        if ($status === SenderInterface::BLOCKED) {
+        if ($status === SenderInterface::STOPPED) {
             // the address is on the do-not-contact list: this subscription ends here, so the finder never queues the
             // cart again (a "retry later" would re-queue it on every run until the block lifts)
             $this->removal->remove((int)$row['subscription_id']);
