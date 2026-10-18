@@ -29,21 +29,16 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 ## Installation
 
-**Two modes for email, one for text messages**
+**Email: choose one mode**
 
-- **Opt-out:** a reminder email for every shopper who enters an email at checkout. Install Abandoned Cart alone.
-- **Opt-in:** a reminder email only for shoppers who agree in the cookie banner. Add privacy-bundle.
-- **Text messages and WhatsApp are always opt-in:** the shopper ticks a checkbox next to their phone number. That
-  consent is separate from email and works in both modes.
-
-**Opt-out** – a reminder for every shopper who enters an email in checkout:
+**Opt-out** – a reminder email for every shopper who enters an email at checkout:
 
 ```sh
 composer require commercekings/module-abandoned-cart:^0.1
 bin/magento setup:upgrade
 ```
 
-**Opt-in** – reminders only with consent, with the cookie banner:
+**Opt-in** – a reminder email only for shoppers who agree in the cookie banner:
 
 ```sh
 composer require commercekings/module-abandoned-cart:^0.1 commercekings/privacy-bundle:^0.1
@@ -55,6 +50,11 @@ Then switch it on in the admin – nothing is sent until you do:
 1. **Stores > Configuration > CommerceKings > Abandoned Cart > Enabled**: Yes.
 2. Opt-in only: **Stores > Configuration > CommerceKings > Consent > Source**: *Cookie banner (vanilla-cookieconsent)*.
    Without a source, no shopper has consent and no reminder is sent.
+
+**Text messages and WhatsApp: always opt-in, in both modes.** The shopper ticks a checkbox next to their phone
+number. That consent is separate from email and doesn't need the cookie banner. Add
+[module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider (see the
+add-ons above).
 
 | | Opt-out | Opt-in |
 |---|---|---|
