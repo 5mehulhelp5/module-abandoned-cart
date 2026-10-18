@@ -17,16 +17,17 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 **Email reminders are built in** and work out of the box. No extra module or provider needed.
 
-**Text messages and WhatsApp:** add [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider:
-[Twilio](https://github.com/commercekings/module-notification-twilio) (text, WhatsApp) or [Infobip](https://github.com/commercekings/module-notification-infobip) (text,
-WhatsApp, Viber). Consent for a phone number is a checkbox next to the number at checkout, built in.
+- **Text messages and WhatsApp:** add [module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider:
+  - [Twilio](https://github.com/commercekings/module-notification-twilio) (text, WhatsApp)
+  - [Infobip](https://github.com/commercekings/module-notification-infobip) (text, WhatsApp, Viber)
 
-**Recommended:** [module-rate-limit](https://github.com/commercekings/module-rate-limit). Limits the public sign-up endpoints and the restore link
-(Magento 2.4.7+).
-
-**Optional, consent for email:** send reminders only to shoppers who agree, through a cookie banner. Install
-[privacy-bundle](https://github.com/commercekings/privacy-bundle) (or its parts: [module-consent-notification](https://github.com/commercekings/module-consent-notification),
-[module-consent](https://github.com/commercekings/module-consent), [module-consent-vanilla](https://github.com/commercekings/module-consent-vanilla)).
+  Consent for a phone number is a checkbox next to the number at checkout, built in.
+- **Recommended:** [module-rate-limit](https://github.com/commercekings/module-rate-limit). Limits the public sign-up endpoints and the restore
+  link (Magento 2.4.7+).
+- **Optional, consent for email:** send reminders only to shoppers who agree, through a cookie banner. Install
+  [privacy-bundle](https://github.com/commercekings/privacy-bundle) (or its parts:
+  [module-consent-notification](https://github.com/commercekings/module-consent-notification), [module-consent](https://github.com/commercekings/module-consent),
+  [module-consent-vanilla](https://github.com/commercekings/module-consent-vanilla)).
 
 ## Installation
 
