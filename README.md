@@ -29,6 +29,15 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 ## Installation
 
+### Text messages and WhatsApp: always opt-in
+
+The shopper ticks a checkbox next to their phone
+number. That consent is separate from email and doesn't need the cookie banner. Add
+[module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider (see the
+add-ons above).
+
+---
+
 ### Email: choose one mode
 
 **Opt-out** – a reminder email for every shopper who enters an email at checkout:
@@ -63,13 +72,6 @@ To move a shop from opt-in to opt-out, uninstall the **consent bridge**, the **c
 `bin/magento module:uninstall`, then `composer remove commercekings/privacy-bundle`.
 Subscriptions made with a consent are not used in opt-out mode; a shopper is subscribed again when they enter
 their email.
-
-### Text messages and WhatsApp: always opt-in
-
-The shopper ticks a checkbox next to their phone
-number. That consent is separate from email and doesn't need the cookie banner. Add
-[module-abandoned-cart-sms](https://github.com/commercekings/module-abandoned-cart-sms) and one provider (see the
-add-ons above).
 
 ## Settings
 
