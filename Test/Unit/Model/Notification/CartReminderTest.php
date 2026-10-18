@@ -155,7 +155,7 @@ class CartReminderTest extends TestCase
         });
         $provider = new MagentoEmail($builder, new OneClickHeaders(), $this->createStub(\Psr\Log\LoggerInterface::class));
         $mailer = new Sender(new ProviderPool($notificationConfig, [$provider]), $this->emulation, $cooldown, $notificationConfig,
-            null, null, $this->blocks());
+            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->blocks());
         $locks = $this->createStub(\Magento\Framework\Lock\LockManagerInterface::class);
         $locks->method('lock')->willReturnCallback(function ($name, $timeout) {
             $this->lockEvents[] = ['lock', $name, $timeout];

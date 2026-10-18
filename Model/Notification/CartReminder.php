@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace CommerceKings\AbandonedCart\Model\Notification;
 
 use CommerceKings\Notification\Api\SubscriptionRemovalInterface;
-use Magento\Framework\App\ObjectManager;
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
 use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Config;
@@ -48,8 +47,6 @@ class CartReminder implements NotificationTypeInterface
     public const CODE = 'cart_reminder';
     private const HOURLY_LOCK = 'commercekings_abandoned_cart_hourly';
 
-    private readonly SubscriptionRemovalInterface $removal;
-
     public function __construct(
         private readonly ResourceConnection $resource,
         private readonly CartRepositoryInterfaceFactory $repositories,
@@ -64,9 +61,8 @@ class CartReminder implements NotificationTypeInterface
         private readonly NotificationConfig $notificationConfig,
         private readonly CartTable $carts,
         private readonly LockManagerInterface $locks,
-        ?SubscriptionRemovalInterface $removal = null
+        private readonly SubscriptionRemovalInterface $removal
     ) {
-        $this->removal = $removal ?? ObjectManager::getInstance()->get(SubscriptionRemovalInterface::class);
     }
 
     public function process(string $reference): void

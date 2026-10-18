@@ -41,7 +41,7 @@
   rollback so an older worker cannot erase a newer successful delivery or clear its queued message.
 - **Flash sales:** the finder runs every minute and publishes every due cart; the message broker holds the backlog,
   so throughput follows the number of consumers. One `queued_at` mark per cart (no reservation layer on top of the
-  queue): cleared on send, skip or failed publish (so custom policies can recur), found again after 24 hours stuck. *Maximum reminders per hour* is
+  queue): cleared on send, skip or failed publish (so custom policies can recur), found again after 24 hours stuck. *Maximum reminders per hour* (default 100) is
   enforced when publishing and when sending, so it also holds when a backlog drains after an outage. Cursor
   pagination and a 30-second budget per run.
 - **Delivery policy:** replaceable `ReminderPolicyInterface` (default one reminder per cart) with typed state

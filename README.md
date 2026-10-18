@@ -58,7 +58,7 @@ their email.
 |---|---|
 | Enabled (store) | No |
 | Inactivity delay (minutes, global) | 180 |
-| Maximum reminders per hour (global) | 0 = no limit – set your email provider's limit |
+| Maximum reminders per hour (global) | 100 – set your email provider's limit; 0 = no limit |
 | Email template (store) | Abandoned Cart Reminder – neutral, for both setups |
 | Sender (store) | General Contact |
 | Show notice (website) | Automatic – Yes without consent, No with consent |

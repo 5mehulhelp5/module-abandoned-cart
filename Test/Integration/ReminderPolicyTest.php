@@ -258,13 +258,15 @@ class ReminderPolicyTest extends TestCase
         }
         $notificationConfig = $this->notificationConfig($cooldownDays);
         $mailer = new Sender(new ProviderPool($notificationConfig, [new MagentoEmail($builder, new OneClickHeaders(),
-            $this->createStub(\Psr\Log\LoggerInterface::class))]), $this->createStub(Emulation::class), $this->cooldown(), $notificationConfig);
+            $this->createStub(\Psr\Log\LoggerInterface::class))]), $this->createStub(Emulation::class), $this->cooldown(), $notificationConfig,
+            new \Psr\Log\NullLogger(), new \CommerceKings\Notification\Model\RecipientNormalizerPool(), $this->om->get(\CommerceKings\Notification\Api\RecipientBlockInterface::class));
         return new CartReminder($this->resource, $this->om->get(CartRepositoryInterfaceFactory::class),
             $data, $mailer, $this->config(), $this->guard(),
             $this->policy ?? new OncePerCart(), $this->createStub(LoggerInterface::class), $this->lifetime(),
             $this->om->get(ReminderEmailResolverInterface::class),
             $this->notificationConfig(), $this->om->get(CartTable::class),
-            $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class));
+            $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class),
+            $this->om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class));
     }
 
     private function withRecipients(CartReminder $consumer, ReminderEmailResolverInterface $recipients): CartReminder

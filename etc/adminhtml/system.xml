@@ -23,7 +23,7 @@
                 </field>
                 <field id="max_per_hour" translate="label comment" type="text" sortOrder="24" showInDefault="1">
                     <label>Maximum reminders per hour</label>
-                    <comment>Set to your email provider's sending limit. 0 = no limit. Carts over the limit wait for the next hour; none are lost.</comment>
+                    <comment>Set to your email provider's sending limit. Default: 100. 0 = no limit. Carts over the limit wait for the next hour; none are lost.</comment>
                     <validate>validate-digits</validate>
                     <depends>
                         <field id="enabled">1</field>

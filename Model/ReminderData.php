@@ -5,7 +5,6 @@ namespace CommerceKings\AbandonedCart\Model;
 
 use CommerceKings\Notification\Api\Channel;
 use CommerceKings\Notification\Api\RecipientBlockInterface;
-use Magento\Framework\App\ObjectManager;
 use CommerceKings\AbandonedCart\Api\Data\UnsubscribeContext;
 use CommerceKings\AbandonedCart\Api\UnsubscribeLinkInterface;
 use CommerceKings\Notification\Api\SubscriberInterface;
@@ -41,7 +40,6 @@ class ReminderData
     /** @var array<string, Currency> */
     private array $currencies = [];
 
-    private readonly RecipientBlockInterface $blocks;
 
     public function __construct(
         private readonly ImageHelper $imageHelper,
@@ -54,9 +52,8 @@ class ReminderData
         private readonly UnsubscribeLinkInterface $unsubscribeLinks,
         private readonly LinkSignature $signature,
         private readonly SubscriberInterface $subscriber,
-        ?RecipientBlockInterface $blocks = null
+        private readonly RecipientBlockInterface $blocks
     ) {
-        $this->blocks = $blocks ?? ObjectManager::getInstance()->get(RecipientBlockInterface::class);
     }
 
     /**

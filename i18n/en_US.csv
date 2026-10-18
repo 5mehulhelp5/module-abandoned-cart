@@ -26,7 +26,7 @@
 "Send one reminder per cart.","Send one reminder per cart."
 "Sender","Sender"
 "Set by the reminder policy. Read-only.","Set by the reminder policy. Read-only."
-"Set to your email provider's sending limit. 0 = no limit. Carts over the limit wait for the next hour; none are lost.","Set to your email provider's sending limit. 0 = no limit. Carts over the limit wait for the next hour; none are lost."
+"Set to your email provider's sending limit. Default: 100. 0 = no limit. Carts over the limit wait for the next hour; none are lost.","Set to your email provider's sending limit. Default: 100. 0 = no limit. Carts over the limit wait for the next hour; none are lost."
 "Show notice","Show notice"
 "Sign in to continue shopping – your cart is waiting for you.","Sign in to continue shopping – your cart is waiting for you."
 "This reminder link is no longer available. You can continue shopping with your current cart.","This reminder link is no longer available. You can continue shopping with your current cart."

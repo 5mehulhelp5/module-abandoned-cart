@@ -128,7 +128,8 @@ own claim, checked against the cart and its consent at send time, lets one deliv
 - **Messages wait in the broker, not in our table.** Each is a few bytes (`cart_reminder|<subscription id>`).
   A shopper who orders, unsubscribes or changes the cart while its message waits is re-checked at send time and
   skipped; switching the feature off makes waiting messages skip.
-- **Maximum reminders per hour** is the brake for your email provider's rate limit and sender reputation. A finder
+- **Maximum reminders per hour** (default 100, 0 = no limit) is the brake for your email provider's rate limit and
+  sender reputation, and caps how many addresses a script could make the shop email. A finder
   run publishes only what still fits in the hour (sent, plus queued carts whose subscription is still valid), and every reminder checks it again when
   sending, under a lock (`commercekings_abandoned_cart_hourly`, held only for the count and the claim), so it holds
   even when a delayed backlog drains after a consumer outage. Carts over it wait for a later hour; none are lost.

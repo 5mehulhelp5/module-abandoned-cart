@@ -23,7 +23,8 @@
         </arguments>
     </type>
     <!-- the consent purpose this feature uses (CommerceKings_Consent) - any consent source can grant it; active only
-         with the consent bridge, so without it (opt-out) the banner shows no reminder switch -->
+         with the consent bridge, so without it (opt-out) the banner shows no reminder switch. Without Consent installed
+         Magento ignores this entry (checked: setup:di:compile passes with the Consent modules disabled). -->
     <type name="CommerceKings\Consent\Model\PurposePool">
         <arguments>
             <argument name="purposes" xsi:type="array">

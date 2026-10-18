@@ -189,7 +189,8 @@ class CartSubscriptionTest extends TestCase
                 $this->createStub(BrowserIdentityInterface::class), $this->createStub(ConsentStore::class),
                 $this->createStub(\CommerceKings\Consent\Api\WithdrawalLinkInterface::class)),
             $this->om->get(ContactRepositoryInterface::class), $this->stores,
-            new EmailAddress(), new StringLength(['max' => 255]), $this->om->create(FilterManager::class));
+            new EmailAddress(), new StringLength(['max' => 255]), $this->om->create(FilterManager::class),
+            $this->om->get(\CommerceKings\Notification\Api\RecipientBlockInterface::class), $this->om->get(\Magento\Customer\Api\CustomerRepositoryInterface::class));
     }
 
     private function customer(): int
