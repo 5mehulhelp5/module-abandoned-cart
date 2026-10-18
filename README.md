@@ -29,6 +29,13 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 ## Installation
 
+**Two modes for email, one for text messages**
+
+- **Opt-out:** a reminder email for every shopper who enters an email at checkout. Install Abandoned Cart alone.
+- **Opt-in:** a reminder email only for shoppers who agree in the cookie banner. Add privacy-bundle.
+- **Text messages and WhatsApp are always opt-in:** the shopper ticks a checkbox next to their phone number. That
+  consent is separate from email and works in both modes.
+
 **Opt-out** – a reminder for every shopper who enters an email in checkout:
 
 ```sh
