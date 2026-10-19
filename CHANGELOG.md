@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.1.0)
+## 0.1.0 - 2026-10-19
 
 First release. Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`); PHP 8.1–8.5.
 
