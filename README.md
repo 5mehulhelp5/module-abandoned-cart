@@ -190,4 +190,4 @@ advice if you are unsure.
 
 ---
 
-**Need help installing or setting it up?** **[Get a quote →](https://commercekings.net)**
+**Need it installed, set up or customized?** **[Get in touch →](https://commercekings.net)**
