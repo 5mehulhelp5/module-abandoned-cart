@@ -19,7 +19,7 @@ trait DbTestTrait
     private array $deletes = [];
     /** @var array<int, array{0: string, 1: mixed}> where() calls of the last select */
     private array $selectWhere = [];
-    /** queued return values of update() (rows affected), default 1 */
+    /** queued return values of update() (rows affected), default 1; a \Throwable is thrown instead */
     private array $updateResults = [];
     private mixed $fetchRowResult = false;
     private mixed $fetchOneResult = false;
@@ -72,7 +72,11 @@ trait DbTestTrait
         $db->method('update')->willReturnCallback(function ($table, array $data, $where = '') {
             // a joined table (CartTable::joined()) is an expression: record its SQL text
             $this->updates[] = ['table' => (string)$table, 'data' => $data, 'where' => (array)$where];
-            return $this->updateResults ? array_shift($this->updateResults) : 1;
+            $result = $this->updateResults ? array_shift($this->updateResults) : 1;
+            if ($result instanceof \Throwable) {
+                throw $result; // e.g. a deadlock: the statement was not applied
+            }
+            return $result;
         });
         $db->method('insertOnDuplicate')->willReturnCallback(function ($table, array $data, array $fields = []) {
             $this->inserts[] = ['table' => $table, 'data' => $data];

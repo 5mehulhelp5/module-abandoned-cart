@@ -805,4 +805,79 @@ class CartReminderTest extends TestCase
         $this->assertSame(0, $this->sentMessages);
         $this->assertContains('CommerceKings_AbandonedCart: cart 42 skipped (no recipient)', $this->logs);
     }
+
+    /** A deadlock or lock wait (Magento's DB adapter): the statement was not applied. */
+    public static function lockErrors(): array
+    {
+        return ['deadlock' => [new \Magento\Framework\DB\Adapter\DeadlockException('Deadlock found')],
+            'lock wait timeout' => [new \Magento\Framework\DB\Adapter\LockWaitException('Lock wait timeout')]];
+    }
+
+    /** process() lets the lock error through: Notification's consumer then rejects the message. */
+    private function processFailsWith(\Throwable $error): void
+    {
+        try {
+            $this->consumer()->process('42');
+            $this->fail('The lock error must reach the queue consumer.');
+        } catch (\Throwable $thrown) {
+            $this->assertSame($error, $thrown);
+        }
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('lockErrors')]
+    public function testALockErrorAtTheClaimSurfacesAndSendsNothing(\Throwable $error): void
+    {
+        $this->updateResults = [$error];
+        $this->processFailsWith($error);
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertFalse($this->recipientClaimed, 'the recipient cooldown is never claimed');
+        $this->assertSame(['c.sent_at', 'c.queued_at', 'c.delivery_version', 'c.failed_sends'],
+            array_keys($this->updates[0]['data']), 'the claim was the statement that failed');
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('lockErrors')]
+    public function testALockErrorAtTheClaimUnderTheHourlyLimitStillUnlocks(\Throwable $error): void
+    {
+        $this->perHour = 5;
+        $this->fetchOneResult = '1';
+        $this->updateResults = [$error];
+        $this->processFailsWith($error);
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertSame([['lock', 'commercekings_abandoned_cart_hourly', 10],
+            ['unlock', 'commercekings_abandoned_cart_hourly']], $this->lockEvents, 'the hourly lock is never left held');
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('lockErrors')]
+    public function testALockErrorReleasingASkippedCartsMarkSurfacesAndSendsNothing(\Throwable $error): void
+    {
+        $this->updateResults = [$error];
+        try {
+            $this->consumer(['is_active' => '0'] + self::ROW)->process('42');
+            $this->fail('Expected the lock error');
+        } catch (\Throwable $thrown) {
+            $this->assertSame($error, $thrown);
+        }
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertSame([['queued_at' => null]], array_column($this->updates, 'data'), 'only the release was tried');
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('lockErrors')]
+    public function testALockErrorAfterTheHandoffKeepsTheClaimSoARetrySendsNothing(\Throwable $error): void
+    {
+        $consumer = $this->consumer();
+        $this->emulation->method('stopEnvironmentEmulation')->willThrowException($error);
+        try {
+            $consumer->process('42');
+            $this->fail('Expected the lock error');
+        } catch (\Throwable $thrown) {
+            $this->assertSame($error, $thrown, 'the cleanup error itself, unwrapped');
+        }
+        $this->assertSame(1, $this->sentMessages);
+        $this->assertCount(1, $this->updates, 'the claim stays: sent_at is not given back');
+        $this->assertSame([], $this->releasedRecipients, 'the recipient cooldown stays');
+        // the redelivered message (or the next run) finds the cart reminded
+        $this->updates = [];
+        $this->consumer(['sent_at' => '2026-10-01 13:00:00', 'delivery_version' => '1'] + self::ROW)->process('42');
+        $this->assertSame(1, $this->sentMessages, 'one email');
+    }
 }
