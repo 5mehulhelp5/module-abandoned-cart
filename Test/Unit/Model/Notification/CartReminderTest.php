@@ -14,6 +14,7 @@ use CommerceKings\AbandonedCart\Model\QuoteLifetime;
 use CommerceKings\AbandonedCart\Model\ReminderData;
 use CommerceKings\AbandonedCart\Test\Unit\DbTestTrait;
 use CommerceKings\Notification\Api\CooldownInterface;
+use CommerceKings\Notification\Exception\TemporaryFailureException;
 use CommerceKings\Notification\Model\Config as NotificationConfig;
 use CommerceKings\Notification\Model\OneClickHeaders;
 use CommerceKings\Notification\Model\Provider\MagentoEmail;
@@ -50,6 +51,7 @@ class CartReminderTest extends TestCase
     private array $logs = [];
     private array $mail = [];
     private bool $sendFails = false;
+    private ?\Throwable $sendFailure = null;
     private Emulation $emulation;
     private ?ReminderPolicyInterface $policy = null;
     private bool $expired = false;
@@ -136,6 +138,9 @@ class CartReminderTest extends TestCase
         $transport->method('sendMessage')->willReturnCallback(function () {
             if ($this->sendFails) {
                 throw new \RuntimeException('SMTP down');
+            }
+            if ($this->sendFailure) {
+                throw $this->sendFailure;
             }
             if ($this->oneClick && str_starts_with($this->optoutUrl, 'https:') && $this->headerSupport) { $this->assertNotNull($this->nativeMessage->getHeaders()->get('List-Unsubscribe'), 'Apply headers before sending'); }
             $this->sentMessages++;
@@ -664,6 +669,35 @@ class CartReminderTest extends TestCase
             $this->assertSame($minutes === null ? null : "NOW() + INTERVAL $minutes MINUTE",
                 $restore['skip_until'] === null ? null : (string)$restore['skip_until']);
             $this->assertStringContainsString($log, implode(' ', $this->logs));
+        }
+    }
+
+    /** The mail server is busy or throttling (SMTP 451): not sent, the claim is given back, try again in 15 minutes. */
+    public function testATemporaryRefusalRetriesSoonWithoutCountingAFailure(): void
+    {
+        $this->sendFailure = new \Magento\Framework\Exception\MailException(new \Magento\Framework\Phrase('Transport error'),
+            new \Symfony\Component\Mailer\Exception\UnexpectedResponseException('451 4.7.1 Try again later', 451));
+        $this->consumer(['failed_sends' => '2'] + self::ROW)->process('42'); // no exception: nothing failed for good
+        $restore = $this->updates[1];
+        $this->assertSame(['sent_at' => null, 'failed_sends' => 2], array_diff_key($restore['data'], ['skip_until' => 1]),
+            'the claim is given back, the failure count stays');
+        $this->assertSame('NOW() + INTERVAL 900 SECOND', (string)$restore['data']['skip_until']);
+        $this->assertSame(['type = ?' => 'cart_reminder', 'reference_id = ?' => 42, 'subject_key = ?' => '', 'delivery_version = ?' => 1],
+            $restore['where'], 'only its own delivery claim');
+        $this->assertSame([['a@test.com', 'claim-token']], $this->releasedRecipients, 'the recipient cooldown is released too');
+        $this->assertSame(0, $this->sentMessages);
+        $this->assertStringContainsString('cart 42 not sent for now (The mail server refused the email for now (SMTP 451)',
+            implode(' ', $this->logs));
+    }
+
+    public function testATemporaryRefusalWaitsAsTheProviderAsksWithinBounds(): void
+    {
+        foreach ([[30, 60], [120, 120], [7200, 7200], [10 ** 7, 86400], [null, 900]] as [$retryAfter, $wait]) {
+            $this->updates = [];
+            $this->sendFailure = new TemporaryFailureException('rate limited', $retryAfter);
+            $this->consumer()->process('42');
+            $this->assertSame("NOW() + INTERVAL $wait SECOND", (string)$this->updates[1]['data']['skip_until'], (string)$retryAfter);
+            $this->assertSame(0, $this->updates[1]['data']['failed_sends']);
         }
     }
 

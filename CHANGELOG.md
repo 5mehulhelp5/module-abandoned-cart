@@ -4,6 +4,10 @@
 
 First release. Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`); PHP 8.1–8.5.
 
+- **Temporary refusals:** a provider refusing for now (Notification's `TemporaryFailureException`: a busy or
+  throttling mail server, an SMS rate limit) gives the cart back and tries again after the provider's `Retry-After`
+  (1 minute to 1 day), else 15 minutes - without counting a failed send; other failures keep the 1 h / 4 h / 1 d / 1 d
+  schedule.
 - **One reminder email per abandoned cart**, in two setups: alone it runs opt-out, with an optional checkout notice
   (*Show notice* Automatic / Yes / No, *Notice text*); with `commercekings/module-consent-notification` only with a
   valid `cart_reminder` consent, checked in PHP and repeated inside every atomic claim, so a withdrawal at the same

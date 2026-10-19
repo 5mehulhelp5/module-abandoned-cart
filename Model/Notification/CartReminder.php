@@ -16,6 +16,7 @@ use CommerceKings\Notification\Api\SenderInterface;
 use CommerceKings\Notification\Api\NotificationTypeInterface;
 use CommerceKings\Notification\Api\SubscriptionPermissionInterface;
 use CommerceKings\Notification\Exception\MessageSentException;
+use CommerceKings\Notification\Exception\TemporaryFailureException;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Sql\Expression;
 use Magento\Framework\Lock\LockManagerInterface;
@@ -39,7 +40,9 @@ use Psr\Log\LoggerInterface;
  * be recalled.
  * Sending (recipient cooldown, store emulation, one-click headers) is CommerceKings_Notification's sender and its selected provider.
  * A delivery version owns each claim. Failed sends restore the prior reminder timestamp only while that version
- * still matches, leaving a newer delivery or queue mark alone; the exception makes Magento log the failure.
+ * still matches, leaving a newer delivery or queue mark alone; the exception makes Magento log the failure. A
+ * temporary refusal (TemporaryFailureException) gives the claim back the same way and waits a short while
+ * (Retry-After, else 15 minutes) without counting as a failed send or being rethrown.
  *
  * @api a virtual type with its "type" argument (ReminderTypeInterface) is a stable extension point
  */
@@ -49,6 +52,10 @@ class CartReminder implements NotificationTypeInterface
     public const CODE = 'cart_reminder';
     /** The email reminder's hourly lock; another type's adds "_<code>" (its own provider, its own limit). */
     public const HOURLY_LOCK = 'commercekings_abandoned_cart_hourly';
+    /** A temporary refusal (TemporaryFailureException) waits this long, or the provider's Retry-After within the bounds. */
+    public const TEMPORARY_RETRY_SECONDS = 900;
+    public const TEMPORARY_MIN_SECONDS = 60;
+    public const TEMPORARY_MAX_SECONDS = 86400;
 
     private readonly CartTable $carts;
     /** The type's own permission, else the shop-wide one - as Notification resolves it for the subscription type. */
@@ -200,6 +207,19 @@ class CartReminder implements NotificationTypeInterface
             $this->logger->error(sprintf('CommerceKings_AbandonedCart: cart %d sent; post-send cleanup failed', $id),
                 ['exception_class' => get_class($e->getPrevious() ?? $e)]);
             throw $e->getPrevious() ?? $e;
+        } catch (TemporaryFailureException $e) {
+            // Refused for now (a busy or throttling mail server, a rate limit): nothing was sent. Give the claim back
+            // and try again soon - not an attempt that counts towards giving up.
+            $wait = min(self::TEMPORARY_MAX_SECONDS, max(self::TEMPORARY_MIN_SECONDS,
+                $e->getRetryAfter() ?? self::TEMPORARY_RETRY_SECONDS));
+            $db->update($this->carts->name(), [
+                'sent_at' => $row['sent_at'],
+                'failed_sends' => (int)($row['failed_sends'] ?? 0),
+                'skip_until' => new Expression('NOW() + INTERVAL ' . $wait . ' SECOND'),
+            ], $this->carts->key($id) + ['delivery_version = ?' => $deliveryVersion]);
+            $this->logger->warning(sprintf('CommerceKings_AbandonedCart: cart %d not sent for now (%s), next try in %d'
+                . ' seconds', $id, $e->getMessage(), $wait));
+            return;
         } catch (\Throwable $e) {
             // Restore our own policy state; claiming already cleared queuing, and newer work must stay intact.
             // A send that keeps failing (a rejected address, a mail setting) waits longer each time, then stops.
