@@ -53,7 +53,10 @@ class ReminderPolicyTest extends TestCase
     private array $storeIds = [];
     private array $quoteIds = [];
     private array $published = [];
+    /** the hourly limit for this test's own carts; 0 = no limit */
     private int $perHour = 0;
+    /** send history rows standing for other carts on the box (no quote) */
+    private array $otherCarts = [];
     /** a replaced reminder policy; null = the default OncePerCart */
     private ?ReminderPolicyInterface $policy = null;
     private int $sent = 0;
@@ -88,18 +91,21 @@ class ReminderPolicyTest extends TestCase
     {
         $db = $this->resource->getConnection();
         if ($this->quoteIds) {
-            $emails = $db->fetchCol($db->select()->from(['s' => $this->table(SubscriptionManagement::TABLE)], [])
-                ->join(['n' => $this->table('ck_notification_contact')], 'n.contact_id = s.contact_id', ['email' => 'recipient'])
-                ->where('s.type = ?', CartReminder::CODE)->where('s.reference_id IN (?)', $this->quoteIds));
-            $hashes = array_map(fn ($email) => $this->cooldown()->hash($email), array_filter($emails));
-            if ($hashes) { $db->delete($this->table('ck_notification_cooldown'), ['recipient_hash IN (?)' => $hashes]); }
+            // every address this test used: its own and "<quote id>-<own>" (withdrawn subscriptions included)
+            $emails = array_merge([$this->email], array_map(fn ($id) => $id . '-' . $this->email, $this->quoteIds));
+            $db->delete($this->table('ck_notification_cooldown'),
+                ['recipient_hash IN (?)' => array_map(fn ($email) => $this->cooldown()->hash($email), $emails)]);
             $db->delete($this->table(SubscriptionManagement::TABLE),
                 ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quoteIds]);
             // no foreign key to the quote: the send history goes with the daily cleanup, here at once
             $db->delete($this->table(\CommerceKings\Notification\Api\DeliveryStateInterface::TABLE),
                 ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->quoteIds]);
             $db->delete($this->table('quote'), ['entity_id IN (?)' => $this->quoteIds]);
-            if ($emails) { $db->delete($this->table('ck_notification_contact'), ['recipient IN (?)' => $emails]); }
+            $db->delete($this->table('ck_notification_contact'), ['recipient IN (?)' => $emails]);
+        }
+        if ($this->otherCarts) {
+            $db->delete($this->table(\CommerceKings\Notification\Api\DeliveryStateInterface::TABLE),
+                ['type = ?' => CartReminder::CODE, 'reference_id IN (?)' => $this->otherCarts]);
         }
         if ($this->storeIds) { $db->delete($this->table('store'), ['store_id IN (?)' => array_values($this->storeIds)]); }
         $this->stores->reinitStores();
@@ -188,15 +194,46 @@ class ReminderPolicyTest extends TestCase
             ->where('subscription_id = ?', $subscriptionId));
     }
 
-    private function config(): Config
+    /** @param bool $sending the consumer's config (it counts sent reminders only), else the finder's */
+    private function config(bool $sending = false): Config
     {
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturnCallback(fn ($id) => in_array($id, $this->storeIds, true));
         $config->method('getDelayMinutes')->willReturn(1);
-        $config->method('getMaxPerHour')->willReturnCallback(fn () => $this->perHour);
+        $config->method('getMaxPerHour')->willReturnCallback(
+            fn () => $this->perHour > 0 ? $this->perHour + $this->otherCartsInTheHour(!$sending) : 0);
         $config->method('getTemplate')->willReturn('fixture');
         $config->method('getIdentity')->willReturn('general');
         return $config;
+    }
+
+    /**
+     * The hourly limit counts every cart_reminder on the database (sent in the last hour; for the finder also those
+     * waiting in the queue), as it should. Counted here the same way for the carts that are not this test's - an E2E
+     * run or a manual send in the hour - and added to $perHour, so the limit holds for this test's own carts.
+     */
+    private function otherCartsInTheHour(bool $queuedToo): int
+    {
+        $db = $this->resource->getConnection();
+        $carts = $this->om->get(CartTable::class);
+        $own = $this->quoteIds ?: [0];
+        $others = (int)$db->fetchOne($db->select()->from($carts->name(), new \Magento\Framework\DB\Sql\Expression('COUNT(*)'))
+            ->where('type = ?', CartReminder::CODE)->where('sent_at >= NOW() - INTERVAL 1 HOUR')
+            ->where('reference_id NOT IN (?)', $own));
+        if ($queuedToo) {
+            // the guard() permission is valid for every subscription: every queued cart counts
+            $others += (int)$db->fetchOne($carts->select([new \Magento\Framework\DB\Sql\Expression('COUNT(*)')])
+                ->where('c.queued_at IS NOT NULL')->where('q.entity_id NOT IN (?)', $own));
+        }
+        return $others;
+    }
+
+    /** Another cart's reminder, sent ten minutes ago (only its send history: the hourly limit counts that). */
+    private function anotherCartSentThisHour(): void
+    {
+        $this->otherCarts[] = $id = random_int(3000000000, 4000000000);
+        $this->resource->getConnection()->insert($this->om->get(CartTable::class)->name(), ['type' => CartReminder::CODE,
+            'reference_id' => $id, 'subject_key' => '', 'sent_at' => gmdate('Y-m-d H:i:s', time() - 600)]);
     }
 
     private function lifetime(): QuoteLifetime
@@ -248,10 +285,11 @@ class ReminderPolicyTest extends TestCase
     }
 
     /** The built-in email reminder over the fixture config, the real email resolver and this test's policy. */
-    private function emailReminder(?ReminderData $data = null, ?ReminderEmailResolverInterface $recipients = null)
+    private function emailReminder(?ReminderData $data = null, ?ReminderEmailResolverInterface $recipients = null,
+        bool $sending = false)
         : \CommerceKings\AbandonedCart\Model\Reminder\EmailReminder
     {
-        return new \CommerceKings\AbandonedCart\Model\Reminder\EmailReminder($this->config(),
+        return new \CommerceKings\AbandonedCart\Model\Reminder\EmailReminder($this->config($sending),
             $recipients ?? $this->om->get(ReminderEmailResolverInterface::class),
             $data ?? $this->createStub(ReminderData::class), $this->policy ?? new OncePerCart(), $this->notificationConfig());
     }
@@ -283,7 +321,7 @@ class ReminderPolicyTest extends TestCase
             $this->guard(), $this->createStub(LoggerInterface::class), $this->lifetime(), $this->om->get(CartTable::class),
             $this->om->get(\Magento\Framework\Lock\LockManagerInterface::class),
             $this->om->get(\CommerceKings\Notification\Api\SubscriptionRemovalInterface::class), $this->quietHours(),
-            $this->emailReminder($data, $recipients));
+            $this->emailReminder($data, $recipients, true));
     }
 
     /** Quiet hours never hold these fixtures: the store's own settings stay out of the policy checks. */
@@ -774,6 +812,7 @@ class ReminderPolicyTest extends TestCase
     {
         // review c77e0cb: two messages reaching restarted consumers in the same hour must not both send
         $this->perHour = 1;
+        $this->anotherCartSentThisHour();   // the limit is the box's; this test's carts get one place on top
         [$first, $second] = [$this->quote(), $this->quote()];
         foreach ([$first, $second] as $id) { $this->state($id, ['email' => $id . '-' . $this->email]); }
         $this->assertSame(1, $this->finder()->execute(), 'the finder publishes only what fits in the hour');
@@ -790,6 +829,7 @@ class ReminderPolicyTest extends TestCase
     {
         // review 2d88801: its message is dropped unsent by Notification's gate, so its mark must not block others
         $this->perHour = 1;
+        $this->anotherCartSentThisHour();
         [$first, $second] = [$this->quote(), $this->quote()];
         foreach ([$first, $second] as $id) { $this->state($id, ['email' => $id . '-' . $this->email]); }
         $this->assertSame(1, $this->finder()->execute());
