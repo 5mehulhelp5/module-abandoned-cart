@@ -1,7 +1,0 @@
-<?xml version="1.0"?>
-<!-- No tables of its own: a cart's send history is CommerceKings_Notification's delivery state
-     (ck_notification_delivery_state, type cart_reminder, reference the quote id). ck_abandoned_cart stays in
-     db_schema_whitelist.json so setup:upgrade drops it where an earlier build created it. -->
-<schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="urn:magento:framework:Setup/Declaration/Schema/etc/schema.xsd">
-</schema>
