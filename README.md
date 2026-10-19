@@ -175,6 +175,14 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 - A worker killed mid-send can leave a cart marked as reminded without its reminder – it is never sent twice.
 - Restore links are signed with Magento's encryption key: changing the key invalidates links already sent.
 
+## Tested (as of 0.1.0)
+
+- **Automated tests:** 210 unit, 55 integration and 48 JavaScript tests (unit and JavaScript tests run on every push).
+- **Line coverage:** 98.9% with unit and integration tests combined.
+- **End to end on Magento 2.4.9:** in Chrome, a guest checkout captures the email; the reminder arrives (caught by a test mail server), restores and merges the cart, and unsubscribes – with RabbitMQ and with the MySQL queue.
+- **Load:** 100,000 carts; about 3 reminders a second per worker, growing linearly with more workers; no cart reminded twice.
+- **Install:** a fresh install of every CommerceKings package from GitHub on an empty Magento database, verified.
+
 ## More
 
 [How it works](docs/how-it-works.md) · [Security and links](docs/security.md) · [Testing](docs/testing.md) ·
@@ -187,14 +195,6 @@ These modules help you ask for, record and respect your shoppers' choices – th
 their own. You are responsible for your store's privacy: what you collect, the wording you show, your privacy policy and
 whether your setup meets the laws that apply to you (e.g. GDPR, ePrivacy, email and SMS marketing rules). Get legal
 advice if you are unsure.
-
-## Tested (as of 0.1.0)
-
-- **Automated tests:** 210 unit, 55 integration and 48 JavaScript tests (unit and JavaScript tests run on every push).
-- **Line coverage:** 98.9% with unit and integration tests combined.
-- **End to end on Magento 2.4.9:** in Chrome, a guest checkout captures the email; the reminder arrives (caught by a test mail server), restores and merges the cart, and unsubscribes – with RabbitMQ and with the MySQL queue.
-- **Load:** 100,000 carts; about 3 reminders a second per worker, growing linearly with more workers; no cart reminded twice.
-- **Install:** a fresh install of every CommerceKings package from GitHub on an empty Magento database, verified.
 
 ---
 
