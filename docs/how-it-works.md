@@ -8,7 +8,7 @@ settings, hourly limit and send-history row – see [other channels](extending.m
 ## Flow
 
 1. **Consent** – with the consent bridge, a recorded consent from `CommerceKings_Consent` (Notification's `SubscriptionPermissionInterface` on the server, `CommerceKings_Notification/js/permission` in the browser – both answered by Consent through the bridge). Recording, validity (withdrawn, expired, banner/terms revision), browser recognition and withdrawals are that module's job; this module keeps only the **consent id**.
-2. **Subscribe** – the cart is subscribed through `commercekings/module-notification`, type `cart_reminder`: this module's `Model\Notification\CartSubscription` decides who may subscribe which cart; Notification does the email rules, the consent check, the guest contact and the storage:
+2. **Subscribe** – the cart is subscribed through `commercekings/module-notification`, type `cart_reminder`: this module's `Model\Notification\CartSubscription` decides who may subscribe which cart; Notification does the address rules, the consent check, the guest contact and the storage:
    - guest: typing a valid email in checkout, or entering checkout with an email Magento prefilled → `POST /V1/ck-notification/subscriptions` `{"type":"cart_reminder","reference":"<masked cart id>","recipient":"…"}` (`js/email-capture-mixin.js`), 1 s after the last change. Requests are serialized and rapid edits coalesce to the latest email. A save is deduplicated only after the server acknowledges it, including an identical successful retry;
    - guest capture retries network failures, HTTP 408/429/5xx and a refused save with exponential delays, up to five attempts. A new email, consent choice or browser `online` event starts another attempt. Withdrawals are sent before a later save; clearing an invalid or blank email also removes the guest's subscription;
    - customer: opening checkout (or switching the consent on there) → `POST /V1/ck-notification/subscriptions/mine` `{"type":"cart_reminder","reference":"<quote id>"}` (`js/customer-consent.js`, Magento's session REST for storefront AJAX); the email comes from the account. A change of consent or browser restarts the delay; re-opening checkout with the same consent does not.
@@ -41,15 +41,21 @@ Magento's cart cleanup has removed the quote.
 Each atomic delivery claim increments `delivery_version`, starting from zero. Rollback checks that version before
 restoring `sent_at`, keeps the version and leaves any newer `queued_at` mark untouched.
 
-Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email addresses. A guest's address is stored once as a Notification contact; the module keeps no email history, and Notification removes contacts nothing uses any more. Magento's `quote.customer_email` and `quote.updated_at` are never touched. The reminder delay uses the later of cart activity (`quote.updated_at`) and subscription activity (`captured_at`, guests and customers); quote expiry still uses Magento's cart timestamp. A withdrawal deletes the subscription but keeps `queued_at`/`sent_at`, so opting in again never causes a second reminder. Every claim is one UPDATE over the delivery state joined to the subscription and `quote` (`Model\CartTable::joined()`), so cart, consent and send history are still checked in the same statement.
+Consents and withdrawals live in `CommerceKings_Consent` (`ck_consent`, `ck_consent_withdrawal`) without email
+addresses. A guest's address is stored once as a Notification contact; the module keeps no address history, and
+Notification removes contacts nothing uses any more. Magento's `quote.customer_email` and `quote.updated_at` are never
+touched. The reminder delay uses the later of cart activity (`quote.updated_at`) and subscription activity
+(`captured_at`, guests and customers); quote expiry still uses Magento's cart timestamp. A withdrawal deletes the
+subscription but keeps `queued_at`/`sent_at`, so opting in again never causes a second reminder. Every claim is one
+UPDATE over the delivery state joined to the subscription and `quote` (`Model\CartTable::joined()`), so cart, consent
+and send history are still checked in the same statement.
 
-`ReminderEmailResolverInterface::resolve(int $quoteId): ?string` supplies the current recipient to
-both queue eligibility and delivery. The default uses the subscribed email for guest carts and
-Magento's `customer_email` for customer carts; absent recipients return `null`. Replace it through
-DI to choose another source. Finder scans candidate pages so unresolved recipients do not stop
-later eligible carts. Delivery compares the subscription it checked in its atomic claim
-and resolves again afterward, releasing the claim if the recipient changed. Email updates never
-reset `sent_at`: the default remains one reminder per cart.
+`ReminderEmailResolverInterface::resolve(int $quoteId): ?string` supplies the email reminder's current recipient to both
+queue eligibility and delivery. The default uses the subscribed email for guest carts and Magento's `customer_email` for
+customer carts; absent recipients return `null`. Replace it through DI to choose another source. Finder scans candidate
+pages so unresolved recipients do not stop later eligible carts. Delivery compares the subscription it checked in its
+atomic claim and resolves again afterward, releasing the claim if the recipient changed. A changed recipient (a new
+email or number) never resets `sent_at`: the default remains one reminder per cart.
 
 ## Delivery policy and quote lifetime
 
@@ -90,15 +96,15 @@ The email's restore access stops at the earlier of seven days after sending and 
 expiry. A reminder sent near expiry can therefore have a shorter restore window. Changing Magento's
 quote lifetime affects pending delivery and restore checks; this module never extends retention.
 
-Each cart can receive one reminder per reminder type. A separate recipient cooldown also limits sends across
-all carts and stores sharing an email address. **Cooldown (days)** is a global admin
-setting, default **7** (**0** turns it off), under CommerceKings > Notifications – it belongs to
-`commercekings/module-notification` and is shared with every notification that uses it. Deferred carts
-remain unsent and may become eligible after the cooldown if their quote and consent are still valid.
+Each cart can receive one reminder per reminder type. A separate recipient cooldown also limits sends across all carts
+and stores sharing an address on a channel. **Cooldown (days)** is a global admin setting, default **7** (**0** turns it
+off), under CommerceKings > Notifications – it belongs to `commercekings/module-notification` and is shared with every
+notification that uses it. Deferred carts remain unsent and may become eligible after the cooldown if their quote and
+consent are still valid.
 
 `ck_notification_cooldown` (module-notification) stores Magento-native keyed hashes of normalized addresses (email or
-phone, per channel), claim timestamps and random claim tokens; it contains no raw email. This is suppression data, not a
-consent identity. It survives cart deletion and consent withdrawal, so these cannot reset the send limit; daily cron
+phone, per channel), claim timestamps and random claim tokens; it contains no raw address. This is suppression data, not
+a consent identity. It survives cart deletion and consent withdrawal, so these cannot reset the send limit; daily cron
 removes rows older than the current cooldown. Key rotation resets suppression for addresses hashed with the previous
 key. Failed sends release only their own recipient claim; successful or interrupted handoffs retain it conservatively.
 
@@ -155,4 +161,4 @@ transports (see *Consumer* above).
 
 ## Skips (consumer log: `CommerceKings_AbandonedCart: cart N skipped (…)`)
 
-`ordered / closed`, `empty`, `no email`, `reminder policy` (already reminded), `quote expired`, `cart recently updated`, `consent withdrawn / expired` (also: older banner/terms revision), `consent purpose / website mismatch`, `disabled`; after a send attempt also Notification's `recipient cooldown`, `recipient changed`, `recipient stopped` and `quiet hours` (the cart waits in `skip_until` until they end; while they last the finder leaves the store out for a channel without a recipient time-zone provider – with one, each delivery is held on its own). A subscription or cart that no longer exists logs `subscription N skipped (subscription or cart gone)`; Notification's consumer already skips withdrawn subscriptions (`CommerceKings_Notification: cart_reminder N skipped (no valid subscription)`). A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.
+`ordered / closed`, `empty`, `no email` (`no recipient` on other channels), `reminder policy` (already reminded), `quote expired`, `cart recently updated`, `consent withdrawn / expired` (also: older banner/terms revision), `consent purpose / website mismatch`, `disabled`; after a send attempt also Notification's `recipient cooldown`, `recipient changed`, `recipient stopped` and `quiet hours` (the cart waits in `skip_until` until they end; while they last the finder leaves the store out for a channel without a recipient time-zone provider – with one, each delivery is held on its own). A subscription or cart that no longer exists logs `subscription N skipped (subscription or cart gone)`; Notification's consumer already skips withdrawn subscriptions (`CommerceKings_Notification: cart_reminder N skipped (no valid subscription)`). A claim that loses to a withdrawal at the same moment sends nothing and logs nothing.

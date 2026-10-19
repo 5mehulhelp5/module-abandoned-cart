@@ -4,15 +4,16 @@ Works with Magento 2.4.4+ · Luma and Hyvä (Luma checkout) · PHP 8.1–8.5 · 
 
 [![License](https://badgen.net/github/license/commercekings/module-abandoned-cart)](LICENSE) [![Release](https://badgen.net/github/release/commercekings/module-abandoned-cart)](https://github.com/commercekings/module-abandoned-cart/releases) [![Checks](https://github.com/commercekings/module-abandoned-cart/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/commercekings/module-abandoned-cart/actions/workflows/checks.yml)
 
-**Everyday reliable, never slows your store.** A well-timed email for every abandoned cart.
+**Everyday reliable, never slows your store.** A well-timed reminder for every abandoned cart – by email out of the box,
+by text message with an add-on.
 
-- **Built for traffic.** Checkout only saves the email; sending runs in the background – thousands of reminders a
-  minute, every cart exactly once (see *Where it shines* below).
+- **Built for traffic.** Checkout only saves the email (or number); sending runs in the background – thousands of
+  reminders a minute, every cart exactly once (see *Where it shines* below).
 - **Your rules.** Opt-in with a cookie banner, or opt-out with an optional checkout notice. Set the delay, hourly limit,
   template, sender and notice text – or plug in your own reminder schedule.
 - **Back to the cart in one click.** With consent, a signed link restores the saved cart and merges it into the
   shopper's current one; otherwise the button opens the cart page.
-- **Respectful by design.** A recipient cooldown, quiet hours (on by default for texts, optional for email), no email
+- **Respectful by design.** A recipient cooldown, quiet hours (on by default for texts, optional for email), no reminder
   after a shopper says no, and a "stop these emails" link that suppresses an address someone else signed up.
 
 **Email reminders are built in** and work out of the box. No extra module or provider needed.
@@ -54,7 +55,7 @@ bin/magento setup:upgrade
 
 Then switch it on in the admin – nothing is sent until you do:
 
-1. **Stores > Configuration > CommerceKings > Abandoned Cart > Enabled**: Yes.
+1. **Stores > Configuration > CommerceKings > Abandoned Cart > Email reminders > Enabled**: Yes.
 2. Opt-in only: **Stores > Configuration > CommerceKings > Consent > Source**: *Cookie banner (vanilla-cookieconsent)*.
    Without a source, no shopper has consent and no reminder email is sent (text reminders use the number's
    checkbox).
@@ -96,9 +97,10 @@ To change the email, load the template in **Marketing > Email Templates**. Varia
 
 ## Guest becomes a customer
 
-When a guest registers or signs in, the reminder goes to the account email, never to the address typed as a guest.
-The customer's subscription replaces the guest one when they open checkout. If Magento merges the guest cart into an
-existing customer cart, the guest address is removed by the nightly cleanup.
+When a guest registers or signs in, the email reminder goes to the account email, never to the address typed as a guest
+(a text goes to the number given at checkout). The customer's subscription replaces the guest one when they open
+checkout. If Magento merges the guest cart into an existing customer cart, the guest address is removed by the nightly
+cleanup.
 
 ## Before going live
 
@@ -109,7 +111,7 @@ existing customer cart, the guest address is removed by the nightly cleanup.
 **Recommended**
 
 - Run the consumer `commerceKingsNotificationSend` with `--max-messages=1000`, so long-running workers recycle.
-- To scale, run more consumers in parallel. Number of consumers = email provider's limit per second ÷ emails one
+- To scale, run more consumers in parallel. Number of consumers = your providers' limit per second ÷ messages one
   consumer sends per second.
 - Rate-limit the guest subscribe endpoint (without one, a script can make the shop email any address – or text any
   number, which costs money – up to the hourly cap) – in your web server, proxy or CDN first
@@ -131,7 +133,7 @@ Replace any of these with a DI preference:
 
 `Api\UnsubscribeLinkInterface` – your own unsubscribe page
 
-`Api\ReminderEmailResolverInterface` – where the recipient comes from
+`Api\ReminderEmailResolverInterface` – where the email reminder's recipient comes from
 
 ### Your own unsubscribe page
 
@@ -182,9 +184,9 @@ deadlocks – while checkout subscribe and unsubscribe held p95 under 80 ms at 5
 ## Disclaimer
 
 These modules help you ask for, record and respect your shoppers' choices – they don't make your store compliant on
-their own. You are responsible for your store's privacy: what you collect, the wording you show, your privacy policy
-and whether your setup meets the laws that apply to you (e.g. GDPR, ePrivacy, email marketing rules). Get legal advice
-if you are unsure.
+their own. You are responsible for your store's privacy: what you collect, the wording you show, your privacy policy and
+whether your setup meets the laws that apply to you (e.g. GDPR, ePrivacy, email and SMS marketing rules). Get legal
+advice if you are unsure.
 
 ---
 

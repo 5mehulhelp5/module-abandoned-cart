@@ -79,16 +79,17 @@ token; the customer id is never taken from the request body.
 | `GET /ckconsent/optout?c=&t=` (Consent module) | email | show read-only withdrawal confirmation |
 | `POST /ckconsent/optout` (form key, `c`, `t`) | confirmation form | withdraw consent and apply owned-browser preferences |
 
-Guest capture sends `{"type":"cart_reminder","reference":"<masked cart id>","recipient":"visitor@example.test"}`;
-an explicit `"recipient":""` unsubscribes. Notification validates the email (missing, non-string, invalid format
-or over 255 characters → Magento's standard 400 input error, without echoing the address) before the cart is
-authorized, so invalid input leaves an existing subscription intact. See [module-notification](https://github.com/commercekings/module-notification/blob/main/docs/how-it-works.md#subscribe).
+Guest capture sends `{"type":"cart_reminder","reference":"<masked cart id>","recipient":"visitor@example.test"}`; an
+explicit `"recipient":""` unsubscribes. Notification validates the recipient (an email: missing, non-string, invalid
+format or over 255 characters; a number: E.164 through the channel's normalizer → Magento's standard 400 input error,
+without echoing the address) before the cart is authorized, so invalid input leaves an existing subscription intact. See
+[module-notification](https://github.com/commercekings/module-notification/blob/main/docs/how-it-works.md#subscribe).
 
 ## Abuse protection
 
-Email content restricts visitor-controlled values and uses the shop's catalog data:
+Reminder content restricts visitor-controlled values and uses the shop's catalog data:
 
-- **No visitor text in the email.** Custom options are shown only for the store's predefined choices (`drop_down`, `radio`, `checkbox`, `multiple`); free text (such as an engraved message), file names and other types are left out. Product and configurable option names come from the catalog.
+- **No visitor text in a reminder.** Custom options are shown only for the store's predefined choices (`drop_down`, `radio`, `checkbox`, `multiple`); free text (such as an engraved message), file names and other types are left out. Product and configurable option names come from the catalog.
 - **Greeting** uses only the first word of the name, letters/`-`/`'` only, max 20 characters. The default template uses "Hi %name," when a valid name is available and omits the greeting otherwise.
 - The guest subscribe endpoint is anonymous and has no rate limit in code. Without one, a script can create guest carts and make the shop send one reminder to any address – or a paid text to any number (SMS pumping) – up to *Maximum reminders per hour* – delaying real shoppers' reminders in that hour. Adding one is recommended: in your web server, proxy or CDN as the first line of defense – see module-notification's [operations guide](https://github.com/commercekings/module-notification/blob/main/docs/operations.md#rate-limiting). [commercekings/module-rate-limit](https://github.com/commercekings/module-rate-limit) (Magento 2.4.7+) is an optional second line for it and the restore link.
 - The recorded consent shows what a browser sent; a scripted client can fake it, like with any cookie banner.

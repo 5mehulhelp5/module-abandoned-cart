@@ -7,8 +7,8 @@
             <tab>commercekings</tab>
             <resource>CommerceKings_AbandonedCart::config</resource>
             <group id="general" translate="label comment" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
-                <label>Cart reminders</label>
-                <comment>Send one reminder per cart.</comment>
+                <label>Email reminders</label>
+                <comment>The built-in reminder email, one per cart. Text messages have their own group.</comment>
                 <field id="enabled" translate="label" type="select" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Enabled</label>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
