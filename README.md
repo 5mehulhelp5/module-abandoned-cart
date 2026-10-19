@@ -188,6 +188,14 @@ their own. You are responsible for your store's privacy: what you collect, the w
 whether your setup meets the laws that apply to you (e.g. GDPR, ePrivacy, email and SMS marketing rules). Get legal
 advice if you are unsure.
 
+## Tested (as of 0.1.0)
+
+- **Automated tests:** 210 unit, 55 integration and 48 JavaScript tests (unit and JavaScript tests run on every push).
+- **Line coverage:** 98.9% with unit and integration tests combined.
+- **End to end on Magento 2.4.9:** in Chrome, a guest checkout captures the email; the reminder arrives (caught by a test mail server), restores and merges the cart, and unsubscribes – with RabbitMQ and with the MySQL queue.
+- **Load:** 100,000 carts; about 3 reminders a second per worker, growing linearly with more workers; no cart reminded twice.
+- **Install:** a fresh install of every CommerceKings package from GitHub on an empty Magento database, verified.
+
 ---
 
 **Need it installed, set up or customized?** **[Get in touch →](https://commercekings.net)**
