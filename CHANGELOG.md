@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 - unreleased
+## 0.1.1 - 2026-10-20
 
 - **Fixed:** a duplicate or redelivered reminder message no longer sends before the retry wait after a failure has
   passed, nor after the last retry was given up: the consumer checks the same retry state as the finder
