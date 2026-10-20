@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace CommerceKings\AbandonedCart\Test\Unit\Model\Notification;
 
+use CommerceKings\AbandonedCart\Model\CartTable;
 use CommerceKings\AbandonedCart\Model\Config;
 use CommerceKings\AbandonedCart\Model\Notification\CartReminder;
 use CommerceKings\AbandonedCart\Api\ReminderPolicyInterface;
@@ -247,6 +248,11 @@ class CartReminderTest extends TestCase
             'permission withdrawn / expired / old revision' => [self::ROW, true, true,
                 'permission withdrawn, expired or for another purpose / website'],
             'module disabled' => [self::ROW, false, false, 'disabled'],
+            // a duplicate or redelivered message must not cut a backoff short or try again after giving up
+            'waiting to retry after a failure' => [['failed_sends' => '2', 'skip_until' => gmdate('Y-m-d H:i:s',
+                time() + 3600)] + self::ROW, true, false, 'waiting to retry'],
+            'given up after the last retry' => [['failed_sends' => (string)(count(CartTable::RETRY_MINUTES) + 1)]
+                + self::ROW, true, false, 'given up after failed sends'],
         ];
     }
 
@@ -484,6 +490,10 @@ class CartReminderTest extends TestCase
         $this->assertContains('NOT_EXPIRED(updated_at,1)', self::conditions($claim['where']));
         $this->assertContains('q.updated_at <= NOW() - INTERVAL 180 MINUTE', self::conditions($claim['where']));
         $this->assertContains('s.captured_at <= NOW() - INTERVAL 180 MINUTE', self::conditions($claim['where']));
+        // and the finder's retry state, so a duplicate message can't claim during a backoff or after giving up
+        $this->assertContains('(c.skip_until IS NULL OR c.skip_until <= NOW())', self::conditions($claim['where']));
+        $this->assertContains('(c.failed_sends IS NULL OR c.failed_sends <= ' . count(CartTable::RETRY_MINUTES) . ')',
+            self::conditions($claim['where']));
         $this->assertTrue((bool)array_filter($this->queries, fn ($query) => str_contains($query[0], 'INSERT IGNORE')),
             'the send history row exists before its claim');
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 - unreleased
+
+- **Fixed:** a duplicate or redelivered reminder message no longer sends before the retry wait after a failure has
+  passed, nor after the last retry was given up: the consumer checks the same retry state as the finder
+  (`skip_until`, the failed-send count), before its claim and in it.
+
 ## 0.1.0 - 2026-10-19
 
 First release. Requires Magento 2.4.4 or later (`magento/framework ^103.0.4`); PHP 8.1–8.5.

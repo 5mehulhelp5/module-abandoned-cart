@@ -87,7 +87,7 @@ class CartReminder implements NotificationTypeInterface
     public function process(string $reference): void
     {
         $db = $this->resource->getConnection();
-        $row = $db->fetchRow($this->carts->select(['sent_at', 'queued_at', 'delivery_version', 'failed_sends'],
+        $row = $db->fetchRow($this->carts->select(['sent_at', 'queued_at', 'delivery_version', 'failed_sends', 'skip_until'],
             ['entity_id', 'is_active', 'items_count', 'customer_id', 'customer_email', 'store_id', 'updated_at'],
             ['subscription_id', 'contact_id', 'captured_at', 'permission_ref'])
             ->where('s.subscription_id = ?', (int)$reference));
@@ -106,6 +106,11 @@ class CartReminder implements NotificationTypeInterface
             !$this->permission->isValidFor((string)$row['permission_ref'], $this->type->getPurpose(), (int)$row['store_id'])
                 => 'permission withdrawn, expired or for another purpose / website',
             !$this->type->isEnabled((int)$row['store_id']) => 'disabled',
+            // the finder's retry state: a duplicate or redelivered message neither cuts a backoff short nor tries
+            // again after the last retry (FindAbandonedCarts queues only what passes these)
+            (int)($row['failed_sends'] ?? 0) > count(CartTable::RETRY_MINUTES) => 'given up after failed sends',
+            ($row['skip_until'] ?? null) !== null && (string)$row['skip_until'] > gmdate('Y-m-d H:i:s')
+                => 'waiting to retry',
             default => null,
         };
         $queuedAt = $row ? $row['queued_at'] : null;
@@ -148,6 +153,9 @@ class CartReminder implements NotificationTypeInterface
                 'q.updated_at <= NOW() - INTERVAL ' . $delay . ' MINUTE',
                 's.captured_at <= NOW() - INTERVAL ' . $delay . ' MINUTE',
                 $this->permission->validCondition('s.permission_ref'),
+                // the retry state too, as the finder reads it: a duplicate can't claim during a backoff
+                '(c.skip_until IS NULL OR c.skip_until <= NOW())',
+                '(c.failed_sends IS NULL OR c.failed_sends <= ' . count(CartTable::RETRY_MINUTES) . ')',
             ]
         );
         $perHour = $this->type->getMaxPerHour();
