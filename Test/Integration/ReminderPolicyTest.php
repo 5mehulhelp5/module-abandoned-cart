@@ -182,6 +182,13 @@ class ReminderPolicyTest extends TestCase
     }
 
     /** The queue message reference of a cart: its subscription id. */
+    /** The retry wait after a failed send is over (a past skip_until, as the finder would find it). */
+    private function endRetryWait(int $quoteId): void
+    {
+        $this->resource->getConnection()->update($this->om->get(CartTable::class)->name(),
+            ['skip_until' => gmdate('Y-m-d H:i:s', time() - 60)], $this->om->get(CartTable::class)->key($quoteId));
+    }
+
     private function subscriptionOf(int $quoteId): string
     {
         return (string)$this->row($quoteId)['subscription_id'];
@@ -455,6 +462,12 @@ class ReminderPolicyTest extends TestCase
         $this->assertNull($this->row($id)['reminded_at']);
         $this->assertSame(1, (int)$this->row($id)['delivery_version'], 'a failed claim keeps its version');
         $this->sendFails = false;
+        // a duplicate (or redelivered) message during the retry wait sends nothing and claims nothing
+        $this->assertNotNull($this->row($id)['skip_until']);
+        $this->consumer()->process($this->subscriptionOf($id));
+        $this->assertSame(0, $this->sent, 'not before the retry wait is over');
+        $this->assertSame(1, (int)$this->row($id)['delivery_version'], 'no claim during the wait');
+        $this->endRetryWait($id);
         $this->consumer()->process($this->subscriptionOf($id));
         $this->assertSame(1, $this->sent);
         $this->assertSame(2, (int)$this->row($id)['delivery_version'], 'retry owns a new version');
@@ -482,6 +495,7 @@ class ReminderPolicyTest extends TestCase
         }
         $db->update($this->table('quote'), ['grand_total' => 99, 'updated_at' => $activity], ['entity_id = ?' => $id]);
         $this->sendFails = false;
+        $this->endRetryWait($id);
         $consumer->process($this->subscriptionOf($id));
         $this->assertSame([11.0, 99.0], $totals, 'the same long-running consumer must reload the quote for a retry');
         $this->assertSame(1, $this->sent);
@@ -543,7 +557,13 @@ class ReminderPolicyTest extends TestCase
             $this->assertSame($sendReplacement ? $replacement['reminded_at'] : null, $after['reminded_at'],
                 'restore only A\'s claim, never B\'s successful timestamp');
             $this->assertSame(0, $this->finder()->execute(), 'the replacement is already queued or was just sent');
-            if (!$sendReplacement) { $newer->process($reference); }
+            if (!$sendReplacement) {
+                // A's failure starts the retry wait: the queued replacement waits for it too
+                $newer->process($reference);
+                $this->assertSame(0, $this->sent, 'not during the retry wait A\'s failure started');
+                $this->endRetryWait($id);
+                $newer->process($reference);
+            }
             $this->assertSame(1, $this->sent, 'no immediate extra email after the newer delivery');
             $this->assertSame(2, (int)$this->row($id)['delivery_version']);
             $this->assertSame(0, $this->finder()->execute());
